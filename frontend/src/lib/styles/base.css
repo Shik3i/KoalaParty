@@ -1,0 +1,138 @@
+* {
+  box-sizing: border-box;
+}
+html {
+  font-family: var(--font-sans);
+  background: var(--surface-page);
+  color: var(--text-primary);
+}
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: radial-gradient(circle at 90% -10%, var(--accent-muted), transparent 32rem), var(--surface-page);
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button,
+.button {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary);
+  color: var(--surface-page);
+  padding: 0.7rem 1rem;
+  font-weight: 720;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+  justify-content: center;
+}
+button:hover,
+.button:hover {
+  background: var(--accent-hover);
+}
+button.secondary,
+.button.secondary {
+  background: var(--surface-elevated);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+button.ghost,
+.button.ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+button.danger {
+  background: var(--danger);
+  color: white;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+input,
+select {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  background: var(--surface-elevated);
+  padding: 0.72rem 0.8rem;
+}
+label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+a {
+  color: var(--accent-primary);
+}
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+h1 {
+  letter-spacing: -0.04em;
+  line-height: 1.03;
+}
+h2 {
+  letter-spacing: -0.025em;
+}
+.panel {
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.stack {
+  display: grid;
+  gap: var(--space-3);
+}
+.row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.muted {
+  color: var(--text-muted);
+}
+.error {
+  color: var(--danger);
+}
+.success {
+  color: var(--success);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
