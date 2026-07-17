@@ -4,6 +4,17 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Full operator, hosting, retention, third-party, GDPR-rights, copyright, and self-hosting notices on dedicated privacy and imprint pages.
+- Responsive KoalaSync cross-promotion with locally bundled Netflix, YouTube, Twitch, Prime Video, Disney+, Jellyfin, and Emby marks.
+- Unit and browser coverage for legal disclosures, local platform artwork, external links, and responsive rendering.
+
+### Changed
+
+- YouTube playback now presents an explicit third-party consent notice before loading the privacy-enhanced player.
+- The footer links directly to Privacy, Imprint, GitHub, and the KoalaSync landing page.
+
 ## [0.1.0] - 2026-07-17
 
 ### Added

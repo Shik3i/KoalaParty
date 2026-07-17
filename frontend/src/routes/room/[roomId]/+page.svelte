@@ -197,7 +197,11 @@
                 watching = true;
                 showNotice('Playback enabled', 2200);
               }}>▶ Start watching</button
-            >{/if}
+            >
+            <p class="youtube-consent">
+              By selecting “Start watching”, you consent to loading YouTube's privacy-enhanced player.
+              <a href="/privacy">Privacy details</a>
+            </p>{/if}
         </div>
         <div class="controls panel">
           <div class="transport">
@@ -426,6 +430,18 @@
     transform: translate(-50%, -50%);
     font-size: 1.05rem;
     padding: 1rem 1.4rem;
+  }
+  .youtube-consent {
+    position: absolute;
+    inset: auto 1rem 0.8rem;
+    margin: 0;
+    color: #b9c8bf;
+    font-size: 0.74rem;
+    line-height: 1.4;
+    text-align: center;
+  }
+  .youtube-consent a {
+    color: #d7f4e2;
   }
   .controls {
     padding: 1rem;

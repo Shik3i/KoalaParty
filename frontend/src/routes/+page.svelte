@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { api } from '$lib/api';
+  import KoalaSyncPromo from '$lib/KoalaSyncPromo.svelte';
   let roomCode = '';
   let creating = false;
   let error = '';
@@ -65,6 +66,7 @@
   <article><b>Real privacy</b><span>No analytics scripts, ads, fingerprinting, or third-party fonts.</span></article>
   <article><b>Public source</b><span>Self-host with Go, SQLite, Docker, and Caddy.</span></article>
 </section>
+<KoalaSyncPromo />
 
 <style>
   .landing {

@@ -36,8 +36,9 @@
 <div id="main">{@render children()}</div>
 <footer>
   <span>KoalaParty · No tracking. No ads.</span><span
-    ><a href="/privacy">Privacy</a> · <a href="https://github.com/Shik3i/KoalaParty">GitHub</a> ·
-    <a href="https://sync.koalastuff.net">KoalaSync</a></span
+    ><a href="/privacy">Privacy</a> · <a href="/imprint">Imprint</a> ·
+    <a href="https://github.com/Shik3i/KoalaParty" target="_blank" rel="noopener noreferrer">GitHub</a> ·
+    <a href="https://sync.koalastuff.net/" target="_blank" rel="noopener noreferrer">KoalaSync</a></span
   >
 </footer>
 

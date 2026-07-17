@@ -33,6 +33,7 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   await owner.getByRole('button', { name: 'Create a room' }).click();
   await expect(owner).toHaveURL(/\/room\/([A-Z2-7]{16})$/);
   await expect(owner.locator('script[src*="youtube.com/iframe_api"]')).toHaveCount(0);
+  await expect(owner.getByText(/you consent to loading YouTube's privacy-enhanced player/)).toBeVisible();
   await owner.getByRole('button', { name: 'Start watching' }).click();
   await expect(owner.locator('script[src*="youtube.com/iframe_api"]')).toHaveCount(1);
   const roomId = owner.url().split('/').at(-1)!;
@@ -91,6 +92,32 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   await owner.reload();
   await expect(owner.getByText('(you)')).toBeVisible();
   await Promise.all([ownerContext.close(), memberContext.close(), thirdContext.close()]);
+});
+
+test('KoalaSync promotion and legal pages are complete and responsive', async ({ page }) => {
+  await page.goto('/');
+  const promo = page.getByRole('region', { name: 'Take the watch party to almost any video site.' });
+  await expect(promo).toBeVisible();
+  await expect(promo.getByText('Netflix', { exact: true })).toBeVisible();
+  await expect(promo.getByText('Disney+', { exact: true })).toBeVisible();
+  await expect(promo.getByRole('link', { name: /See KoalaSync/ })).toHaveAttribute(
+    'href',
+    'https://sync.koalastuff.net/',
+  );
+  expect(await promo.locator('img').evaluateAll((images) => images.every((image) => image.naturalWidth > 0))).toBe(
+    true,
+  );
+
+  await page.goto('/privacy');
+  await expect(page.getByRole('heading', { name: 'Privacy Policy' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'YouTube' })).toBeVisible();
+  await expect(page.getByText('admin@koalastuff.net')).toBeVisible();
+
+  await page.goto('/imprint');
+  await expect(page.getByRole('heading', { name: 'Legal Notice' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Copyright and trademarks' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute('href', '/privacy');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 test('mobile navigation and room empty states remain usable', async ({ browser }) => {
