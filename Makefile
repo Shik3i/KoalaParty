@@ -14,8 +14,8 @@ test:
 	cd frontend && npm test -- --run
 
 verify:
-	cd backend && gofmt -w . && go vet ./... && go test ./...
-	cd frontend && npm run check && npm run lint && npm test -- --run && npm run build
+	cd backend && gofmt -w . && go vet ./... && go run golang.org/x/vuln/cmd/govulncheck@latest ./... && go test -race -count=1 ./...
+	cd frontend && npm run check && npm run lint && npm test -- --run && npm run build && npm audit --audit-level=high
 	node --test scripts/*.test.mjs
 
 build:
