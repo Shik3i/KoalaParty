@@ -22,6 +22,10 @@ describe('legal and KoalaSync cross-promotion', () => {
     expect(promo).not.toMatch(/<img[^>]+src=["']https?:/);
   });
 
+  it('serves explicit crawler policy instead of the SPA fallback', () => {
+    expect(source('static/robots.txt')).toBe('User-agent: *\nAllow: /\n');
+  });
+
   it('states the MIT license and current trademark position', () => {
     const imprint = source('src/routes/imprint/+page.svelte');
     expect(imprint).toContain('MIT License');

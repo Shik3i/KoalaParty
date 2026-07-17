@@ -17,6 +17,10 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 - The footer links directly to Privacy, Imprint, GitHub, and the KoalaSync landing page.
 - YouTube thumbnails no longer contact third-party hosts before explicit playback consent.
 
+### Fixed
+
+- Crawlers now receive a valid local `robots.txt` instead of the application fallback document.
+
 ## [0.1.0] - 2026-07-17
 
 ### Added
