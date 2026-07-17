@@ -11,6 +11,7 @@ Privacy-first shared YouTube rooms. Synchronized playback and a collaborative qu
 
 - Server-authoritative play, pause, seek, queue, reorder, skip, and reconnect behavior.
 - Persistent anonymous browser identities; optional accounts and friend-only rooms.
+- Cross-device room library, private invitations, account/session self-service, and ownership transfer.
 - Owner/admin/member roles, per-member capabilities, kick, ban, visibility, and activity history.
 - Optional public discovery with controlled provider metadata; disabled by default for early-beta deployments.
 - Responsive SvelteKit UI with accessible loading, empty, error, connection, light, dark, and system-theme states.
@@ -36,7 +37,7 @@ Release images support `linux/amd64` and `linux/arm64`:
 
 ```sh
 cp .env.example .env
-docker pull ghcr.io/shik3i/koalaparty:0.1.0
+docker pull ghcr.io/shik3i/koalaparty:0.2.0
 docker compose -f deploy/docker-compose.ghcr.yml up -d
 ```
 

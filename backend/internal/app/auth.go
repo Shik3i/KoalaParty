@@ -85,7 +85,8 @@ func (a *application) exchangeIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var stored string
-	err := a.db.QueryRow("SELECT secret_hash FROM identities WHERE id=?", in.ID).Scan(&stored)
+	var linkedAccount sql.NullString
+	err := a.db.QueryRow("SELECT secret_hash,account_id FROM identities WHERE id=?", in.ID).Scan(&stored, &linkedAccount)
 	if errors.Is(err, sql.ErrNoRows) {
 		stored, err = hashSecret(in.Secret)
 		if err == nil {
@@ -99,7 +100,11 @@ func (a *application) exchangeIdentity(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "identity_failed", "Could not establish identity.")
 		return
 	}
-	_, _ = a.db.Exec("UPDATE identities SET display_name=?,last_seen_at=CURRENT_TIMESTAMP WHERE id=?", in.DisplayName, in.ID)
+	if linkedAccount.Valid {
+		_, _ = a.db.Exec("UPDATE identities SET last_seen_at=CURRENT_TIMESTAMP WHERE id=?", in.ID)
+	} else {
+		_, _ = a.db.Exec("UPDATE identities SET display_name=?,last_seen_at=CURRENT_TIMESTAMP WHERE id=?", in.DisplayName, in.ID)
+	}
 	if current, authErr := a.authenticate(r); authErr == nil && current.IdentityID == in.ID {
 		writeJSON(w, 200, current)
 		return

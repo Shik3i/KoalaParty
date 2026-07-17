@@ -117,8 +117,10 @@
       <li>Reports remain available for operator review until resolved or deleted.</li>
     </ul>
     <p>
-      The current version has no self-service account or room deletion interface. Deletion requests can be sent to the
-      contact address above. Self-hosters can configure different retention periods.
+      Account holders can delete their account and owned rooms directly in the interface. Account deletion revokes all
+      sessions, anonymizes retained identity references and closes rooms whose ownership was not transferred first.
+      Additional deletion requests can be sent to the contact address above. Self-hosters can configure different
+      retention periods.
     </p>
   </section>
 

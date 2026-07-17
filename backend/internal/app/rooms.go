@@ -31,11 +31,12 @@ type queueItem struct {
 	Media    media  `json:"media"`
 }
 type member struct {
-	IdentityID  string          `json:"identityId"`
-	DisplayName string          `json:"displayName"`
-	Role        string          `json:"role"`
-	Active      bool            `json:"active"`
-	Permissions map[string]bool `json:"permissions"`
+	IdentityID    string          `json:"identityId"`
+	DisplayName   string          `json:"displayName"`
+	Role          string          `json:"role"`
+	Active        bool            `json:"active"`
+	Permissions   map[string]bool `json:"permissions"`
+	AccountLinked bool            `json:"accountLinked"`
 }
 type playback struct {
 	Media     *media  `json:"media"`
@@ -210,17 +211,19 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 	if e := a.db.QueryRowContext(ctx, "SELECT visibility,revision FROM rooms WHERE id=?", id).Scan(&s.Visibility, &s.Revision); e != nil {
 		return s, e
 	}
-	rows, e := a.db.QueryContext(ctx, "SELECT i.id,i.display_name,m.role FROM room_members m JOIN identities i ON i.id=m.identity_id WHERE m.room_id=? ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,i.display_name", id)
+	rows, e := a.db.QueryContext(ctx, "SELECT i.id,i.display_name,m.role,i.account_id FROM room_members m JOIN identities i ON i.id=m.identity_id WHERE m.room_id=? ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,i.display_name", id)
 	if e != nil {
 		return s, e
 	}
 	for rows.Next() {
 		var m member
+		var account sql.NullString
 		m.Permissions = map[string]bool{}
-		if e = rows.Scan(&m.IdentityID, &m.DisplayName, &m.Role); e != nil {
+		if e = rows.Scan(&m.IdentityID, &m.DisplayName, &m.Role, &account); e != nil {
 			rows.Close()
 			return s, e
 		}
+		m.AccountLinked = account.Valid
 		for _, c := range memberCapabilities {
 			m.Permissions[c] = true
 		}

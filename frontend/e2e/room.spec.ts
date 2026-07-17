@@ -143,3 +143,79 @@ test('mobile navigation and room empty states remain usable', async ({ browser }
   await expect(page.getByText('(you)')).toBeVisible();
   await context.close();
 });
+
+test('account room library, private invitations, transfer, sessions and deletion work end to end', async ({
+  browser,
+}) => {
+  const suffix = Date.now().toString(36);
+  const ownerName = `owner_${suffix}`;
+  const memberName = `member_${suffix}`;
+  const password = 'very-secure-password';
+  const newPassword = 'an-even-better-password';
+  const ownerContext = await browser.newContext();
+  const memberContext = await browser.newContext();
+  const owner = await ownerContext.newPage();
+  const member = await memberContext.newPage();
+
+  async function register(page: Page, username: string) {
+    await page.goto('/register');
+    await page.getByLabel('Username').fill(username);
+    await page.getByLabel('Password').fill(password);
+    await page.getByRole('button', { name: 'Create account' }).click();
+    await expect(page).toHaveURL(/\/account$/);
+    await expect(page.getByText('Linked account')).toBeVisible();
+  }
+
+  await register(owner, ownerName);
+  await owner.goto('/');
+  await owner.getByRole('button', { name: 'Create a room' }).click();
+  await expect(owner).toHaveURL(/\/room\/([A-Z2-7]{16})$/);
+  const roomURL = owner.url();
+  const roomLabel = await owner.locator('.room-header h1').textContent();
+
+  await owner.goto('/rooms');
+  await expect(owner.getByRole('heading', { name: roomLabel ?? '' })).toBeVisible();
+  await owner.getByRole('link', { name: 'Open' }).click();
+  await owner.getByRole('button', { name: 'Room settings' }).click();
+  await owner.getByLabel('Visibility').selectOption('private');
+  await expect(owner.locator('.visibility')).toHaveText('private');
+
+  await register(member, memberName);
+  await member.goto(roomURL);
+  await expect(member.getByRole('heading', { name: 'Couldn’t enter this room' })).toBeVisible();
+
+  await owner.getByLabel('Account username').fill(memberName);
+  await owner.getByRole('button', { name: 'Invite', exact: true }).click();
+  await expect(owner.getByText(memberName, { exact: true })).toBeVisible();
+  await member.goto(roomURL);
+  await expect(member.locator('.room-header h1')).toHaveText(roomLabel ?? '');
+
+  owner.once('dialog', (dialog) => dialog.accept());
+  await owner.getByRole('button', { name: 'Transfer', exact: true }).click();
+  await expect(member.getByText('owner', { exact: true })).toBeVisible();
+
+  owner.once('dialog', (dialog) => dialog.accept());
+  await owner.getByRole('button', { name: 'Leave room' }).click();
+  await expect(owner).toHaveURL(/\/rooms$/);
+
+  await member.getByRole('button', { name: 'Room settings' }).click();
+  member.once('dialog', (dialog) => dialog.accept());
+  await member.getByRole('button', { name: 'Delete room' }).click();
+  await expect(member).toHaveURL(/\/rooms$/);
+
+  await owner.goto('/account');
+  await owner.getByLabel('Display name').fill('Polished Koala');
+  await owner.getByRole('button', { name: 'Save profile' }).click();
+  await expect(owner.getByText('Display name updated.')).toBeVisible();
+  await owner.getByLabel('Current password').fill(password);
+  await owner.getByLabel('New password').fill(newPassword);
+  await owner.getByRole('button', { name: 'Change password' }).click();
+  await expect(owner.getByText('Password changed.')).toBeVisible();
+  await owner.getByLabel('Confirm password').fill(newPassword);
+  owner.once('dialog', (dialog) => dialog.accept());
+  await owner.getByRole('button', { name: 'Delete account permanently' }).click();
+  await expect(owner).toHaveURL(/\/$/);
+
+  await ownerContext.close();
+  await memberContext.close();
+});

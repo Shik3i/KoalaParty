@@ -15,6 +15,7 @@ export interface Member {
   displayName: string;
   role: Role;
   active: boolean;
+  accountLinked: boolean;
   permissions: Record<string, boolean>;
 }
 export interface Activity {
@@ -93,6 +94,8 @@ export function formatActivity(e: Activity) {
       return `${who} changed a permission`;
     case 'room.visibility':
       return `${who} changed the room to ${String(e.payload.visibility).replace('_', '-')}`;
+    case 'room.transfer':
+      return `${who} transferred room ownership`;
     case 'room.created':
       return `${who} created the room`;
     default:

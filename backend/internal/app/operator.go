@@ -122,15 +122,19 @@ func operateReports(db *sql.DB, args []string, stdout io.Writer) error {
 }
 
 func deleteAccount(db *sql.DB, username string) error {
+	var accountID string
+	if err := db.QueryRow("SELECT id FROM accounts WHERE username=?", strings.TrimSpace(username)).Scan(&accountID); err != nil {
+		return fmt.Errorf("account not found: %s", username)
+	}
+	return deleteAccountByID(db, accountID)
+}
+
+func deleteAccountByID(db *sql.DB, accountID string) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	var accountID string
-	if err = tx.QueryRow("SELECT id FROM accounts WHERE username=?", strings.TrimSpace(username)).Scan(&accountID); err != nil {
-		return fmt.Errorf("account not found: %s", username)
-	}
 	random := make([]byte, 32)
 	if _, err = rand.Read(random); err != nil {
 		return err
@@ -139,6 +143,9 @@ func deleteAccount(db *sql.DB, username string) error {
 		return err
 	}
 	if _, err = tx.Exec("DELETE FROM friendships WHERE requester_account_id=? OR addressee_account_id=?", accountID, accountID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("UPDATE rooms SET visibility='unlisted',deleted_at=coalesce(deleted_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE owner_identity_id IN (SELECT id FROM identities WHERE account_id=?)", accountID); err != nil {
 		return err
 	}
 	if _, err = tx.Exec("DELETE FROM room_bans WHERE account_id=? AND identity_id IS NULL", accountID); err != nil {

@@ -20,6 +20,10 @@
   let seekTo = 0;
   let mobileTab: 'queue' | 'people' | 'activity' = 'queue';
   let dragging: string | null = null;
+  let settingsOpen = false;
+  let settingsLoading = false;
+  let invites: { username: string; createdAt: string }[] = [];
+  let inviteUsername = '';
   const me = () => room?.members.find((m) => m.identityId === room?.me);
   const can = (cap: string) => {
     const m = me();
@@ -149,6 +153,54 @@
     else if (confirm(`${action === 'ban' ? 'Ban' : 'Kick'} ${member.displayName}?`))
       await command(`member.${action}`, { identityId: member.identityId });
   }
+  async function loadInvites() {
+    if (!manages() || settingsLoading) return;
+    settingsLoading = true;
+    try {
+      invites = await api(`/api/rooms/${roomId}/invites`);
+    } catch (e) {
+      showNotice(e instanceof Error ? e.message : 'Could not load invitations.');
+    } finally {
+      settingsLoading = false;
+    }
+  }
+  async function addInvite() {
+    if (!inviteUsername.trim()) return;
+    try {
+      await api(`/api/rooms/${roomId}/invites`, {
+        method: 'POST',
+        body: JSON.stringify({ username: inviteUsername.trim() }),
+      });
+      inviteUsername = '';
+      await loadInvites();
+      showNotice('Invitation added.', 2200);
+    } catch (e) {
+      showNotice(e instanceof Error ? e.message : 'Could not add invitation.');
+    }
+  }
+  async function revokeInvite(username: string) {
+    try {
+      await api(`/api/rooms/${roomId}/invites/${encodeURIComponent(username)}`, { method: 'DELETE' });
+      invites = invites.filter((invite) => invite.username !== username);
+      showNotice('Invitation revoked.', 2200);
+    } catch (e) {
+      showNotice(e instanceof Error ? e.message : 'Could not revoke invitation.');
+    }
+  }
+  async function leaveOrDelete() {
+    const owner = me()?.role === 'owner';
+    if (!confirm(owner ? 'Delete this room permanently?' : 'Leave this room?')) return;
+    try {
+      await api(`/api/rooms/${roomId}${owner ? '' : '/membership'}`, { method: 'DELETE' });
+      location.href = '/rooms';
+    } catch (e) {
+      showNotice(e instanceof Error ? e.message : 'Room action failed.');
+    }
+  }
+  async function transfer(member: Member) {
+    if (!confirm(`Transfer ownership to ${member.displayName}? You will become an admin.`)) return;
+    await command('room.transfer', { identityId: member.identityId });
+  }
 </script>
 
 <svelte:head><title>{room?.label || roomId} · KoalaParty</title></svelte:head>
@@ -170,18 +222,90 @@
         ><span class="visibility">{room.visibility.replace('_', '-')}</span><button
           class="secondary"
           onclick={copyInvite}>Copy invite</button
-        >{#if manages()}<label class="visibility-select"
-            ><span class="sr-only">Room visibility</span><select
-              value={room.visibility}
-              disabled={commandPending}
-              onchange={(e) => command('room.visibility', { visibility: e.currentTarget.value })}
-              ><option value="unlisted">Unlisted</option>{#if room.publicRoomsEnabled}<option value="public"
-                  >Public</option
-                >{/if}<option value="private">Private</option><option value="friends_only">Friends only</option></select
-            ></label
-          >{/if}
+        ><button
+          class="secondary"
+          onclick={() => {
+            settingsOpen = !settingsOpen;
+            if (settingsOpen) loadInvites();
+          }}>{settingsOpen ? 'Close settings' : 'Room settings'}</button
+        >
       </div>
     </header>
+    {#if settingsOpen}<section class="settings panel" aria-label="Room settings">
+        <div class="settings-grid">
+          <div>
+            <h2>Access</h2>
+            <p class="muted">Choose who can enter this room. Invite lists apply to private rooms.</p>
+            {#if manages()}<label
+                >Visibility<select
+                  value={room.visibility}
+                  disabled={commandPending}
+                  onchange={(e) => command('room.visibility', { visibility: e.currentTarget.value })}
+                >
+                  <option value="unlisted">Unlisted</option>{#if room.publicRoomsEnabled}<option value="public"
+                      >Public</option
+                    >{/if}<option value="private">Private</option><option value="friends_only">Friends only</option>
+                </select></label
+              >{/if}
+          </div>
+          {#if manages()}<div>
+              <h2>Private invitations</h2>
+              <form
+                class="invite-form"
+                onsubmit={(e) => {
+                  e.preventDefault();
+                  addInvite();
+                }}
+              >
+                <label
+                  >Account username<input
+                    bind:value={inviteUsername}
+                    pattern="[A-Za-z0-9_]+"
+                    minlength="3"
+                    maxlength="24"
+                  /></label
+                ><button disabled={settingsLoading}>Invite</button>
+              </form>
+              {#if settingsLoading}<p class="muted">Loading invitations…</p>{:else if !invites.length}<p class="muted">
+                  No private invitations.
+                </p>{:else}<ul class="invite-list">
+                  {#each invites as invite}<li>
+                      <span>{invite.username}</span><button class="ghost" onclick={() => revokeInvite(invite.username)}
+                        >Revoke</button
+                      >
+                    </li>{/each}
+                </ul>{/if}
+            </div>{/if}
+          {#if me()?.role === 'owner'}<div>
+              <h2>Transfer ownership</h2>
+              <p class="muted">Only account-linked members can become the permanent owner.</p>
+              <ul class="transfer-list">
+                {#each room.members.filter((member) => member.identityId !== room!.me && member.accountLinked) as member}<li
+                  >
+                    <span>{member.displayName}</span><button class="secondary" onclick={() => transfer(member)}
+                      >Transfer</button
+                    >
+                  </li>{/each}
+              </ul>
+              {#if !room.members.some((member) => member.identityId !== room!.me && member.accountLinked)}<p
+                  class="muted"
+                >
+                  No eligible member is currently in the room.
+                </p>{/if}
+            </div>{/if}
+          <div class="danger-settings">
+            <h2>{me()?.role === 'owner' ? 'Delete room' : 'Leave room'}</h2>
+            <p class="muted">
+              {me()?.role === 'owner'
+                ? 'Permanently closes the room for every participant.'
+                : 'Removes this room from your account.'}
+            </p>
+            <button class="danger" onclick={leaveOrDelete}
+              >{me()?.role === 'owner' ? 'Delete room' : 'Leave room'}</button
+            >
+          </div>
+        </div>
+      </section>{/if}
     <section class="room-grid">
       <div class="main-column">
         <div class="player-wrap">
@@ -411,16 +535,52 @@
   .connection.offline::before {
     color: var(--warning);
   }
-  .visibility-select {
-    width: 8.5rem;
-  }
-  .visibility-select select {
-    padding: 0.55rem;
-  }
   .room-grid {
     display: grid;
     grid-template-columns: minmax(0, 2.2fr) minmax(310px, 0.8fr);
     gap: 1rem;
+  }
+  .settings {
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+  }
+  .settings-grid > div {
+    padding: 1rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+  }
+  .settings h2 {
+    margin-top: 0;
+    font-size: 1rem;
+  }
+  .invite-form {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    gap: 0.6rem;
+  }
+  .invite-list,
+  .transfer-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.8rem 0 0;
+  }
+  .invite-list li,
+  .transfer-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .danger-settings {
+    border-color: color-mix(in srgb, var(--danger) 45%, var(--border-subtle)) !important;
   }
   .main-column {
     display: grid;
@@ -679,6 +839,9 @@
     display: none;
   }
   @media (max-width: 850px) {
+    .settings-grid {
+      grid-template-columns: 1fr;
+    }
     .room-header {
       align-items: flex-start;
     }

@@ -90,6 +90,32 @@ func (h *hub) disconnect(room, identity string) {
 		_ = c.conn.Close()
 	}
 }
+func (h *hub) disconnectRoom(room string) {
+	h.mu.RLock()
+	clients := make([]*client, 0, len(h.rooms[room]))
+	for c := range h.rooms[room] {
+		clients = append(clients, c)
+	}
+	h.mu.RUnlock()
+	for _, c := range clients {
+		_ = c.conn.Close()
+	}
+}
+func (h *hub) disconnectIdentity(identity string) {
+	h.mu.RLock()
+	clients := []*client{}
+	for _, roomClients := range h.rooms {
+		for c := range roomClients {
+			if c.identity == identity {
+				clients = append(clients, c)
+			}
+		}
+	}
+	h.mu.RUnlock()
+	for _, c := range clients {
+		_ = c.conn.Close()
+	}
+}
 func (h *hub) broadcast(room string, s snapshot) {
 	h.mu.RLock()
 	clients := make([]*client, 0, len(h.rooms[room]))
@@ -98,7 +124,9 @@ func (h *hub) broadcast(room string, s snapshot) {
 	}
 	h.mu.RUnlock()
 	for _, c := range clients {
-		_ = c.write(map[string]any{"type": "snapshot", "payload": s})
+		personalized := s
+		personalized.Me = c.identity
+		_ = c.write(map[string]any{"type": "snapshot", "payload": personalized})
 	}
 }
 func (a *application) websocket(w http.ResponseWriter, r *http.Request, p principal) {

@@ -44,7 +44,7 @@ var errStale = errors.New("stale revision")
 
 func (a *application) roleAndAllowed(room, identity, cap string) (string, bool) {
 	var role string
-	if a.db.QueryRow("SELECT role FROM room_members WHERE room_id=? AND identity_id=?", room, identity).Scan(&role) != nil {
+	if a.db.QueryRow("SELECT m.role FROM room_members m JOIN rooms r ON r.id=m.room_id WHERE m.room_id=? AND m.identity_id=? AND r.deleted_at IS NULL", room, identity).Scan(&role) != nil {
 		return "", false
 	}
 	if role == "owner" || role == "admin" {
@@ -84,6 +84,8 @@ func capFor(t string) string {
 		return "members.manage_permissions"
 	case "room.visibility":
 		return "room.manage_visibility"
+	case "room.transfer":
+		return "room.manage_ownership"
 	}
 	return ""
 }
@@ -317,6 +319,27 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		}
 		_, e = tx.Exec("UPDATE rooms SET visibility=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", in.Visibility, room)
 		payload["visibility"] = in.Visibility
+	case "room.transfer":
+		if role != "owner" {
+			return snapshot{}, errDenied
+		}
+		var in struct {
+			IdentityID string `json:"identityId"`
+		}
+		if json.Unmarshal(c.Payload, &in) != nil || in.IdentityID == "" || in.IdentityID == p.IdentityID {
+			return snapshot{}, errors.New("invalid ownership target")
+		}
+		var targetAccount sql.NullString
+		if e = tx.QueryRow(`SELECT i.account_id FROM room_members m JOIN identities i ON i.id=m.identity_id WHERE m.room_id=? AND m.identity_id=?`, room, in.IdentityID).Scan(&targetAccount); e != nil || !targetAccount.Valid {
+			return snapshot{}, errors.New("new owner must be an account-linked room member")
+		}
+		if _, e = tx.Exec("UPDATE room_members SET role='admin' WHERE room_id=? AND identity_id=?", room, p.IdentityID); e == nil {
+			_, e = tx.Exec("UPDATE room_members SET role='owner' WHERE room_id=? AND identity_id=?", room, in.IdentityID)
+		}
+		if e == nil {
+			_, e = tx.Exec("UPDATE rooms SET owner_identity_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", in.IdentityID, room)
+		}
+		payload["identityId"] = in.IdentityID
 	default:
 		return snapshot{}, fmt.Errorf("unsupported command %s", c.Type)
 	}

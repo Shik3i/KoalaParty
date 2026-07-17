@@ -4,6 +4,8 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-17
+
 ### Added
 
 - Full operator, hosting, retention, third-party, GDPR-rights, copyright, and self-hosting notices on dedicated privacy and imprint pages.
@@ -12,6 +14,11 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 - MIT License for open-source use, modification, distribution, and self-hosting.
 - Host-only operator commands for verified SQLite backups/restores, report review and delisting, room deletion, and privacy-preserving account deletion.
 - Hardened pinned-image Compose example with a read-only root filesystem, dropped capabilities, resource limits, and log rotation.
+- Cross-device My Rooms library for owned and joined rooms with live status, open, leave, and delete actions.
+- Private-room invitation management with account lookup, listing, and revocation.
+- Account self-service for display names, password changes, active-session review/revocation, logout, and verified account deletion.
+- Room settings for visibility, invitations, ownership transfer, leaving, and permanent room closure.
+- Backend integration and multi-account browser coverage for the complete room and account management lifecycle.
 
 ### Changed
 
@@ -26,6 +33,7 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 - Crawlers now receive a valid local `robots.txt` instead of the application fallback document.
 - Rate limits now identify clients through forwarding headers only when the immediate peer is an explicitly trusted proxy, preventing global throttling behind Caddy and header spoofing from untrusted peers.
+- WebSocket broadcasts now personalize the snapshot identity per connected client, preventing another participant's join or command from temporarily changing the local UI role.
 
 ## [0.1.0] - 2026-07-17
 
@@ -58,7 +66,7 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 ### Known limitations
 
 - YouTube playback depends on the external privacy-enhanced embed API after explicit user consent.
-- Password recovery, MFA, passkeys, account deletion, anonymous identity recovery, and session-management UI are not available yet.
+- Password recovery, MFA, passkeys, and anonymous identity recovery are not available yet.
 - SQLite and the in-memory WebSocket hub target a single application instance; operators must perform WAL-aware backups.
 - Public-room moderation reports require operator-side review tooling outside the current UI.
 - The v0.1.0 release tag predates the MIT license added on the main branch.

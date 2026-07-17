@@ -1,6 +1,6 @@
 services:
   koalaparty:
-    image: ghcr.io/shik3i/koalaparty:${KOALAPARTY_VERSION:?Set KOALAPARTY_VERSION to an exact release such as 0.1.0}
+    image: ghcr.io/shik3i/koalaparty:${KOALAPARTY_VERSION:?Set KOALAPARTY_VERSION to an exact release such as 0.2.0}
     container_name: KoalaParty
     restart: unless-stopped
     env_file:
