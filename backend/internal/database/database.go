@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,27 +38,52 @@ func Open(path string) (*sql.DB, error) {
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
+	entries, err := migrations.ReadDir("migrations")
+	if err != nil {
+		return err
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	var exists int
-	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='schema_migrations'").Scan(&exists); err != nil {
+	if err = db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='schema_migrations'").Scan(&exists); err != nil {
 		return err
 	}
+	current := 0
 	if exists > 0 {
-		return nil
+		if err = db.QueryRowContext(ctx, "SELECT coalesce(max(version),0) FROM schema_migrations").Scan(&current); err != nil {
+			return err
+		}
 	}
-	b, err := migrations.ReadFile("migrations/001_initial.sql")
-	if err != nil {
-		return err
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		prefix, _, ok := strings.Cut(entry.Name(), "_")
+		version, parseErr := strconv.Atoi(prefix)
+		if !ok || parseErr != nil {
+			return fmt.Errorf("invalid migration filename %q", entry.Name())
+		}
+		if version <= current {
+			continue
+		}
+		b, readErr := migrations.ReadFile("migrations/" + entry.Name())
+		if readErr != nil {
+			return readErr
+		}
+		tx, beginErr := db.BeginTx(ctx, nil)
+		if beginErr != nil {
+			return beginErr
+		}
+		if _, err = tx.ExecContext(ctx, string(b)); err == nil {
+			_, err = tx.ExecContext(ctx, "INSERT INTO schema_migrations(version) VALUES(?)", version)
+		}
+		if err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("migration %03d: %w", version, err)
+		}
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("migration %03d commit: %w", version, err)
+		}
+		current = version
 	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, string(b)); err != nil {
-		return fmt.Errorf("migration 001: %w", err)
-	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO schema_migrations(version) VALUES(1)"); err != nil && !strings.Contains(err.Error(), "UNIQUE") {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }

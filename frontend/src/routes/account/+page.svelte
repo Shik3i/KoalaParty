@@ -3,11 +3,14 @@
   import { establish, type Principal } from '$lib/api';
   let me: Principal | null = null;
   let error = '';
+  let loading = true;
   onMount(async () => {
     try {
       me = await establish();
     } catch (e) {
       error = e instanceof Error ? e.message : 'Identity unavailable.';
+    } finally {
+      loading = false;
     }
   });
 </script>
@@ -15,7 +18,9 @@
 <svelte:head><title>Account · KoalaParty</title></svelte:head>
 <main class="page">
   <h1>Account</h1>
-  {#if error}<p class="error">{error}</p>{:else if me}<section class="panel card">
+  {#if loading}<p class="muted" role="status">Loading identity…</p>{:else if error}<p class="error" role="alert">
+      {error}
+    </p>{:else if me}<section class="panel card">
       <div class="avatar">{me.displayName.slice(0, 1).toUpperCase()}</div>
       <div>
         <h2>{me.displayName}</h2>

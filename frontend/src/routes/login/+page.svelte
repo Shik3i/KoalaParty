@@ -2,17 +2,32 @@
   let username = '';
   let password = '';
   let error = '';
+  let submitting = false;
   async function submit() {
-    const r = await fetch('/api/accounts/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
-    if (!r.ok) {
-      error = ((await r.json()) as { message: string }).message;
-      return;
+    if (submitting) return;
+    submitting = true;
+    error = '';
+    try {
+      const r = await fetch('/api/accounts/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.trim(), password }),
+      });
+      if (!r.ok) {
+        let message = r.statusText || 'Login failed.';
+        try {
+          message = ((await r.json()) as { message?: string }).message || message;
+        } catch {
+          // Keep the HTTP fallback for non-JSON proxy errors.
+        }
+        throw new Error(message);
+      }
+      location.href = '/account';
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Login failed.';
+    } finally {
+      submitting = false;
     }
-    location.href = '/account';
   }
 </script>
 
@@ -27,9 +42,9 @@
   >
     <label>Username<input bind:value={username} autocomplete="username" required /></label><label
       >Password<input type="password" bind:value={password} autocomplete="current-password" required /></label
-    >{#if error}<p class="error" role="alert">{error}</p>{/if}<button>Log in</button><a href="/register"
-      >Create an account</a
-    >
+    >{#if error}<p class="error" role="alert">{error}</p>{/if}<button disabled={submitting}
+      >{submitting ? 'Logging in…' : 'Log in'}</button
+    ><a href="/register">Create an account</a>
   </form>
   <p class="muted">Password recovery is not available in this release.</p>
 </main>

@@ -7,6 +7,11 @@
   const roomId = (page.params.roomId ?? '').toUpperCase();
   let room: Snapshot | null = null;
   let roomReceivedAt = Date.now();
+  let disposed = false;
+  let socket: WebSocket | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+  let commandPending = false;
   let error = '';
   let notice = '';
   let connected = false;
@@ -22,38 +27,71 @@
   };
   const manages = () => me()?.role === 'owner' || me()?.role === 'admin';
   function updateRoom(next: Snapshot) {
+    if (room && next.revision < room.revision) return;
     room = next;
     roomReceivedAt = Date.now();
   }
-  onMount(async () => {
-    try {
-      await establish();
-      updateRoom(await api(`/api/rooms/${roomId}`));
-      connect();
-    } catch (e) {
-      error = e instanceof Error ? e.message : 'Could not join room.';
-    }
+  function showNotice(message: string, clearAfter = 0) {
+    if (noticeTimer) clearTimeout(noticeTimer);
+    notice = message;
+    if (clearAfter > 0) noticeTimer = setTimeout(() => (notice = ''), clearAfter);
+  }
+  onMount(() => {
+    void (async () => {
+      try {
+        await establish();
+        if (disposed) return;
+        updateRoom(await api(`/api/rooms/${roomId}`));
+        if (!disposed) connect();
+      } catch (e) {
+        if (!disposed) error = e instanceof Error ? e.message : 'Could not join room.';
+      }
+    })();
+    return () => {
+      disposed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (noticeTimer) clearTimeout(noticeTimer);
+      const activeSocket = socket;
+      socket = null;
+      activeSocket?.close();
+    };
   });
   function connect() {
+    if (disposed || socket) return;
     const ws = new WebSocket(websocketURL(`/api/rooms/${roomId}/ws`));
+    socket = ws;
     ws.onopen = () => {
+      if (socket !== ws) return;
       connected = true;
-      notice = 'Connected';
+      showNotice('Connected', 1800);
     };
     ws.onclose = () => {
+      if (socket !== ws) return;
+      socket = null;
       connected = false;
-      notice = 'Connection lost. Reconnecting…';
-      setTimeout(connect, 1500);
+      if (disposed) return;
+      showNotice('Connection lost. Reconnecting…');
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, 1500);
     };
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'snapshot') updateRoom(data.payload);
-      else if (data.type === 'error') notice = data.message || 'The server denied that action.';
+      if (socket !== ws) return;
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'snapshot') updateRoom(data.payload);
+        else if (data.type === 'error') showNotice(data.message || 'The server denied that action.');
+      } catch {
+        showNotice('Received an invalid room update. Reconnecting…');
+        ws.close();
+      }
     };
   }
   async function command(type: string, payload: Record<string, unknown> = {}) {
-    if (!room) return;
-    notice = '';
+    if (!room || commandPending) return;
+    commandPending = true;
+    showNotice('');
     try {
       updateRoom(
         await api(`/api/rooms/${roomId}/commands`, {
@@ -61,33 +99,43 @@
           body: JSON.stringify({
             type,
             requestId: crypto.randomUUID(),
-            expectedRevision: room.playback.revision,
+            expectedRevision: room.revision,
             payload,
           }),
         }),
       );
     } catch (e) {
-      notice = e instanceof Error ? e.message : 'Action failed.';
+      showNotice(e instanceof Error ? e.message : 'Action failed.');
+    } finally {
+      commandPending = false;
     }
   }
   async function add(playNow = false) {
     const id = parseYouTube(videoURL);
     if (!id) {
-      notice = 'Enter a valid YouTube video URL or video ID.';
+      showNotice('Enter a valid YouTube video URL or video ID.');
       return;
     }
     await command(playNow ? 'queue.play_now' : 'queue.add', { videoId: id, title: `YouTube video ${id}` });
     videoURL = '';
   }
-  function copyInvite() {
-    navigator.clipboard.writeText(location.href);
-    notice = 'Invite link copied.';
+  async function copyInvite() {
+    try {
+      await navigator.clipboard.writeText(location.href);
+      showNotice('Invite link copied.', 2200);
+    } catch {
+      showNotice('Could not copy the invite link. Copy it from the address bar.');
+    }
   }
   function drop(target: string) {
     if (!room || !dragging || dragging === target) return;
     const ids = room.queue.map((q) => q.id);
     const from = ids.indexOf(dragging),
       to = ids.indexOf(target);
+    if (from < 0 || to < 0) {
+      dragging = null;
+      return;
+    }
     ids.splice(to, 0, ids.splice(from, 1)[0]);
     dragging = null;
     command('queue.reorder', { itemIds: ids });
@@ -118,12 +166,14 @@
         <code>{room.id}</code>
       </div>
       <div class="room-actions">
-        <span class:offline={!connected} class="connection">{connected ? 'Live' : 'Reconnecting'}</span><span
-          class="visibility">{room.visibility.replace('_', '-')}</span
-        ><button class="secondary" onclick={copyInvite}>Copy invite</button>{#if manages()}<label
-            class="visibility-select"
+        <span class:offline={!connected} class="connection" role="status">{connected ? 'Live' : 'Reconnecting'}</span
+        ><span class="visibility">{room.visibility.replace('_', '-')}</span><button
+          class="secondary"
+          onclick={copyInvite}>Copy invite</button
+        >{#if manages()}<label class="visibility-select"
             ><span class="sr-only">Room visibility</span><select
               value={room.visibility}
+              disabled={commandPending}
               onchange={(e) => command('room.visibility', { visibility: e.currentTarget.value })}
               ><option value="unlisted">Unlisted</option><option value="public">Public</option><option value="private"
                 >Private</option
@@ -145,7 +195,7 @@
               class="start"
               onclick={() => {
                 watching = true;
-                notice = 'Playback enabled';
+                showNotice('Playback enabled', 2200);
               }}>▶ Start watching</button
             >{/if}
         </div>
@@ -156,20 +206,21 @@
                 command(room!.playback.status === 'playing' ? 'player.pause' : 'player.play', {
                   position: currentPlaybackPosition(room!.playback, roomReceivedAt),
                 })}
-              disabled={!can('playback.play_pause')}>{room.playback.status === 'playing' ? 'Pause' : 'Play'}</button
+              disabled={commandPending || !can('playback.play_pause')}
+              >{room.playback.status === 'playing' ? 'Pause' : 'Play'}</button
             ><label class="seek"
               ><span>Seek in seconds</span><input
                 type="number"
                 min="0"
                 max="604800"
                 bind:value={seekTo}
-                disabled={!can('playback.seek')}
+                disabled={commandPending || !can('playback.seek')}
               /></label
             ><button
               class="secondary"
               onclick={() => command('player.seek', { position: Number(seekTo) })}
-              disabled={!can('playback.seek')}>Seek</button
-            ><span class="revision">Revision {room.playback.revision}</span>
+              disabled={commandPending || !can('playback.seek')}>Seek</button
+            ><span class="revision">Revision {room.revision}</span>
           </div>
           <form
             class="add"
@@ -184,11 +235,11 @@
                 maxlength="2048"
                 placeholder="https://youtube.com/watch?v=…"
               /></label
-            ><button disabled={!can('queue.add')}>Add to queue</button><button
+            ><button disabled={commandPending || !can('queue.add')}>Add to queue</button><button
               type="button"
               class="secondary"
               onclick={() => add(true)}
-              disabled={!can('media.play_now')}>Play now</button
+              disabled={commandPending || !can('media.play_now')}>Play now</button
             >
           </form>
           {#if room.playback.media}<div class="now">
@@ -199,11 +250,22 @@
       </div>
       <aside class="side-column panel">
         <div class="mobile-tabs" role="tablist">
-          <button class:active={mobileTab === 'queue'} onclick={() => (mobileTab = 'queue')}
-            >Queue <span>{room.queue.length}</span></button
-          ><button class:active={mobileTab === 'people'} onclick={() => (mobileTab = 'people')}
-            >People <span>{room.members.length}</span></button
-          ><button class:active={mobileTab === 'activity'} onclick={() => (mobileTab = 'activity')}>Activity</button>
+          <button
+            role="tab"
+            aria-selected={mobileTab === 'queue'}
+            class:active={mobileTab === 'queue'}
+            onclick={() => (mobileTab = 'queue')}>Queue <span>{room.queue.length}</span></button
+          ><button
+            role="tab"
+            aria-selected={mobileTab === 'people'}
+            class:active={mobileTab === 'people'}
+            onclick={() => (mobileTab = 'people')}>People <span>{room.members.length}</span></button
+          ><button
+            role="tab"
+            aria-selected={mobileTab === 'activity'}
+            class:active={mobileTab === 'activity'}
+            onclick={() => (mobileTab = 'activity')}>Activity</button
+          >
         </div>
         <section class:hidden-mobile={mobileTab !== 'queue'}>
           <header>
@@ -211,7 +273,7 @@
             <button
               class="ghost"
               onclick={() => command('queue.skip')}
-              disabled={!room.queue.length || !can('queue.skip')}>Skip next</button
+              disabled={commandPending || !room.queue.length || !can('queue.skip')}>Skip next</button
             >
           </header>
           {#if !room.queue.length}<div class="empty">
@@ -219,7 +281,7 @@
               <p>The queue is empty.<br />Add a YouTube link together.</p>
             </div>{:else}<ol class="queue">
               {#each room.queue as item, i}<li
-                  draggable={can('queue.reorder')}
+                  draggable={!commandPending && can('queue.reorder')}
                   ondragstart={() => (dragging = item.id)}
                   ondragover={(e) => e.preventDefault()}
                   ondrop={() => drop(item.id)}
@@ -230,7 +292,7 @@
                     class="ghost icon"
                     aria-label={`Remove ${item.media.title}`}
                     onclick={() => command('queue.remove', { itemId: item.id })}
-                    disabled={!can('queue.remove')}>×</button
+                    disabled={commandPending || !can('queue.remove')}>×</button
                   >
                 </li>{/each}
             </ol>{/if}
@@ -249,11 +311,12 @@
                 {#if manages() && member.role !== 'owner' && member.identityId !== room.me}<details>
                     <summary aria-label={`Manage ${member.displayName}`}>•••</summary>
                     <div class="menu">
-                      <button class="ghost" onclick={() => memberAction(member, 'role')}
+                      <button class="ghost" disabled={commandPending} onclick={() => memberAction(member, 'role')}
                         >{member.role === 'admin' ? 'Make member' : 'Make admin'}</button
-                      ><button class="ghost" onclick={() => memberAction(member, 'kick')}>Kick</button><button
-                        class="danger"
-                        onclick={() => memberAction(member, 'ban')}>Ban</button
+                      ><button class="ghost" disabled={commandPending} onclick={() => memberAction(member, 'kick')}
+                        >Kick</button
+                      ><button class="danger" disabled={commandPending} onclick={() => memberAction(member, 'ban')}
+                        >Ban</button
                       >
                     </div>
                   </details>{/if}
@@ -269,7 +332,7 @@
       <div class="activity-tabs"><b>Activity</b><span>Chat <small>Later</small></span></div>
       {@render Activity(room.events)}
     </section>
-    <div class="status" aria-live="polite">{notice}</div>
+    {#if notice}<div class="status" aria-live="polite">{notice}</div>{/if}
   </main>{/if}
 {#snippet Activity(events: Snapshot['events'])}<div class="events">
     {#if !events.length}<p class="muted">No activity yet.</p>{/if}{#each [...events].reverse() as event}<article>

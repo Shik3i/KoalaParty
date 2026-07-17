@@ -71,18 +71,29 @@ func (a *application) register(w http.ResponseWriter, r *http.Request, p princip
 	}
 	accountID := newID(10)
 	tx, e := a.db.BeginTx(r.Context(), nil)
-	if e == nil {
-		_, e = tx.Exec("INSERT INTO accounts(id,username,password_hash) VALUES(?,?,?)", accountID, in.Username, hash)
+	if e != nil {
+		problem(w, 500, "database_error", "Account could not be created.")
+		return
 	}
+	defer tx.Rollback()
+	_, e = tx.Exec("INSERT INTO accounts(id,username,password_hash) VALUES(?,?,?)", accountID, in.Username, hash)
 	if e == nil {
-		_, e = tx.Exec("UPDATE identities SET account_id=? WHERE id=? AND account_id IS NULL", accountID, p.IdentityID)
+		var result sql.Result
+		result, e = tx.Exec("UPDATE identities SET account_id=? WHERE id=? AND account_id IS NULL", accountID, p.IdentityID)
+		if e == nil {
+			if changed, resultErr := result.RowsAffected(); resultErr != nil || changed != 1 {
+				e = errors.New("identity is already linked")
+			}
+		}
 	}
 	if e != nil {
-		tx.Rollback()
 		problem(w, 409, "username_unavailable", "Username is unavailable or identity is already linked.")
 		return
 	}
-	_ = tx.Commit()
+	if e = tx.Commit(); e != nil {
+		problem(w, 500, "database_error", "Account could not be created.")
+		return
+	}
 	out, _ := a.principalByIdentity(p.IdentityID)
 	out.CSRF = p.CSRF
 	writeJSON(w, 201, out)
@@ -105,7 +116,7 @@ func (a *application) logout(w http.ResponseWriter, r *http.Request, p principal
 	if c != nil {
 		_, _ = a.db.Exec("DELETE FROM sessions WHERE token_hash=?", tokenHash(c.Value))
 	}
-	http.SetCookie(w, &http.Cookie{Name: "kp_session", Value: "", Path: "/", HttpOnly: true, MaxAge: -1, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: "kp_session", Value: "", Path: "/", HttpOnly: true, Secure: a.cookieSecure, MaxAge: -1, SameSite: http.SameSiteLaxMode})
 	w.WriteHeader(204)
 }
 
@@ -128,8 +139,15 @@ func (a *application) friends(w http.ResponseWriter, r *http.Request, p principa
 		out := []map[string]string{}
 		for rows.Next() {
 			var u, s, d string
-			_ = rows.Scan(&u, &s, &d)
+			if e = rows.Scan(&u, &s, &d); e != nil {
+				problem(w, 500, "database_error", "Could not list friends.")
+				return
+			}
 			out = append(out, map[string]string{"username": u, "status": s, "direction": d})
+		}
+		if e = rows.Err(); e != nil {
+			problem(w, 500, "database_error", "Could not list friends.")
+			return
 		}
 		writeJSON(w, 200, out)
 		return
@@ -138,13 +156,31 @@ func (a *application) friends(w http.ResponseWriter, r *http.Request, p principa
 	if !decode(w, r, &in) {
 		return
 	}
+	in.Username = strings.TrimSpace(in.Username)
 	var target string
 	e := a.db.QueryRow("SELECT id FROM accounts WHERE username=?", in.Username).Scan(&target)
 	if e != nil || target == p.AccountID {
 		problem(w, 404, "account_not_found", "Account was not found.")
 		return
 	}
-	_, e = a.db.Exec(`INSERT INTO friendships(requester_account_id,addressee_account_id,status) VALUES(?,?,'pending') ON CONFLICT(requester_account_id,addressee_account_id) DO UPDATE SET status='pending',updated_at=CURRENT_TIMESTAMP`, p.AccountID, target)
+	var existingRequester, existingStatus string
+	e = a.db.QueryRow(`SELECT requester_account_id,status FROM friendships WHERE (requester_account_id=? AND addressee_account_id=?) OR (requester_account_id=? AND addressee_account_id=?) LIMIT 1`, p.AccountID, target, target, p.AccountID).Scan(&existingRequester, &existingStatus)
+	if e == nil {
+		if existingRequester == target && existingStatus == "pending" {
+			_, e = a.db.Exec("UPDATE friendships SET status='accepted',updated_at=CURRENT_TIMESTAMP WHERE requester_account_id=? AND addressee_account_id=?", target, p.AccountID)
+			if e == nil {
+				w.WriteHeader(204)
+				return
+			}
+		} else {
+			problem(w, 409, "relationship_exists", "A friendship relationship already exists.")
+			return
+		}
+	} else if !errors.Is(e, sql.ErrNoRows) {
+		problem(w, 500, "database_error", "Friend request could not be sent.")
+		return
+	}
+	_, e = a.db.Exec("INSERT INTO friendships(requester_account_id,addressee_account_id,status) VALUES(?,?,'pending')", p.AccountID, target)
 	if e != nil {
 		problem(w, 409, "friend_request_failed", "Friend request could not be sent.")
 		return
@@ -164,12 +200,27 @@ func (a *application) friendAction(w http.ResponseWriter, r *http.Request, p pri
 		return
 	}
 	var e error
+	var result sql.Result
 	switch action {
-	case "accept", "decline", "block":
-		status := map[string]string{"accept": "accepted", "decline": "declined", "block": "blocked"}[action]
-		_, e = a.db.Exec("UPDATE friendships SET status=?,updated_at=CURRENT_TIMESTAMP WHERE requester_account_id=? AND addressee_account_id=?", status, target, p.AccountID)
+	case "accept", "decline":
+		status := map[string]string{"accept": "accepted", "decline": "declined"}[action]
+		result, e = a.db.Exec("UPDATE friendships SET status=?,updated_at=CURRENT_TIMESTAMP WHERE requester_account_id=? AND addressee_account_id=? AND status='pending'", status, target, p.AccountID)
 	case "remove":
-		_, e = a.db.Exec("DELETE FROM friendships WHERE (requester_account_id=? AND addressee_account_id=?) OR (requester_account_id=? AND addressee_account_id=?)", p.AccountID, target, target, p.AccountID)
+		result, e = a.db.Exec("DELETE FROM friendships WHERE (requester_account_id=? AND addressee_account_id=?) OR (requester_account_id=? AND addressee_account_id=?)", p.AccountID, target, target, p.AccountID)
+	case "block":
+		tx, txErr := a.db.BeginTx(r.Context(), nil)
+		if txErr == nil {
+			_, txErr = tx.Exec("DELETE FROM friendships WHERE (requester_account_id=? AND addressee_account_id=?) OR (requester_account_id=? AND addressee_account_id=?)", p.AccountID, target, target, p.AccountID)
+		}
+		if txErr == nil {
+			_, txErr = tx.Exec("INSERT INTO friendships(requester_account_id,addressee_account_id,status) VALUES(?,?,'blocked')", p.AccountID, target)
+		}
+		if txErr == nil {
+			txErr = tx.Commit()
+		} else if tx != nil {
+			_ = tx.Rollback()
+		}
+		e = txErr
 	default:
 		problem(w, 404, "unknown_action", "Unknown friendship action.")
 		return
@@ -178,10 +229,16 @@ func (a *application) friendAction(w http.ResponseWriter, r *http.Request, p pri
 		problem(w, 500, "database_error", "Friendship update failed.")
 		return
 	}
+	if action != "block" {
+		if changed, resultErr := result.RowsAffected(); resultErr != nil || changed == 0 {
+			problem(w, 409, "friendship_not_found", "No matching friendship action was available.")
+			return
+		}
+	}
 	w.WriteHeader(204)
 }
 func (a *application) discover(w http.ResponseWriter, r *http.Request) {
-	rows, e := a.db.Query(`SELECT r.id,coalesce(m.title,''),coalesce(m.thumbnail_url,''),p.status,(SELECT count(*) FROM room_members rm WHERE rm.room_id=r.id) FROM rooms r JOIN playback_states p ON p.room_id=r.id LEFT JOIN media_items m ON m.id=p.current_media_id WHERE r.visibility='public' AND r.deleted_at IS NULL ORDER BY r.last_active_at DESC LIMIT 50`)
+	rows, e := a.db.Query(`SELECT r.id,coalesce(m.title,''),coalesce(m.thumbnail_url,''),p.status FROM rooms r JOIN playback_states p ON p.room_id=r.id LEFT JOIN media_items m ON m.id=p.current_media_id WHERE r.visibility='public' AND r.deleted_at IS NULL ORDER BY r.last_active_at DESC LIMIT 50`)
 	if e != nil {
 		problem(w, 500, "database_error", "Discovery failed.")
 		return
@@ -190,9 +247,15 @@ func (a *application) discover(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]any{}
 	for rows.Next() {
 		var id, title, thumb, status string
-		var count int
-		_ = rows.Scan(&id, &title, &thumb, &status, &count)
-		out = append(out, map[string]any{"id": id, "label": roomLabel(id), "title": title, "thumbnail": thumb, "status": status, "participants": count})
+		if e = rows.Scan(&id, &title, &thumb, &status); e != nil {
+			problem(w, 500, "database_error", "Discovery failed.")
+			return
+		}
+		out = append(out, map[string]any{"id": id, "label": roomLabel(id), "title": title, "thumbnail": thumb, "status": status, "participants": a.hub.activeCount(id)})
+	}
+	if e = rows.Err(); e != nil {
+		problem(w, 500, "database_error", "Discovery failed.")
+		return
 	}
 	writeJSON(w, 200, out)
 }
@@ -212,6 +275,10 @@ func (a *application) report(w http.ResponseWriter, r *http.Request, p principal
 	e := a.db.QueryRow(`SELECT json_object('title',coalesce(m.title,''),'thumbnail',coalesce(m.thumbnail_url,'')) FROM rooms r JOIN playback_states p ON p.room_id=r.id LEFT JOIN media_items m ON m.id=p.current_media_id WHERE r.id=? AND r.visibility='public'`, id).Scan(&metadata)
 	if errors.Is(e, sql.ErrNoRows) {
 		problem(w, 404, "room_not_found", "Public room was not found.")
+		return
+	}
+	if e != nil {
+		problem(w, 500, "database_error", "Report failed.")
 		return
 	}
 	_, e = a.db.Exec("INSERT INTO room_reports(id,room_id,reporter_identity_id,reason,metadata_json) VALUES(?,?,?,?,?)", newID(10), id, p.IdentityID, in.Reason, metadata)

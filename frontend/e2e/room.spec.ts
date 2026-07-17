@@ -14,7 +14,7 @@ async function command(page: Page, roomId: string, type: string, payload: Record
         body: JSON.stringify({
           type,
           requestId: crypto.randomUUID(),
-          expectedRevision: room.playback.revision,
+          expectedRevision: room.revision,
           payload,
         }),
       });
@@ -91,4 +91,19 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   await owner.reload();
   await expect(owner.getByText('(you)')).toBeVisible();
   await Promise.all([ownerContext.close(), memberContext.close(), thirdContext.close()]);
+});
+
+test('mobile navigation and room empty states remain usable', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });
+  const page = await context.newPage();
+  await page.goto('/');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Discover' })).toBeVisible();
+  await page.getByRole('button', { name: 'Create a room' }).click();
+  await expect(page).toHaveURL(/\/room\/[A-Z2-7]{16}$/);
+  await expect(page.getByText('The queue is empty.')).toBeVisible();
+  await page.getByRole('tab', { name: 'People' }).click();
+  await expect(page.getByText('(you)')).toBeVisible();
+  await context.close();
 });

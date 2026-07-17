@@ -12,7 +12,7 @@ func TestMigrationFromEmptyDatabase(t *testing.T) {
 	}
 	defer db.Close()
 	var version int
-	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 1 {
+	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 2 {
 		t.Fatalf("migration version=%d err=%v", version, e)
 	}
 	var fk int
@@ -24,5 +24,9 @@ func TestMigrationFromEmptyDatabase(t *testing.T) {
 	_ = db.QueryRow("PRAGMA journal_mode").Scan(&mode)
 	if mode != "wal" {
 		t.Fatalf("journal mode=%s", mode)
+	}
+	var revisionColumn int
+	if e = db.QueryRow("SELECT count(*) FROM pragma_table_info('rooms') WHERE name='revision'").Scan(&revisionColumn); e != nil || revisionColumn != 1 {
+		t.Fatalf("room revision column unavailable: count=%d err=%v", revisionColumn, e)
 	}
 }

@@ -3,12 +3,21 @@
   let username = '';
   let password = '';
   let error = '';
+  let submitting = false;
   async function submit() {
+    if (submitting) return;
+    submitting = true;
+    error = '';
     try {
-      await api('/api/accounts/register', { method: 'POST', body: JSON.stringify({ username, password }) });
+      await api('/api/accounts/register', {
+        method: 'POST',
+        body: JSON.stringify({ username: username.trim(), password }),
+      });
       location.href = '/account';
     } catch (e) {
       error = e instanceof Error ? e.message : 'Registration failed.';
+    } finally {
+      submitting = false;
     }
   }
 </script>
@@ -41,7 +50,9 @@
         autocomplete="new-password"
         required
       /></label
-    >{#if error}<p class="error" role="alert">{error}</p>{/if}<button>Create account</button>
+    >{#if error}<p class="error" role="alert">{error}</p>{/if}<button disabled={submitting}
+      >{submitting ? 'Creating…' : 'Create account'}</button
+    >
   </form>
   <p class="muted">No email is requested. Password recovery is unavailable.</p>
 </main>

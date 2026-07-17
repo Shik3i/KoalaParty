@@ -99,14 +99,27 @@
   }
   @media (max-width: 700px) {
     .site-header {
+      height: auto;
+      min-height: 68px;
+      flex-wrap: wrap;
       gap: 0.8rem;
+      padding-top: 0.65rem;
+      padding-bottom: 0.65rem;
     }
     .site-header nav {
-      display: none;
+      order: 3;
+      width: 100%;
+      margin-left: 0;
+      gap: 1rem;
+      overflow-x: auto;
+      padding-bottom: 0.15rem;
+      scrollbar-width: thin;
+      min-width: 0;
     }
     .theme {
       margin-left: auto;
-      width: 8rem;
+      width: 7.5rem;
+      min-width: 0;
     }
     footer {
       flex-direction: column;

@@ -112,6 +112,7 @@
     padding: clamp(1.4rem, 4vw, 2.4rem);
     position: relative;
     overflow: hidden;
+    min-width: 0;
   }
   .room-mark {
     font-size: 4rem;
@@ -156,8 +157,11 @@
   }
   @media (max-width: 800px) {
     .landing {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
       padding-top: 3rem;
+    }
+    .landing > * {
+      min-width: 0;
     }
     .features {
       grid-template-columns: 1fr 1fr;
@@ -165,7 +169,7 @@
   }
   @media (max-width: 480px) {
     .features {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 </style>

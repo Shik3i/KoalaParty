@@ -1,4 +1,3 @@
 # WebSocket protocol
 
-Connect to `/api/rooms/{roomId}/ws` with the session cookie. The server sends `snapshot` first. Commands use `{ "type": "player.play", "requestId": "...", "payload": {} }`; responses use `ack` or `error`. Events carry a monotonically increasing room revision. Playback commands contain `expectedRevision`; stale commands are rejected. Heartbeats and drift corrections are not activity events.
-
+Connect to `/api/rooms/{roomId}/ws` with the session cookie. The server sends and broadcasts `snapshot` messages. Commands use `{ "type": "player.play", "requestId": "...", "expectedRevision": 3, "payload": {} }`; failures use `error` messages. Every state-changing command contains the latest room-wide `expectedRevision`; stale commands are rejected. Playback maintains a separate playback revision. Heartbeats and drift corrections are not activity events.

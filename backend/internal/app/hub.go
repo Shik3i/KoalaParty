@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -18,6 +19,7 @@ type client struct {
 func (c *client) write(v any) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+	_ = c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	return c.conn.WriteJSON(v)
 }
 
@@ -35,13 +37,21 @@ func (h *hub) add(room string, c *client) {
 	}
 	h.rooms[room][c] = struct{}{}
 }
-func (h *hub) remove(room string, c *client) {
+func (h *hub) remove(room string, c *client) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.rooms[room], c)
+	lastForIdentity := true
+	for remaining := range h.rooms[room] {
+		if remaining.identity == c.identity {
+			lastForIdentity = false
+			break
+		}
+	}
 	if len(h.rooms[room]) == 0 {
 		delete(h.rooms, room)
 	}
+	return lastForIdentity
 }
 func (h *hub) isActive(room, identity string) bool {
 	h.mu.RLock()
@@ -57,6 +67,15 @@ func (h *hub) activeRoom(room string) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.rooms[room]) > 0
+}
+func (h *hub) activeCount(room string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	identities := map[string]struct{}{}
+	for c := range h.rooms[room] {
+		identities[c.identity] = struct{}{}
+	}
+	return len(identities)
 }
 func (h *hub) disconnect(room, identity string) {
 	h.mu.RLock()
@@ -84,13 +103,13 @@ func (h *hub) broadcast(room string, s snapshot) {
 }
 func (a *application) websocket(w http.ResponseWriter, r *http.Request, p principal) {
 	room := r.PathValue("roomId")
+	if !a.originAllowed(r.Header.Get("Origin")) {
+		problem(w, 403, "origin_denied", "WebSocket origin is not trusted.")
+		return
+	}
 	s, e := a.joinAndSnapshot(r.Context(), room, p)
 	if e != nil {
 		roomProblem(w, e)
-		return
-	}
-	if !a.originAllowed(r.Header.Get("Origin")) {
-		problem(w, 403, "origin_denied", "WebSocket origin is not trusted.")
 		return
 	}
 	up := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -104,9 +123,25 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 	s, _ = a.snapshot(r.Context(), room, p.IdentityID)
 	a.hub.broadcast(room, s)
 	defer func() {
-		a.hub.remove(room, c)
+		lastForIdentity := a.hub.remove(room, c)
 		conn.Close()
-		_ = a.insertEvent(room, p.IdentityID, "member.left", map[string]any{})
+		if lastForIdentity {
+			var membership int
+			_ = a.db.QueryRow("SELECT count(*) FROM room_members WHERE room_id=? AND identity_id=?", room, p.IdentityID).Scan(&membership)
+			if membership > 0 {
+				tx, txErr := a.db.Begin()
+				if txErr == nil {
+					if txErr = a.insertEventTx(tx, room, p.IdentityID, "member.left", map[string]any{}); txErr == nil {
+						_, txErr = tx.Exec("UPDATE rooms SET revision=revision+1 WHERE id=?", room)
+					}
+					if txErr == nil {
+						txErr = tx.Commit()
+					} else {
+						_ = tx.Rollback()
+					}
+				}
+			}
+		}
 		if latest, e := a.snapshot(context.Background(), room, p.IdentityID); e == nil {
 			a.hub.broadcast(room, latest)
 		}

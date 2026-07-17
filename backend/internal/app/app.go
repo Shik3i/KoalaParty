@@ -37,7 +37,13 @@ func env(key, fallback string) string {
 }
 func Healthcheck() error {
 	c := http.Client{Timeout: 2 * time.Second}
-	r, e := c.Get("http://127.0.0.1" + env("KOALAPARTY_ADDR", ":8080") + "/api/health")
+	addr := env("KOALAPARTY_ADDR", ":8080")
+	if strings.HasPrefix(addr, ":") {
+		addr = "127.0.0.1" + addr
+	} else if strings.HasPrefix(addr, "0.0.0.0:") {
+		addr = "127.0.0.1:" + strings.TrimPrefix(addr, "0.0.0.0:")
+	}
+	r, e := c.Get("http://" + addr + "/api/health")
 	if e != nil {
 		return e
 	}
@@ -55,16 +61,16 @@ func Run() error {
 	}
 	defer db.Close()
 	ttl, _ := time.ParseDuration(env("KOALAPARTY_SESSION_TTL", "168h"))
-	if ttl == 0 {
+	if ttl <= 0 {
 		ttl = 168 * time.Hour
 	}
 	a := &application{db: db, hub: newHub(), sessionTTL: ttl, cookieSecure: env("KOALAPARTY_COOKIE_SECURE", "false") == "true", trustedOrigins: map[string]bool{}}
 	a.activityMaxAge, _ = time.ParseDuration(env("KOALAPARTY_ACTIVITY_MAX_AGE", "720h"))
-	if a.activityMaxAge == 0 {
+	if a.activityMaxAge <= 0 {
 		a.activityMaxAge = 720 * time.Hour
 	}
 	a.roomMaxIdle, _ = time.ParseDuration(env("KOALAPARTY_ROOM_MAX_IDLE", "8760h"))
-	if a.roomMaxIdle == 0 {
+	if a.roomMaxIdle <= 0 {
 		a.roomMaxIdle = 8760 * time.Hour
 	}
 	if _, e := fmt.Sscanf(env("KOALAPARTY_ACTIVITY_MAX_EVENTS", "200"), "%d", &a.activityMaxEvents); e != nil || a.activityMaxEvents < 10 {
@@ -100,12 +106,15 @@ func Run() error {
 	mux.HandleFunc("GET /api/discover", a.discover)
 	webRoot := env("KOALAPARTY_WEB_ROOT", "../frontend/build")
 	mux.Handle("/", spaHandler(webRoot))
-	go a.maintenanceLoop(context.Background())
+	maintenanceCtx, cancelMaintenance := context.WithCancel(context.Background())
+	defer cancelMaintenance()
+	go a.maintenanceLoop(maintenanceCtx)
 	srv := &http.Server{Addr: env("KOALAPARTY_ADDR", ":8080"), Handler: securityHeaders(mux, contentSecurityPolicy(webRoot)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-stop
+		cancelMaintenance()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(ctx)

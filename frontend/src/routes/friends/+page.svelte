@@ -5,26 +5,45 @@
   let list: Friend[] = [];
   let username = '';
   let error = '';
+  let loading = true;
+  let pending = '';
   async function load() {
     try {
+      error = '';
       list = await api('/api/friends');
     } catch (e) {
       error = e instanceof Error ? e.message : 'Friends unavailable.';
+    } finally {
+      loading = false;
     }
   }
   onMount(load);
   async function send() {
+    if (pending) return;
+    pending = 'send';
+    error = '';
     try {
-      await api('/api/friends', { method: 'POST', body: JSON.stringify({ username }) });
+      await api('/api/friends', { method: 'POST', body: JSON.stringify({ username: username.trim() }) });
       username = '';
       await load();
     } catch (e) {
       error = e instanceof Error ? e.message : 'Request failed.';
+    } finally {
+      pending = '';
     }
   }
   async function action(user: string, value: string) {
-    await api(`/api/friends/${encodeURIComponent(user)}/${value}`, { method: 'POST' });
-    await load();
+    if (pending) return;
+    pending = `${user}:${value}`;
+    error = '';
+    try {
+      await api(`/api/friends/${encodeURIComponent(user)}/${value}`, { method: 'POST' });
+      await load();
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Request failed.';
+    } finally {
+      pending = '';
+    }
   }
 </script>
 
@@ -39,19 +58,24 @@
       send();
     }}
   >
-    <label>Username<input bind:value={username} required /></label><button>Send request</button>
+    <label>Username<input bind:value={username} minlength="3" maxlength="24" pattern="[A-Za-z0-9_]+" required /></label
+    ><button disabled={!!pending}>{pending === 'send' ? 'Sending…' : 'Send request'}</button>
   </form>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <section class="panel list">
-    {#if !list.length}<p class="muted">No friend relationships yet.</p>{/if}{#each list as friend}<article>
+    {#if loading}<p class="muted" role="status">Loading friends…</p>{:else if !list.length}<p class="muted">
+        No friend relationships yet.
+      </p>{/if}{#each list as friend}<article>
         <div><b>{friend.username}</b><small>{friend.status} · {friend.direction}</small></div>
         <div class="row">
           {#if friend.status === 'pending' && friend.direction === 'incoming'}<button
+              disabled={!!pending}
               onclick={() => action(friend.username, 'accept')}>Accept</button
-            ><button class="secondary" onclick={() => action(friend.username, 'decline')}>Decline</button>{/if}<button
-            class="ghost"
-            onclick={() => action(friend.username, 'remove')}>Remove</button
-          ><button class="ghost" onclick={() => action(friend.username, 'block')}>Block</button>
+            ><button class="secondary" disabled={!!pending} onclick={() => action(friend.username, 'decline')}
+              >Decline</button
+            >{/if}<button class="ghost" disabled={!!pending} onclick={() => action(friend.username, 'remove')}
+            >Remove</button
+          ><button class="ghost" disabled={!!pending} onclick={() => action(friend.username, 'block')}>Block</button>
         </div>
       </article>{/each}
   </section>

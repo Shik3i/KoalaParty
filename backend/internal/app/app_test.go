@@ -118,12 +118,12 @@ func TestRoomPersistenceAndOwnerProtection(t *testing.T) {
 			t.Fatal("default member playback permission missing from snapshot")
 		}
 	}
-	cmd := command{Type: "member.ban", Payload: json.RawMessage(`{"identityId":"` + owner.IdentityID + `"}`)}
+	cmd := command{Type: "member.ban", ExpectedRevision: s.Revision, Payload: json.RawMessage(`{"identityId":"` + owner.IdentityID + `"}`)}
 	if _, e = a.applyCommand(t.Context(), created["id"], memberP, cmd); e != errDenied {
 		t.Fatalf("member moderation should be denied: %v", e)
 	}
 	_ = memberCookie
-	cmd = command{Type: "player.play", ExpectedRevision: 0, Payload: json.RawMessage(`{"position":12}`)}
+	cmd = command{Type: "player.play", ExpectedRevision: s.Revision, Payload: json.RawMessage(`{"position":12}`)}
 	s, e = a.applyCommand(t.Context(), created["id"], memberP, cmd)
 	if e != nil || s.Playback.Status != "playing" || s.Playback.Revision != 1 {
 		t.Fatalf("default playback permission failed: %v", e)
@@ -131,7 +131,7 @@ func TestRoomPersistenceAndOwnerProtection(t *testing.T) {
 	if _, e = a.applyCommand(t.Context(), created["id"], memberP, cmd); e != errStale {
 		t.Fatalf("stale command accepted: %v", e)
 	}
-	override := command{Type: "member.permission", Payload: json.RawMessage(`{"identityId":"` + memberP.IdentityID + `","permission":"playback.play_pause","allowed":false}`)}
+	override := command{Type: "member.permission", ExpectedRevision: s.Revision, Payload: json.RawMessage(`{"identityId":"` + memberP.IdentityID + `","permission":"playback.play_pause","allowed":false}`)}
 	s, e = a.applyCommand(t.Context(), created["id"], owner, override)
 	if e != nil {
 		t.Fatal(e)
@@ -159,6 +159,51 @@ func TestRegistrationLinksExistingIdentity(t *testing.T) {
 	a.login(loginResponse, httptest.NewRequest("POST", "/api/accounts/login", bytes.NewReader(loginBody)))
 	if loginResponse.Code != 200 {
 		t.Fatalf("login failed: %d %s", loginResponse.Code, loginResponse.Body.String())
+	}
+}
+
+func TestRepeatedSnapshotDoesNotDuplicateJoinEvent(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174006", strings.Repeat("f", 43))
+	w := httptest.NewRecorder()
+	a.requireAuth(a.createRoom)(w, authed("POST", "/api/rooms", nil, cookie, owner.CSRF))
+	var created map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	_, member := exchange(t, a, "123e4567-e89b-42d3-a456-426614174007", strings.Repeat("g", 43))
+	first, e := a.joinAndSnapshot(t.Context(), created["id"], member)
+	if e != nil {
+		t.Fatal(e)
+	}
+	second, e := a.joinAndSnapshot(t.Context(), created["id"], member)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if second.Revision != first.Revision {
+		t.Fatalf("repeat snapshot changed revision: first=%d second=%d", first.Revision, second.Revision)
+	}
+	var joins int
+	if e = a.db.QueryRow("SELECT count(*) FROM room_events WHERE room_id=? AND actor_identity_id=? AND event_type='member.joined'", created["id"], member.IdentityID).Scan(&joins); e != nil || joins != 1 {
+		t.Fatalf("found %d join events, want 1: %v", joins, e)
+	}
+}
+
+func TestSecondRegistrationRollsBackOrphanAccount(t *testing.T) {
+	a := testApp(t)
+	cookie, p := exchange(t, a, "123e4567-e89b-42d3-a456-426614174008", strings.Repeat("h", 43))
+	first := httptest.NewRecorder()
+	a.register(first, authed("POST", "/api/accounts/register", credentials{Username: "first_account", Password: "very-long-test-password"}, cookie, p.CSRF), p)
+	if first.Code != 201 {
+		t.Fatalf("first registration: %d %s", first.Code, first.Body.String())
+	}
+	second := httptest.NewRecorder()
+	a.register(second, authed("POST", "/api/accounts/register", credentials{Username: "orphan_account", Password: "very-long-test-password"}, cookie, p.CSRF), p)
+	if second.Code != 409 {
+		t.Fatalf("second registration: %d %s", second.Code, second.Body.String())
+	}
+	var accounts int
+	_ = a.db.QueryRow("SELECT count(*) FROM accounts").Scan(&accounts)
+	if accounts != 1 {
+		t.Fatalf("found %d accounts, want 1", accounts)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -107,16 +108,28 @@ func (a *application) exchangeIdentity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *application) issueSession(w http.ResponseWriter, r *http.Request, identityID string) {
-	token, _ := randomToken(32)
-	csrf, _ := randomToken(24)
+	p, err := a.principalByIdentity(identityID)
+	if err != nil {
+		problem(w, 500, "session_failed", "Could not create session.")
+		return
+	}
+	token, err := randomToken(32)
+	if err != nil {
+		problem(w, 500, "session_failed", "Could not create session.")
+		return
+	}
+	csrf, err := randomToken(24)
+	if err != nil {
+		problem(w, 500, "session_failed", "Could not create session.")
+		return
+	}
 	expires := time.Now().Add(a.sessionTTL)
-	_, err := a.db.Exec("INSERT INTO sessions(token_hash,identity_id,csrf_token,expires_at) VALUES(?,?,?,?)", tokenHash(token), identityID, csrf, expires.UTC().Format(time.RFC3339))
+	_, err = a.db.Exec("INSERT INTO sessions(token_hash,identity_id,csrf_token,expires_at) VALUES(?,?,?,?)", tokenHash(token), identityID, csrf, expires.UTC().Format(time.RFC3339))
 	if err != nil {
 		problem(w, 500, "session_failed", "Could not create session.")
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: "kp_session", Value: token, Path: "/", HttpOnly: true, Secure: a.cookieSecure, SameSite: http.SameSiteLaxMode, Expires: expires})
-	p, _ := a.principalByIdentity(identityID)
 	p.CSRF = csrf
 	writeJSON(w, 200, p)
 }
@@ -163,6 +176,10 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	d.DisallowUnknownFields()
 	if e := d.Decode(v); e != nil {
 		problem(w, 400, "invalid_json", "Invalid request body.")
+		return false
+	}
+	if e := d.Decode(&struct{}{}); !errors.Is(e, io.EOF) {
+		problem(w, 400, "invalid_json", "Request body must contain one JSON object.")
 		return false
 	}
 	return true

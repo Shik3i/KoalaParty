@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 )
@@ -102,8 +103,10 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	}
 	defer tx.Rollback()
 	var current int64
-	_ = tx.QueryRow("SELECT revision FROM playback_states WHERE room_id=?", room).Scan(&current)
-	if strings.HasPrefix(c.Type, "player.") && c.ExpectedRevision != current {
+	if e = tx.QueryRow("SELECT revision FROM rooms WHERE id=? AND deleted_at IS NULL", room).Scan(&current); e != nil {
+		return snapshot{}, errDenied
+	}
+	if c.ExpectedRevision != current {
 		return snapshot{}, errStale
 	}
 	eventType := c.Type
@@ -113,8 +116,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		var in struct {
 			Position float64 `json:"position"`
 		}
-		_ = json.Unmarshal(c.Payload, &in)
-		if in.Position < 0 || in.Position > 604800 {
+		if json.Unmarshal(c.Payload, &in) != nil || math.IsNaN(in.Position) || math.IsInf(in.Position, 0) || in.Position < 0 || in.Position > 604800 {
 			return snapshot{}, errors.New("invalid playback position")
 		}
 		status := "paused"
@@ -138,6 +140,9 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		if len(in.Title) > 200 {
 			in.Title = in.Title[:200]
 		}
+		if strings.TrimSpace(in.Title) == "" {
+			in.Title = "YouTube video " + in.VideoID
+		}
 		mediaID := "YT" + in.VideoID
 		_, e = tx.Exec("INSERT INTO media_items(id,provider,provider_media_id,title,thumbnail_url) VALUES(?,'youtube',?,?,?) ON CONFLICT(provider,provider_media_id) DO UPDATE SET title=excluded.title", mediaID, in.VideoID, in.Title, "https://i.ytimg.com/vi/"+in.VideoID+"/mqdefault.jpg")
 		if e == nil && c.Type == "queue.add" {
@@ -154,8 +159,16 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		var in struct {
 			ItemID string `json:"itemId"`
 		}
-		_ = json.Unmarshal(c.Payload, &in)
-		_, e = tx.Exec("DELETE FROM room_queue_items WHERE room_id=? AND id=?", room, in.ItemID)
+		if json.Unmarshal(c.Payload, &in) != nil || in.ItemID == "" {
+			return snapshot{}, errors.New("invalid queue item")
+		}
+		var res sql.Result
+		res, e = tx.Exec("DELETE FROM room_queue_items WHERE room_id=? AND id=?", room, in.ItemID)
+		if e == nil {
+			if changed, resultErr := res.RowsAffected(); resultErr != nil || changed != 1 {
+				return snapshot{}, errors.New("unknown queue item")
+			}
+		}
 		if e == nil {
 			e = resequence(tx, room)
 		}
@@ -163,19 +176,35 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		var in struct {
 			ItemIDs []string `json:"itemIds"`
 		}
-		_ = json.Unmarshal(c.Payload, &in)
+		if json.Unmarshal(c.Payload, &in) != nil {
+			return snapshot{}, errors.New("invalid queue order")
+		}
 		var count int
-		_ = tx.QueryRow("SELECT count(*) FROM room_queue_items WHERE room_id=?", room).Scan(&count)
+		if e = tx.QueryRow("SELECT count(*) FROM room_queue_items WHERE room_id=?", room).Scan(&count); e != nil {
+			return snapshot{}, e
+		}
 		if len(in.ItemIDs) != count {
 			return snapshot{}, errors.New("reorder must contain every queue item")
+		}
+		seen := make(map[string]struct{}, len(in.ItemIDs))
+		for _, id := range in.ItemIDs {
+			if id == "" {
+				return snapshot{}, errors.New("invalid queue item")
+			}
+			if _, duplicate := seen[id]; duplicate {
+				return snapshot{}, errors.New("queue order contains duplicates")
+			}
+			seen[id] = struct{}{}
 		}
 		_, e = tx.Exec("UPDATE room_queue_items SET position=position+1000000 WHERE room_id=?", room)
 		for pos, id := range in.ItemIDs {
 			if e == nil {
 				var res sql.Result
 				res, e = tx.Exec("UPDATE room_queue_items SET position=? WHERE room_id=? AND id=?", pos, room, id)
-				if n, _ := res.RowsAffected(); n != 1 {
-					return snapshot{}, errors.New("unknown queue item")
+				if e == nil {
+					if n, resultErr := res.RowsAffected(); resultErr != nil || n != 1 {
+						return snapshot{}, errors.New("unknown queue item")
+					}
 				}
 			}
 		}
@@ -197,9 +226,13 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		}
 	case "member.role":
 		var in struct{ IdentityID, Role string }
-		_ = json.Unmarshal(c.Payload, &in)
+		if json.Unmarshal(c.Payload, &in) != nil {
+			return snapshot{}, errors.New("invalid member role")
+		}
 		var targetRole string
-		_ = tx.QueryRow("SELECT role FROM room_members WHERE room_id=? AND identity_id=?", room, in.IdentityID).Scan(&targetRole)
+		if e = tx.QueryRow("SELECT role FROM room_members WHERE room_id=? AND identity_id=?", room, in.IdentityID).Scan(&targetRole); e != nil {
+			return snapshot{}, errors.New("member not found")
+		}
 		if targetRole == "owner" || !(in.Role == "admin" || in.Role == "member") {
 			return snapshot{}, errDenied
 		}
@@ -210,9 +243,13 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			IdentityID, Permission string
 			Allowed                bool
 		}
-		_ = json.Unmarshal(c.Payload, &in)
+		if json.Unmarshal(c.Payload, &in) != nil {
+			return snapshot{}, errors.New("invalid member permission")
+		}
 		var targetRole string
-		_ = tx.QueryRow("SELECT role FROM room_members WHERE room_id=? AND identity_id=?", room, in.IdentityID).Scan(&targetRole)
+		if e = tx.QueryRow("SELECT role FROM room_members WHERE room_id=? AND identity_id=?", room, in.IdentityID).Scan(&targetRole); e != nil {
+			return snapshot{}, errors.New("member not found")
+		}
 		if targetRole == "owner" || !contains(memberCapabilities, in.Permission) {
 			return snapshot{}, errDenied
 		}
@@ -223,10 +260,14 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		var in struct {
 			IdentityID string `json:"identityId"`
 		}
-		_ = json.Unmarshal(c.Payload, &in)
+		if json.Unmarshal(c.Payload, &in) != nil || in.IdentityID == "" {
+			return snapshot{}, errors.New("invalid member")
+		}
 		var targetRole string
 		var account sql.NullString
-		_ = tx.QueryRow("SELECT m.role,i.account_id FROM room_members m JOIN identities i ON i.id=m.identity_id WHERE m.room_id=? AND i.id=?", room, in.IdentityID).Scan(&targetRole, &account)
+		if e = tx.QueryRow("SELECT m.role,i.account_id FROM room_members m JOIN identities i ON i.id=m.identity_id WHERE m.room_id=? AND i.id=?", room, in.IdentityID).Scan(&targetRole, &account); e != nil {
+			return snapshot{}, errors.New("member not found")
+		}
 		if targetRole == "owner" {
 			return snapshot{}, errDenied
 		}
@@ -242,7 +283,9 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		var in struct {
 			IdentityID string `json:"identityId"`
 		}
-		_ = json.Unmarshal(c.Payload, &in)
+		if json.Unmarshal(c.Payload, &in) != nil || in.IdentityID == "" {
+			return snapshot{}, errors.New("invalid member")
+		}
 		res, updateErr := tx.Exec("UPDATE room_bans SET revoked_at=CURRENT_TIMESTAMP,revoked_by_identity_id=? WHERE room_id=? AND identity_id=? AND revoked_at IS NULL", p.IdentityID, room, in.IdentityID)
 		if updateErr != nil {
 			return snapshot{}, updateErr
@@ -256,7 +299,9 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		var in struct {
 			Visibility string `json:"visibility"`
 		}
-		_ = json.Unmarshal(c.Payload, &in)
+		if json.Unmarshal(c.Payload, &in) != nil {
+			return snapshot{}, errors.New("invalid visibility")
+		}
 		if !contains([]string{"unlisted", "public", "private", "friends_only"}, in.Visibility) {
 			return snapshot{}, errors.New("invalid visibility")
 		}
@@ -278,7 +323,9 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	if e = a.insertEventTx(tx, room, p.IdentityID, eventType, payload); e != nil {
 		return snapshot{}, e
 	}
-	_, _ = tx.Exec("UPDATE rooms SET last_active_at=CURRENT_TIMESTAMP WHERE id=?", room)
+	if _, e = tx.Exec("UPDATE rooms SET revision=revision+1,last_active_at=CURRENT_TIMESTAMP WHERE id=?", room); e != nil {
+		return snapshot{}, e
+	}
 	if e = tx.Commit(); e != nil {
 		return snapshot{}, e
 	}
@@ -297,14 +344,21 @@ func resequence(tx *sql.Tx, room string) error {
 	var ids []string
 	for rows.Next() {
 		var id string
-		_ = rows.Scan(&id)
+		if e = rows.Scan(&id); e != nil {
+			rows.Close()
+			return e
+		}
 		ids = append(ids, id)
+	}
+	if e = rows.Err(); e != nil {
+		rows.Close()
+		return e
 	}
 	rows.Close()
 	_, e = tx.Exec("UPDATE room_queue_items SET position=position+1000000 WHERE room_id=?", room)
 	for i, id := range ids {
 		if e == nil {
-			_, e = tx.Exec("UPDATE room_queue_items SET position=? WHERE id=?", i, id)
+			_, e = tx.Exec("UPDATE room_queue_items SET position=? WHERE room_id=? AND id=?", i, room, id)
 		}
 	}
 	return e

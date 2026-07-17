@@ -72,14 +72,11 @@ func newID(bytes int) string {
 func roomLabel(id string) string {
 	adjectives := []string{"Calm", "Gentle", "Mossy", "Quiet", "Sunny", "Cozy", "Bamboo", "Forest"}
 	animals := []string{"Koala", "Wombat", "Kookaburra", "Possum"}
-	n := 0
+	var n uint64
 	for _, c := range []byte(id) {
-		n = n*31 + int(c)
+		n = n*31 + uint64(c)
 	}
-	if n < 0 {
-		n = -n
-	}
-	return fmt.Sprintf("%s %s %03d", adjectives[n%len(adjectives)], animals[(n/7)%len(animals)], n%1000)
+	return fmt.Sprintf("%s %s %03d", adjectives[n%uint64(len(adjectives))], animals[(n/7)%uint64(len(animals))], n%1000)
 }
 func (a *application) createRoom(w http.ResponseWriter, r *http.Request, p principal) {
 	id := newID(10)
@@ -136,13 +133,23 @@ func (a *application) joinAndSnapshot(ctx context.Context, id string, p principa
 	if !roomIDPattern.MatchString(id) {
 		return snapshot{}, errors.New("not_found")
 	}
-	var visibility, owner string
-	e := a.db.QueryRowContext(ctx, "SELECT visibility,owner_identity_id FROM rooms WHERE id=? AND deleted_at IS NULL", id).Scan(&visibility, &owner)
+	tx, e := a.db.BeginTx(ctx, nil)
 	if e != nil {
-		return snapshot{}, errors.New("not_found")
+		return snapshot{}, e
+	}
+	defer tx.Rollback()
+	var visibility, owner string
+	e = tx.QueryRowContext(ctx, "SELECT visibility,owner_identity_id FROM rooms WHERE id=? AND deleted_at IS NULL", id).Scan(&visibility, &owner)
+	if e != nil {
+		if errors.Is(e, sql.ErrNoRows) {
+			return snapshot{}, errors.New("not_found")
+		}
+		return snapshot{}, e
 	}
 	var banned int
-	_ = a.db.QueryRowContext(ctx, `SELECT count(*) FROM room_bans WHERE room_id=? AND revoked_at IS NULL AND (identity_id=? OR (account_id IS NOT NULL AND account_id=?))`, id, p.IdentityID, p.AccountID).Scan(&banned)
+	if e = tx.QueryRowContext(ctx, `SELECT count(*) FROM room_bans WHERE room_id=? AND revoked_at IS NULL AND (identity_id=? OR (account_id IS NOT NULL AND account_id=?))`, id, p.IdentityID, p.AccountID).Scan(&banned); e != nil {
+		return snapshot{}, e
+	}
 	if banned > 0 {
 		return snapshot{}, errors.New("banned")
 	}
@@ -152,14 +159,20 @@ func (a *application) joinAndSnapshot(ctx context.Context, id string, p principa
 		}
 		allowed := p.IdentityID == owner
 		if visibility == "private" && !allowed {
-			_ = a.db.QueryRowContext(ctx, "SELECT count(*) FROM room_invites WHERE room_id=? AND account_id=?", id, p.AccountID).Scan(&banned)
+			if e = tx.QueryRowContext(ctx, "SELECT count(*) FROM room_invites WHERE room_id=? AND account_id=?", id, p.AccountID).Scan(&banned); e != nil {
+				return snapshot{}, e
+			}
 			allowed = banned > 0
 		}
 		if visibility == "friends_only" && !allowed {
 			var ownerAccount sql.NullString
-			_ = a.db.QueryRowContext(ctx, "SELECT account_id FROM identities WHERE id=?", owner).Scan(&ownerAccount)
+			if e = tx.QueryRowContext(ctx, "SELECT account_id FROM identities WHERE id=?", owner).Scan(&ownerAccount); e != nil {
+				return snapshot{}, e
+			}
 			if ownerAccount.Valid {
-				_ = a.db.QueryRowContext(ctx, `SELECT count(*) FROM friendships WHERE status='accepted' AND ((requester_account_id=? AND addressee_account_id=?) OR (requester_account_id=? AND addressee_account_id=?))`, ownerAccount.String, p.AccountID, p.AccountID, ownerAccount.String).Scan(&banned)
+				if e = tx.QueryRowContext(ctx, `SELECT count(*) FROM friendships WHERE status='accepted' AND ((requester_account_id=? AND addressee_account_id=?) OR (requester_account_id=? AND addressee_account_id=?))`, ownerAccount.String, p.AccountID, p.AccountID, ownerAccount.String).Scan(&banned); e != nil {
+					return snapshot{}, e
+				}
 				allowed = banned > 0
 			}
 		}
@@ -167,18 +180,33 @@ func (a *application) joinAndSnapshot(ctx context.Context, id string, p principa
 			return snapshot{}, errors.New("not_allowed")
 		}
 	}
-	res, e := a.db.ExecContext(ctx, "INSERT INTO room_members(room_id,identity_id,role) VALUES(?,?,'member') ON CONFLICT(room_id,identity_id) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP", id, p.IdentityID)
+	res, e := tx.ExecContext(ctx, "INSERT INTO room_members(room_id,identity_id,role) VALUES(?,?,'member') ON CONFLICT(room_id,identity_id) DO NOTHING", id, p.IdentityID)
 	if e != nil {
 		return snapshot{}, e
 	}
-	if n, _ := res.RowsAffected(); n > 0 {
-		_ = a.insertEvent(id, p.IdentityID, "member.joined", map[string]any{})
+	inserted, e := res.RowsAffected()
+	if e != nil {
+		return snapshot{}, e
+	}
+	if _, e = tx.ExecContext(ctx, "UPDATE room_members SET last_seen_at=CURRENT_TIMESTAMP WHERE room_id=? AND identity_id=?", id, p.IdentityID); e != nil {
+		return snapshot{}, e
+	}
+	if inserted == 1 {
+		if e = a.insertEventTx(tx, id, p.IdentityID, "member.joined", map[string]any{}); e != nil {
+			return snapshot{}, e
+		}
+		if _, e = tx.ExecContext(ctx, "UPDATE rooms SET revision=revision+1,last_active_at=CURRENT_TIMESTAMP WHERE id=?", id); e != nil {
+			return snapshot{}, e
+		}
+	}
+	if e = tx.Commit(); e != nil {
+		return snapshot{}, e
 	}
 	return a.snapshot(ctx, id, p.IdentityID)
 }
 func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, error) {
 	s := snapshot{ID: id, Label: roomLabel(id), Me: me, Members: []member{}, Queue: []queueItem{}, Events: []event{}}
-	if e := a.db.QueryRowContext(ctx, "SELECT visibility FROM rooms WHERE id=?", id).Scan(&s.Visibility); e != nil {
+	if e := a.db.QueryRowContext(ctx, "SELECT visibility,revision FROM rooms WHERE id=?", id).Scan(&s.Visibility, &s.Revision); e != nil {
 		return s, e
 	}
 	rows, e := a.db.QueryContext(ctx, "SELECT i.id,i.display_name,m.role FROM room_members m JOIN identities i ON i.id=m.identity_id WHERE m.room_id=? ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,i.display_name", id)
@@ -188,22 +216,39 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 	for rows.Next() {
 		var m member
 		m.Permissions = map[string]bool{}
-		_ = rows.Scan(&m.IdentityID, &m.DisplayName, &m.Role)
+		if e = rows.Scan(&m.IdentityID, &m.DisplayName, &m.Role); e != nil {
+			rows.Close()
+			return s, e
+		}
 		for _, c := range memberCapabilities {
 			m.Permissions[c] = true
 		}
 		s.Members = append(s.Members, m)
 	}
+	if e = rows.Err(); e != nil {
+		rows.Close()
+		return s, e
+	}
 	rows.Close()
 	for i := range s.Members {
 		s.Members[i].Active = a.hub.isActive(id, s.Members[i].IdentityID)
 		if s.Members[i].Role == "member" {
-			pr, _ := a.db.QueryContext(ctx, "SELECT permission,allowed FROM room_permissions WHERE room_id=? AND identity_id=?", id, s.Members[i].IdentityID)
+			pr, queryErr := a.db.QueryContext(ctx, "SELECT permission,allowed FROM room_permissions WHERE room_id=? AND identity_id=?", id, s.Members[i].IdentityID)
+			if queryErr != nil {
+				return s, queryErr
+			}
 			for pr.Next() {
 				var c string
 				var allowed bool
-				_ = pr.Scan(&c, &allowed)
+				if e = pr.Scan(&c, &allowed); e != nil {
+					pr.Close()
+					return s, e
+				}
 				s.Members[i].Permissions[c] = allowed
+			}
+			if e = pr.Err(); e != nil {
+				pr.Close()
+				return s, e
 			}
 			pr.Close()
 			for _, c := range memberCapabilities {
@@ -213,15 +258,27 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 			}
 		}
 	}
-	q, _ := a.db.QueryContext(ctx, `SELECT q.id,q.position,m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,'') FROM room_queue_items q JOIN media_items m ON m.id=q.media_id WHERE q.room_id=? ORDER BY q.position`, id)
+	q, e := a.db.QueryContext(ctx, `SELECT q.id,q.position,m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,'') FROM room_queue_items q JOIN media_items m ON m.id=q.media_id WHERE q.room_id=? ORDER BY q.position`, id)
+	if e != nil {
+		return s, e
+	}
 	for q.Next() {
 		var x queueItem
-		_ = q.Scan(&x.ID, &x.Position, &x.Media.ID, &x.Media.ProviderID, &x.Media.Title, &x.Media.Thumbnail)
+		if e = q.Scan(&x.ID, &x.Position, &x.Media.ID, &x.Media.ProviderID, &x.Media.Title, &x.Media.Thumbnail); e != nil {
+			q.Close()
+			return s, e
+		}
 		s.Queue = append(s.Queue, x)
+	}
+	if e = q.Err(); e != nil {
+		q.Close()
+		return s, e
 	}
 	q.Close()
 	var mid, title, thumb, provider sql.NullString
-	_ = a.db.QueryRowContext(ctx, `SELECT p.status,p.position_seconds,p.revision,p.updated_at,m.id,m.provider_media_id,m.title,m.thumbnail_url FROM playback_states p LEFT JOIN media_items m ON m.id=p.current_media_id WHERE p.room_id=?`, id).Scan(&s.Playback.Status, &s.Playback.Position, &s.Playback.Revision, &s.Playback.UpdatedAt, &mid, &provider, &title, &thumb)
+	if e = a.db.QueryRowContext(ctx, `SELECT p.status,p.position_seconds,p.revision,p.updated_at,m.id,m.provider_media_id,m.title,m.thumbnail_url FROM playback_states p LEFT JOIN media_items m ON m.id=p.current_media_id WHERE p.room_id=?`, id).Scan(&s.Playback.Status, &s.Playback.Position, &s.Playback.Revision, &s.Playback.UpdatedAt, &mid, &provider, &title, &thumb); e != nil {
+		return s, e
+	}
 	if mid.Valid {
 		s.Playback.Media = &media{ID: mid.String, ProviderID: provider.String, Title: title.String, Thumbnail: thumb.String}
 	}
@@ -230,14 +287,26 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 			s.Playback.Position += time.Since(updated.UTC()).Seconds()
 		}
 	}
-	s.Revision = s.Playback.Revision
-	er, _ := a.db.QueryContext(ctx, `SELECT e.id,coalesce(e.actor_identity_id,''),coalesce(i.display_name,''),e.event_type,e.payload_json,e.created_at FROM room_events e LEFT JOIN identities i ON i.id=e.actor_identity_id WHERE e.room_id=? ORDER BY e.created_at DESC LIMIT 200`, id)
+	er, e := a.db.QueryContext(ctx, `SELECT e.id,coalesce(e.actor_identity_id,''),coalesce(i.display_name,''),e.event_type,e.payload_json,e.created_at FROM room_events e LEFT JOIN identities i ON i.id=e.actor_identity_id WHERE e.room_id=? ORDER BY e.created_at DESC LIMIT 200`, id)
+	if e != nil {
+		return s, e
+	}
 	for er.Next() {
 		var x event
 		var raw string
-		_ = er.Scan(&x.ID, &x.ActorID, &x.ActorName, &x.Type, &raw, &x.CreatedAt)
-		_ = json.Unmarshal([]byte(raw), &x.Payload)
+		if e = er.Scan(&x.ID, &x.ActorID, &x.ActorName, &x.Type, &raw, &x.CreatedAt); e != nil {
+			er.Close()
+			return s, e
+		}
+		if e = json.Unmarshal([]byte(raw), &x.Payload); e != nil {
+			er.Close()
+			return s, e
+		}
 		s.Events = append(s.Events, x)
+	}
+	if e = er.Err(); e != nil {
+		er.Close()
+		return s, e
 	}
 	er.Close()
 	sort.Slice(s.Events, func(i, j int) bool { return s.Events[i].CreatedAt < s.Events[j].CreatedAt })

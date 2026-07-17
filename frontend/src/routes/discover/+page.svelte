@@ -3,6 +3,7 @@
   type Room = { id: string; label: string; title: string; thumbnail: string; status: string; participants: number };
   let rooms: Room[] = [];
   let error = '';
+  let loading = true;
   onMount(async () => {
     try {
       const r = await fetch('/api/discover');
@@ -10,6 +11,8 @@
       rooms = await r.json();
     } catch (e) {
       error = e instanceof Error ? e.message : 'Discovery is unavailable.';
+    } finally {
+      loading = false;
     }
   });
 </script>
@@ -21,7 +24,12 @@
     <h1>See what’s playing</h1>
     <p>Controlled metadata only. Rooms have no editable titles, descriptions, or promotional text.</p>
   </header>
-  {#if error}<p class="error" role="alert">{error}</p>{:else if !rooms.length}<div class="empty panel">
+  {#if loading}<div class="empty panel" role="status">Loading active rooms…</div>{:else if error}<p
+      class="error"
+      role="alert"
+    >
+      {error}
+    </p>{:else if !rooms.length}<div class="empty panel">
       <span>🌱</span>
       <h2>It’s quiet here</h2>
       <p>No public rooms are active. Unlisted rooms never appear here.</p>
