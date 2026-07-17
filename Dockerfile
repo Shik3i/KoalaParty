@@ -15,7 +15,7 @@ RUN go mod download
 COPY backend/ ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/Shik3i/KoalaParty/backend/internal/app.Version=${VERSION} -X github.com/Shik3i/KoalaParty/backend/internal/app.Commit=${COMMIT} -X github.com/Shik3i/KoalaParty/backend/internal/app.BuildDate=${BUILD_DATE}" -o /koalaparty ./cmd/server
 
-FROM alpine:3.23
+FROM alpine:3.24
 RUN addgroup -S koala && adduser -S -G koala koala && mkdir -p /data /app/web && chown -R koala:koala /data /app
 COPY --from=backend /koalaparty /koalaparty
 COPY --from=frontend /src/frontend/build /app/web
