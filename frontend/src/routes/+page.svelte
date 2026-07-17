@@ -63,7 +63,7 @@
   <article><b>Shared player</b><span>Play, pause, seek, and stay together.</span></article>
   <article><b>Open queue</b><span>Everyone can add and arrange videos by default.</span></article>
   <article><b>Real privacy</b><span>No analytics scripts, ads, fingerprinting, or third-party fonts.</span></article>
-  <article><b>Open source</b><span>Self-host with Go, SQLite, Docker, and Caddy.</span></article>
+  <article><b>Public source</b><span>Self-host with Go, SQLite, Docker, and Caddy.</span></article>
 </section>
 
 <style>

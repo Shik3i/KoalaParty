@@ -12,6 +12,9 @@
     "test": "vitest",
     "test:e2e": "playwright test"
   },
+  "overrides": {
+    "cookie": "0.7.2"
+  },
   "devDependencies": {
     "@emnapi/core": "^1.11.2",
     "@emnapi/runtime": "^1.11.2",

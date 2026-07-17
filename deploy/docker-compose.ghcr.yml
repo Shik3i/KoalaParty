@@ -1,15 +1,15 @@
 services:
   koalaparty:
-    build: .
+    image: ghcr.io/shik3i/koalaparty:${KOALAPARTY_VERSION:-latest}
     restart: unless-stopped
     env_file:
       - path: .env
         required: false
     environment:
-      KOALAPARTY_ADDR: ${KOALAPARTY_ADDR:-:8080}
-      KOALAPARTY_DB: ${KOALAPARTY_DB:-/data/koalaparty.db}
-      KOALAPARTY_WEB_ROOT: ${KOALAPARTY_WEB_ROOT:-/app/web}
-      KOALAPARTY_TRUSTED_ORIGINS: ${KOALAPARTY_TRUSTED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+      KOALAPARTY_ADDR: :8080
+      KOALAPARTY_DB: /data/koalaparty.db
+      KOALAPARTY_WEB_ROOT: /app/web
+      KOALAPARTY_TRUSTED_ORIGINS: ${KOALAPARTY_TRUSTED_ORIGINS:-http://localhost:8080}
       KOALAPARTY_COOKIE_SECURE: ${KOALAPARTY_COOKIE_SECURE:-false}
       KOALAPARTY_SESSION_TTL: ${KOALAPARTY_SESSION_TTL:-168h}
       KOALAPARTY_ACTIVITY_MAX_AGE: ${KOALAPARTY_ACTIVITY_MAX_AGE:-720h}

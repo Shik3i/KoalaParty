@@ -8,6 +8,11 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		info := app.CurrentBuildInformation()
+		fmt.Printf("KoalaParty %s (commit %s, built %s)\n", info.Version, info.Commit, info.BuildDate)
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		if err := app.Healthcheck(); err != nil {
 			fmt.Fprintln(os.Stderr, err)

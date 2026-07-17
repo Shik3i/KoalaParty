@@ -1,0 +1,199 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.26.5"
+          cache-dependency-path: backend/go.sum
+
+      - name: Verify backend
+        working-directory: backend
+        run: test -z "$(gofmt -l .)" && go vet ./... && go test ./...
+
+      - name: Scan Go dependencies
+        working-directory: backend
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Verify release tag and changelog
+        run: node scripts/verify-release.mjs "$GITHUB_REF_NAME"
+
+      - name: Test release metadata tooling
+        run: node --test scripts/*.test.mjs
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Verify frontend
+        working-directory: frontend
+        run: npm run check && npm run lint && npm test -- --run && npm run build && npm audit --audit-level=high
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        working-directory: frontend
+        run: npm run test:e2e
+
+  image:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      image: ${{ steps.image.outputs.value }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Normalize image name
+        id: image
+        shell: bash
+        run: echo "value=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set build date
+        id: build-date
+        run: echo "value=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ${{ steps.image.outputs.value }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.build-date.outputs.value }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@78e6cbd37d0ac1a40113c04f2037dacf1ea3f12e # v4
+        with:
+          subject-name: ${{ steps.image.outputs.value }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  release:
+    needs: [verify, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+
+      - name: Create release notes
+        run: |
+          node scripts/verify-release.mjs "$GITHUB_REF_NAME" release-notes.md
+          cat >> release-notes.md <<EOF
+
+          ## Container image
+
+          \`docker pull ${{ needs.image.outputs.image }}:${GITHUB_REF_NAME#v}\`
+
+          Image digest: \`${{ needs.image.outputs.digest }}\`
+          EOF
+
+      - name: Package deployment bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="koalaparty-${GITHUB_REF_NAME}-deploy"
+          mkdir -p "release-assets/$bundle/deploy"
+          cp deploy/docker-compose.ghcr.yml "release-assets/$bundle/docker-compose.yml"
+          cp deploy/Caddyfile.example "release-assets/$bundle/deploy/Caddyfile.example"
+          cp .env.example "release-assets/$bundle/.env.example"
+          sed -i "s/^KOALAPARTY_VERSION=.*/KOALAPARTY_VERSION=${GITHUB_REF_NAME#v}/" "release-assets/$bundle/.env.example"
+          cp README.md CHANGELOG.md SECURITY.md "release-assets/$bundle/"
+          cp -r docs "release-assets/$bundle/docs"
+          tar -czf "release-assets/$bundle.tar.gz" -C release-assets "$bundle"
+          (cd release-assets && zip -qr "$bundle.zip" "$bundle")
+          rm -rf "release-assets/$bundle"
+          (cd release-assets && sha256sum "$bundle.tar.gz" "$bundle.zip" > SHA256SUMS)
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@c12583777ecdfd3be55c69cf75464299dc01057e # v3
+        with:
+          name: KoalaParty ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false
+          make_latest: true

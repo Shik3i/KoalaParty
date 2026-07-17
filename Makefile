@@ -1,4 +1,4 @@
-.PHONY: dev backend frontend test verify build docker
+.PHONY: dev backend frontend test verify build docker release-check
 
 dev:
 	docker compose up --build
@@ -16,6 +16,7 @@ test:
 verify:
 	cd backend && gofmt -w . && go vet ./... && go test ./...
 	cd frontend && npm run check && npm run lint && npm test -- --run && npm run build
+	node --test scripts/*.test.mjs
 
 build:
 	cd frontend && npm run build
@@ -24,3 +25,5 @@ build:
 docker:
 	docker compose build
 
+release-check:
+	node scripts/verify-release.mjs $(TAG)

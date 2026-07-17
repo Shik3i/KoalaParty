@@ -82,7 +82,11 @@ func Run() error {
 	mux := http.NewServeMux()
 	authLimiter := newRateLimiter(20, time.Minute)
 	commandLimiter := newRateLimiter(180, time.Minute)
-	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
+		info := CurrentBuildInformation()
+		writeJSON(w, 200, map[string]string{"status": "ok", "version": info.Version})
+	})
+	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, CurrentBuildInformation()) })
 	mux.HandleFunc("GET /api/ready", func(w http.ResponseWriter, _ *http.Request) {
 		if e := db.Ping(); e != nil {
 			problem(w, 503, "not_ready", "Database unavailable.")
@@ -119,7 +123,7 @@ func Run() error {
 		defer cancel()
 		_ = srv.Shutdown(ctx)
 	}()
-	fmt.Printf(`{"level":"info","message":"server started","addr":%q}`+"\n", srv.Addr)
+	fmt.Printf(`{"level":"info","message":"server started","addr":%q,"version":%q,"commit":%q}`+"\n", srv.Addr, Version, Commit)
 	e = srv.ListenAndServe()
 	if e == http.ErrServerClosed {
 		return nil
