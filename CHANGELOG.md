@@ -20,6 +20,7 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 - YouTube thumbnails no longer contact third-party hosts before explicit playback consent.
 - Public room discovery is opt-in and disabled by default for early-beta deployments.
 - Production mode now rejects insecure cookies, non-HTTPS origins, malformed durations, booleans, proxy networks, and retention values instead of silently accepting unsafe fallbacks.
+- Official deployment examples now use `party.koalastuff.net` and the shared external `caddy_net` convention used by the other Koala services.
 
 ### Fixed
 

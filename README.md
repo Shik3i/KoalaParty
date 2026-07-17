@@ -40,7 +40,7 @@ docker pull ghcr.io/shik3i/koalaparty:0.1.0
 docker compose -f deploy/docker-compose.ghcr.yml up -d
 ```
 
-Before public deployment, pin an exact image version, replace `party.example.com`, verify `KOALAPARTY_TRUSTED_PROXIES` against the container's immediate proxy peer, and configure Caddy or another TLS reverse proxy. Public room discovery remains disabled until `KOALAPARTY_PUBLIC_ROOMS=true` is explicitly selected. See [deployment](docs/deployment.md).
+The official deployment is preconfigured for `https://party.koalastuff.net` and the shared external `caddy_net` used by the other Koala services. Pin an exact image version and verify `KOALAPARTY_TRUSTED_PROXIES` against that Docker network. Public room discovery remains disabled until `KOALAPARTY_PUBLIC_ROOMS=true` is explicitly selected. See [deployment](docs/deployment.md).
 
 ## Verification
 

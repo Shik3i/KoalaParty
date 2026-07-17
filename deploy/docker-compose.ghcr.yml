@@ -1,12 +1,14 @@
 services:
   koalaparty:
     image: ghcr.io/shik3i/koalaparty:${KOALAPARTY_VERSION:?Set KOALAPARTY_VERSION to an exact release such as 0.1.0}
+    container_name: KoalaParty
     restart: unless-stopped
     env_file:
       - path: .env
         required: false
     environment:
       KOALAPARTY_ADDR: :8080
+      TZ: Europe/Berlin
       KOALAPARTY_DB: /data/koalaparty.db
       KOALAPARTY_WEB_ROOT: /app/web
       KOALAPARTY_TRUSTED_ORIGINS: ${KOALAPARTY_TRUSTED_ORIGINS:?Set the exact public HTTPS origin}
@@ -18,10 +20,10 @@ services:
       KOALAPARTY_ACTIVITY_MAX_AGE: ${KOALAPARTY_ACTIVITY_MAX_AGE:-720h}
       KOALAPARTY_ACTIVITY_MAX_EVENTS: ${KOALAPARTY_ACTIVITY_MAX_EVENTS:-200}
       KOALAPARTY_ROOM_MAX_IDLE: ${KOALAPARTY_ROOM_MAX_IDLE:-8760h}
-    ports:
-      - "127.0.0.1:8080:8080"
     volumes:
       - koalaparty-data:/data
+    networks:
+      - caddy_net
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -45,3 +47,8 @@ services:
 
 volumes:
   koalaparty-data:
+
+networks:
+  caddy_net:
+    external: true
+    name: caddy_net

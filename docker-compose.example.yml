@@ -2,18 +2,20 @@
 services:
   koalaparty:
     image: ghcr.io/shik3i/koalaparty:${KOALAPARTY_VERSION:?Set an exact release version}
+    container_name: KoalaParty
     restart: unless-stopped
     env_file:
       - path: .env
         required: false
     environment:
       KOALAPARTY_ADDR: :8080
+      TZ: Europe/Berlin
       KOALAPARTY_DB: /data/koalaparty.db
       KOALAPARTY_WEB_ROOT: /app/web
-    ports:
-      - "127.0.0.1:8080:8080"
     volumes:
       - koalaparty-data:/data
+    networks:
+      - caddy_net
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -37,3 +39,8 @@ services:
 
 volumes:
   koalaparty-data:
+
+networks:
+  caddy_net:
+    external: true
+    name: caddy_net

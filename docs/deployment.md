@@ -4,16 +4,17 @@
 
 1. Copy `docker-compose.example.yml` and `.env.example` to the deployment host.
 2. Pin `KOALAPARTY_VERSION` to the full released version, never `latest`.
-3. Replace `party.example.com` in `.env` and `deploy/Caddyfile.example` with the same exact HTTPS hostname.
-4. Keep `KOALAPARTY_PRODUCTION=true`, `KOALAPARTY_COOKIE_SECURE=true`, and `KOALAPARTY_PUBLIC_ROOMS=false` for the early beta.
-5. Confirm the backend's immediate proxy address and restrict `KOALAPARTY_TRUSTED_PROXIES` to that IP or Docker subnet. Forwarding headers from every other peer are ignored.
-6. Configure DNS and let Caddy terminate TLS. Do not expose the backend on a public non-TLS port.
-7. Start with `docker compose pull && docker compose up -d`.
-8. Verify `/api/health`, `/api/ready`, `/api/version`, WebSocket upgrades, the persistent volume, and the manual two-client YouTube test.
+3. Use the existing external `caddy_net` shared by the other Koala services. The production Compose example deliberately publishes no host port.
+4. Add `deploy/Caddyfile.example` to the central Caddy configuration. It serves `party.koalastuff.net` and proxies to `KoalaParty:8080` on `caddy_net`.
+5. Keep `KOALAPARTY_PRODUCTION=true`, `KOALAPARTY_COOKIE_SECURE=true`, and `KOALAPARTY_PUBLIC_ROOMS=false` for the early beta.
+6. Confirm the backend's immediate proxy address and restrict `KOALAPARTY_TRUSTED_PROXIES` to that IP or Docker subnet. Forwarding headers from every other peer are ignored.
+7. Point the `party.koalastuff.net` DNS record at the existing Koala host and let Caddy obtain TLS automatically.
+8. Start with `docker compose pull && docker compose up -d`.
+9. Verify `/api/health`, `/api/ready`, `/api/version`, WebSocket upgrades, the persistent volume, and the manual two-client YouTube test through `https://party.koalastuff.net`.
 
 Production mode fails before opening the database when secure cookies, exact HTTPS origins, durations, booleans, retention values, or trusted proxy networks are invalid. The example container binds only to loopback, runs without Linux capabilities, uses a read-only root filesystem, limits processes/memory/CPU, and rotates runtime logs.
 
-`KOALAPARTY_TRUSTED_PROXIES=172.16.0.0/12` matches the common private Docker bridge range used when host Caddy connects through the published loopback port. Narrow it after observing the actual immediate peer. Never use `0.0.0.0/0` or `::/0`.
+`KOALAPARTY_TRUSTED_PROXIES=172.16.0.0/12` matches the common private Docker network range used by the shared Caddy setup. Narrow it to the actual `caddy_net` subnet after observing the immediate peer. Never use `0.0.0.0/0` or `::/0`.
 
 ## Backups and restore drills
 
@@ -37,7 +38,7 @@ For a real restore: stop the service, retain the live database and its `-wal`/`-
 
 ## Moderation and privacy operations
 
-These commands are available only to someone with shell access to the deployment host:
+These commands are available only to Timo Schmidt as operator of the official KoalaParty service, or to the respective host of an independent deployment. There is no additional in-app "operator" account to create:
 
 ```sh
 docker compose exec koalaparty /koalaparty operator reports list
@@ -49,7 +50,7 @@ docker compose exec koalaparty /koalaparty operator delete-account USERNAME
 
 `reports delist` resolves the report and immediately changes the room to unlisted. Account deletion revokes sessions and anonymous recovery, removes account and friendship data, unlinks/anonymizes retained identities, and preserves referential integrity for durable room history. Record the request, identity verification, command result, and completion timestamp outside application data.
 
-Enable `KOALAPARTY_PUBLIC_ROOMS=true` only after assigning an operator who reviews reports and can respond to abuse and deletion requests.
+Enable `KOALAPARTY_PUBLIC_ROOMS=true` only when Timo actively reviews reports and can respond to abuse and deletion requests. No separate KoalaParty role or account is required.
 
 ## Monitoring and rollback
 

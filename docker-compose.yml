@@ -1,12 +1,14 @@
 services:
   koalaparty:
     build: .
+    container_name: KoalaParty
     restart: unless-stopped
     env_file:
       - path: .env
         required: false
     environment:
       KOALAPARTY_ADDR: ${KOALAPARTY_ADDR:-:8080}
+      TZ: ${TZ:-Europe/Berlin}
       KOALAPARTY_DB: ${KOALAPARTY_DB:-/data/koalaparty.db}
       KOALAPARTY_WEB_ROOT: ${KOALAPARTY_WEB_ROOT:-/app/web}
       KOALAPARTY_TRUSTED_ORIGINS: ${KOALAPARTY_TRUSTED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
