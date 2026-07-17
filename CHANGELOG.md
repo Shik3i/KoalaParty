@@ -4,6 +4,13 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-18
+
+### Changed
+
+- Upgraded Docker build base image to Node.js 26-alpine.
+- Upgraded GitHub Actions softprops/action-gh-release to 3d0d9888cb7fd7b750713d6e236d1fcb99157228.
+
 ## [0.2.0] - 2026-07-17
 
 ### Added
