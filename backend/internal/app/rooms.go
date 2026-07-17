@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 var youtubeID = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
@@ -33,6 +34,7 @@ type member struct {
 	IdentityID  string          `json:"identityId"`
 	DisplayName string          `json:"displayName"`
 	Role        string          `json:"role"`
+	Active      bool            `json:"active"`
 	Permissions map[string]bool `json:"permissions"`
 }
 type playback struct {
@@ -188,12 +190,13 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 		m.Permissions = map[string]bool{}
 		_ = rows.Scan(&m.IdentityID, &m.DisplayName, &m.Role)
 		for _, c := range memberCapabilities {
-			m.Permissions[c] = m.Role != "member"
+			m.Permissions[c] = true
 		}
 		s.Members = append(s.Members, m)
 	}
 	rows.Close()
 	for i := range s.Members {
+		s.Members[i].Active = a.hub.isActive(id, s.Members[i].IdentityID)
 		if s.Members[i].Role == "member" {
 			pr, _ := a.db.QueryContext(ctx, "SELECT permission,allowed FROM room_permissions WHERE room_id=? AND identity_id=?", id, s.Members[i].IdentityID)
 			for pr.Next() {
@@ -221,6 +224,11 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 	_ = a.db.QueryRowContext(ctx, `SELECT p.status,p.position_seconds,p.revision,p.updated_at,m.id,m.provider_media_id,m.title,m.thumbnail_url FROM playback_states p LEFT JOIN media_items m ON m.id=p.current_media_id WHERE p.room_id=?`, id).Scan(&s.Playback.Status, &s.Playback.Position, &s.Playback.Revision, &s.Playback.UpdatedAt, &mid, &provider, &title, &thumb)
 	if mid.Valid {
 		s.Playback.Media = &media{ID: mid.String, ProviderID: provider.String, Title: title.String, Thumbnail: thumb.String}
+	}
+	if s.Playback.Status == "playing" {
+		if updated, err := time.Parse("2006-01-02 15:04:05", s.Playback.UpdatedAt); err == nil {
+			s.Playback.Position += time.Since(updated.UTC()).Seconds()
+		}
 	}
 	s.Revision = s.Playback.Revision
 	er, _ := a.db.QueryContext(ctx, `SELECT e.id,coalesce(e.actor_identity_id,''),coalesce(i.display_name,''),e.event_type,e.payload_json,e.created_at FROM room_events e LEFT JOIN identities i ON i.id=e.actor_identity_id WHERE e.room_id=? ORDER BY e.created_at DESC LIMIT 200`, id)

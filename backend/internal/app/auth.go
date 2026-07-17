@@ -52,17 +52,20 @@ func hashSecret(secret string) (string, error) {
 	return fmt.Sprintf("$argon2id$v=19$m=65536,t=1,p=4$%s$%s", base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(h)), nil
 }
 func verifySecret(encoded, secret string) bool {
-	var m, t uint32
-	var p uint8
-	var salt64, hash64 string
-	if _, e := fmt.Sscanf(encoded, "$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", &m, &t, &p, &salt64, &hash64); e != nil {
+	parts := strings.Split(encoded, "$")
+	if len(parts) != 6 || parts[1] != "argon2id" || parts[2] != "v=19" {
 		return false
 	}
-	salt, e := base64.RawStdEncoding.DecodeString(salt64)
+	var m, t uint32
+	var p uint8
+	if _, e := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &m, &t, &p); e != nil {
+		return false
+	}
+	salt, e := base64.RawStdEncoding.DecodeString(parts[4])
 	if e != nil {
 		return false
 	}
-	expected, e := base64.RawStdEncoding.DecodeString(hash64)
+	expected, e := base64.RawStdEncoding.DecodeString(parts[5])
 	if e != nil {
 		return false
 	}

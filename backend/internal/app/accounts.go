@@ -28,17 +28,20 @@ func hashPassword(password string) (string, error) {
 	return fmt.Sprintf("$argon2id$v=19$m=65536,t=2,p=4$%s$%s", base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(h)), nil
 }
 func verifyPassword(encoded, password string) bool {
-	var m, t uint32
-	var p uint8
-	var s, h string
-	if _, e := fmt.Sscanf(encoded, "$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", &m, &t, &p, &s, &h); e != nil {
+	parts := strings.Split(encoded, "$")
+	if len(parts) != 6 || parts[1] != "argon2id" || parts[2] != "v=19" {
 		return false
 	}
-	salt, e := base64.RawStdEncoding.DecodeString(s)
+	var m, t uint32
+	var p uint8
+	if _, e := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &m, &t, &p); e != nil {
+		return false
+	}
+	salt, e := base64.RawStdEncoding.DecodeString(parts[4])
 	if e != nil {
 		return false
 	}
-	expected, e := base64.RawStdEncoding.DecodeString(h)
+	expected, e := base64.RawStdEncoding.DecodeString(parts[5])
 	if e != nil {
 		return false
 	}

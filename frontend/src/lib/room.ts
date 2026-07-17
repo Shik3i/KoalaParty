@@ -14,6 +14,7 @@ export interface Member {
   identityId: string;
   displayName: string;
   role: Role;
+  active: boolean;
   permissions: Record<string, boolean>;
 }
 export interface Activity {

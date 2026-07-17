@@ -238,6 +238,20 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		}
 		eventType = map[bool]string{true: "member.banned", false: "member.kicked"}[c.Type == "member.ban"]
 		payload["identityId"] = in.IdentityID
+	case "member.unban":
+		var in struct {
+			IdentityID string `json:"identityId"`
+		}
+		_ = json.Unmarshal(c.Payload, &in)
+		res, updateErr := tx.Exec("UPDATE room_bans SET revoked_at=CURRENT_TIMESTAMP,revoked_by_identity_id=? WHERE room_id=? AND identity_id=? AND revoked_at IS NULL", p.IdentityID, room, in.IdentityID)
+		if updateErr != nil {
+			return snapshot{}, updateErr
+		}
+		if changed, _ := res.RowsAffected(); changed == 0 {
+			return snapshot{}, errors.New("active ban not found")
+		}
+		eventType = "member.unbanned"
+		payload["identityId"] = in.IdentityID
 	case "room.visibility":
 		var in struct {
 			Visibility string `json:"visibility"`
@@ -267,6 +281,11 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	_, _ = tx.Exec("UPDATE rooms SET last_active_at=CURRENT_TIMESTAMP WHERE id=?", room)
 	if e = tx.Commit(); e != nil {
 		return snapshot{}, e
+	}
+	if c.Type == "member.kick" || c.Type == "member.ban" {
+		if id, ok := payload["identityId"].(string); ok {
+			a.hub.disconnect(room, id)
+		}
 	}
 	return a.snapshot(ctx, room, p.IdentityID)
 }
