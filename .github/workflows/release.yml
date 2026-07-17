@@ -136,7 +136,7 @@ jobs:
           sbom: true
 
       - name: Attest image provenance
-        uses: actions/attest-build-provenance@78e6cbd37d0ac1a40113c04f2037dacf1ea3f12e # v4
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
         with:
           subject-name: ${{ steps.image.outputs.value }}
           subject-digest: ${{ steps.build.outputs.digest }}
