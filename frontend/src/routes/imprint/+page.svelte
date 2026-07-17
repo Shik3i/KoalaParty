@@ -34,7 +34,10 @@
     <p>
       KoalaParty is a free, non-commercial hobby project for synchronized YouTube rooms. Its source code is publicly
       available on <a href="https://github.com/Shik3i/KoalaParty" target="_blank" rel="noopener noreferrer">GitHub</a>.
-      No software license has currently been selected; normal copyright restrictions apply.
+      The source code is free and open-source software licensed under the
+      <a href="https://github.com/Shik3i/KoalaParty/blob/main/LICENSE" target="_blank" rel="noopener noreferrer"
+        >MIT License</a
+      >.
     </p>
     <p>
       Details about hosting, stored room and account data, YouTube, retention and data-subject rights are provided in

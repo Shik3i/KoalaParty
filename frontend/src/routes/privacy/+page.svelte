@@ -94,9 +94,9 @@
   <section>
     <h2>7. YouTube</h2>
     <p>
-      KoalaParty uses locally hosted interface assets until YouTube content is needed. A room containing videos may load
-      thumbnails from <code>i.ytimg.com</code>. The YouTube iframe API and privacy-enhanced player from
-      <code>youtube.com</code> and <code>youtube-nocookie.com</code> load only after you select “Start watching”.
+      KoalaParty uses locally hosted interface assets before playback consent. YouTube thumbnails, the iframe API and
+      the privacy-enhanced player from <code>i.ytimg.com</code>, <code>youtube.com</code> and
+      <code>youtube-nocookie.com</code> load only after you select “Start watching”.
     </p>
     <p>
       Google or YouTube may then receive your IP address, device and browser information, referrer, request time and

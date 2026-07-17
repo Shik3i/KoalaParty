@@ -22,9 +22,10 @@ describe('legal and KoalaSync cross-promotion', () => {
     expect(promo).not.toMatch(/<img[^>]+src=["']https?:/);
   });
 
-  it('states the current copyright and trademark position', () => {
+  it('states the MIT license and current trademark position', () => {
     const imprint = source('src/routes/imprint/+page.svelte');
-    expect(imprint).toContain('No software license has currently been selected');
+    expect(imprint).toContain('MIT License');
+    expect(source('../LICENSE')).toContain('Permission is hereby granted, free of charge');
     expect(imprint).toMatch(/All third-party trademarks\s+belong to their respective owners/);
   });
 });

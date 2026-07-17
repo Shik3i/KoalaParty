@@ -247,7 +247,10 @@
             >
           </form>
           {#if room.playback.media}<div class="now">
-              <img src={room.playback.media.thumbnail} alt="" />
+              {#if watching}<img src={room.playback.media.thumbnail} alt="" />{:else}<span
+                  class="thumbnail-placeholder"
+                  aria-hidden="true">▶</span
+                >{/if}
               <div><small>Now playing</small><b>{room.playback.media.title}</b></div>
             </div>{/if}
         </div>
@@ -290,7 +293,10 @@
                   ondragover={(e) => e.preventDefault()}
                   ondrop={() => drop(item.id)}
                 >
-                  <span class="handle" aria-hidden="true">⠿</span><img src={item.media.thumbnail} alt="" />
+                  <span class="handle" aria-hidden="true">⠿</span>{#if watching}<img
+                      src={item.media.thumbnail}
+                      alt=""
+                    />{:else}<span class="thumbnail-placeholder" aria-hidden="true">▶</span>{/if}
                   <div><small>{i + 1} · YouTube</small><b>{item.media.title}</b></div>
                   <button
                     class="ghost icon"
@@ -481,7 +487,8 @@
     background: var(--activity-background);
     border-radius: var(--radius-sm);
   }
-  .now img {
+  .now img,
+  .now .thumbnail-placeholder {
     width: 75px;
     aspect-ratio: 16/9;
     object-fit: cover;
@@ -535,11 +542,19 @@
   .members li:hover {
     background: var(--surface-hover);
   }
-  .queue img {
+  .queue img,
+  .queue .thumbnail-placeholder {
     width: 70px;
     aspect-ratio: 16/9;
     object-fit: cover;
     border-radius: 5px;
+  }
+  .thumbnail-placeholder {
+    flex: 0 0 auto;
+    display: grid;
+    place-content: center;
+    color: var(--text-muted);
+    background: var(--player-background);
   }
   .queue li > div,
   .members li > div {

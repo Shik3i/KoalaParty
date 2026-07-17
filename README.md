@@ -3,6 +3,7 @@
 [![CI](https://github.com/Shik3i/KoalaParty/actions/workflows/ci.yml/badge.svg)](https://github.com/Shik3i/KoalaParty/actions/workflows/ci.yml)
 [![Release](https://github.com/Shik3i/KoalaParty/actions/workflows/release.yml/badge.svg)](https://github.com/Shik3i/KoalaParty/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/Shik3i/KoalaParty)](https://github.com/Shik3i/KoalaParty/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 Privacy-first shared YouTube rooms. Synchronized playback and a collaborative queue without advertising, analytics, fingerprinting, or a required account for unlisted rooms.
 
@@ -17,7 +18,7 @@ Privacy-first shared YouTube rooms. Synchronized playback and a collaborative qu
 
 ## Quick start
 
-Requirements: Go 1.26.5, Node.js 24, npm 11, and Docker.
+Requirements: Go 1.26.5, Node.js 24 LTS, npm 12, and Docker.
 
 ```sh
 git clone https://github.com/Shik3i/KoalaParty.git
@@ -66,6 +67,6 @@ CI additionally runs dependency scanning, a frontend audit, Docker build/health 
 
 Stable tags matching `vX.Y.Z` publish a multi-architecture GHCR image with SBOM, provenance, and attestation, plus checksummed deployment bundles and a GitHub Release generated from the matching changelog section.
 
-## License status
+## License
 
-No software license has been selected yet. The source is publicly readable, but normal copyright restrictions apply until the project owner selects and adds a license.
+KoalaParty is free and open-source software licensed under the [MIT License](LICENSE).

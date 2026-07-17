@@ -9,11 +9,13 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 - Full operator, hosting, retention, third-party, GDPR-rights, copyright, and self-hosting notices on dedicated privacy and imprint pages.
 - Responsive KoalaSync cross-promotion with locally bundled Netflix, YouTube, Twitch, Prime Video, Disney+, Jellyfin, and Emby marks.
 - Unit and browser coverage for legal disclosures, local platform artwork, external links, and responsive rendering.
+- MIT License for open-source use, modification, distribution, and self-hosting.
 
 ### Changed
 
 - YouTube playback now presents an explicit third-party consent notice before loading the privacy-enhanced player.
 - The footer links directly to Privacy, Imprint, GitHub, and the KoalaSync landing page.
+- YouTube thumbnails no longer contact third-party hosts before explicit playback consent.
 
 ## [0.1.0] - 2026-07-17
 
@@ -49,4 +51,4 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 - Password recovery, MFA, passkeys, account deletion, anonymous identity recovery, and session-management UI are not available yet.
 - SQLite and the in-memory WebSocket hub target a single application instance; operators must perform WAL-aware backups.
 - Public-room moderation reports require operator-side review tooling outside the current UI.
-- No software license has been selected; normal copyright restrictions currently apply.
+- The v0.1.0 release tag predates the MIT license added on the main branch.

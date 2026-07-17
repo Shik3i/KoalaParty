@@ -1,7 +1,7 @@
 # Known limitations and extension points
 
 - One backend instance and an in-process WebSocket hub. A future event-bus adapter is required before horizontal scaling.
-- YouTube is the only media provider. Metadata uses the submitted fallback title and standard thumbnail URL; no tracking metadata API is called.
+- YouTube is the only media provider. Metadata uses the submitted fallback title and standard thumbnail URL; thumbnails and the player load only after explicit playback consent, and no tracking metadata API is called.
 - No chat. The activity UI reserves a future tab; chat should use a separate `chat_messages` table.
 - No email or password recovery. Anonymous identity loss is intentionally unrecoverable until linked to an account.
 - No ownership transfer or permanent room deletion UI in this release.

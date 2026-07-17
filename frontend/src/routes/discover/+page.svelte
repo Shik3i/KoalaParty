@@ -35,7 +35,7 @@
       <p>No public rooms are active. Unlisted rooms never appear here.</p>
     </div>{:else}<div class="grid">
       {#each rooms as room}<article class="panel">
-          {#if room.thumbnail}<img src={room.thumbnail} alt="" />{/if}
+          <div class="thumbnail-placeholder" aria-hidden="true"><span>▶</span><small>YouTube</small></div>
           <div>
             <div class="row"><b>{room.label}</b><span class="pill">{room.status}</span></div>
             <p>{room.title || 'Waiting for a video'}</p>
@@ -69,10 +69,18 @@
   .grid article {
     overflow: hidden;
   }
-  .grid img {
+  .thumbnail-placeholder {
     width: 100%;
     aspect-ratio: 16/9;
-    object-fit: cover;
+    display: grid;
+    place-content: center;
+    gap: 0.35rem;
+    text-align: center;
+    color: var(--text-muted);
+    background: var(--player-background);
+  }
+  .thumbnail-placeholder span {
+    font-size: 1.8rem;
   }
   .grid article > div {
     padding: 1rem;
