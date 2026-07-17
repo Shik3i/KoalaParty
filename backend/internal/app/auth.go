@@ -99,6 +99,10 @@ func (a *application) exchangeIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = a.db.Exec("UPDATE identities SET display_name=?,last_seen_at=CURRENT_TIMESTAMP WHERE id=?", in.DisplayName, in.ID)
+	if current, authErr := a.authenticate(r); authErr == nil && current.IdentityID == in.ID {
+		writeJSON(w, 200, current)
+		return
+	}
 	a.issueSession(w, r, in.ID)
 }
 

@@ -36,6 +36,10 @@ export interface Snapshot {
   events: Activity[];
   revision: number;
 }
+export function currentPlaybackPosition(playback: Snapshot['playback'], receivedAt: number, now = Date.now()): number {
+  if (playback.status !== 'playing') return playback.position;
+  return playback.position + Math.max(0, now - receivedAt) / 1000;
+}
 export function parseYouTube(input: string): string | null {
   const value = input.trim();
   if (/^[A-Za-z0-9_-]{11}$/.test(value)) return value;

@@ -3,9 +3,10 @@
   import { page } from '$app/state';
   import { api, establish, websocketURL } from '$lib/api';
   import YouTubePlayer from '$lib/YouTubePlayer.svelte';
-  import { formatActivity, parseYouTube, type Snapshot, type Member } from '$lib/room';
+  import { currentPlaybackPosition, formatActivity, parseYouTube, type Snapshot, type Member } from '$lib/room';
   const roomId = (page.params.roomId ?? '').toUpperCase();
   let room: Snapshot | null = null;
+  let roomReceivedAt = Date.now();
   let error = '';
   let notice = '';
   let connected = false;
@@ -20,10 +21,14 @@
     return !!m && (m.role === 'owner' || m.role === 'admin' || m.permissions[cap] !== false);
   };
   const manages = () => me()?.role === 'owner' || me()?.role === 'admin';
+  function updateRoom(next: Snapshot) {
+    room = next;
+    roomReceivedAt = Date.now();
+  }
   onMount(async () => {
     try {
       await establish();
-      room = await api(`/api/rooms/${roomId}`);
+      updateRoom(await api(`/api/rooms/${roomId}`));
       connect();
     } catch (e) {
       error = e instanceof Error ? e.message : 'Could not join room.';
@@ -42,7 +47,7 @@
     };
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      if (data.type === 'snapshot') room = data.payload;
+      if (data.type === 'snapshot') updateRoom(data.payload);
       else if (data.type === 'error') notice = data.message || 'The server denied that action.';
     };
   }
@@ -50,15 +55,17 @@
     if (!room) return;
     notice = '';
     try {
-      room = await api(`/api/rooms/${roomId}/commands`, {
-        method: 'POST',
-        body: JSON.stringify({
-          type,
-          requestId: crypto.randomUUID(),
-          expectedRevision: room.playback.revision,
-          payload,
+      updateRoom(
+        await api(`/api/rooms/${roomId}/commands`, {
+          method: 'POST',
+          body: JSON.stringify({
+            type,
+            requestId: crypto.randomUUID(),
+            expectedRevision: room.playback.revision,
+            payload,
+          }),
         }),
-      });
+      );
     } catch (e) {
       notice = e instanceof Error ? e.message : 'Action failed.';
     }
@@ -147,7 +154,7 @@
             <button
               onclick={() =>
                 command(room!.playback.status === 'playing' ? 'player.pause' : 'player.play', {
-                  position: room!.playback.position,
+                  position: currentPlaybackPosition(room!.playback, roomReceivedAt),
                 })}
               disabled={!can('playback.play_pause')}>{room.playback.status === 'playing' ? 'Pause' : 'Play'}</button
             ><label class="seek"

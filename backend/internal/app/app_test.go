@@ -72,6 +72,32 @@ func TestIdentityCreationAuthenticationAndRejection(t *testing.T) {
 		t.Fatalf("invalid secret accepted: %d", w.Code)
 	}
 }
+
+func TestIdentityExchangeReusesMatchingSession(t *testing.T) {
+	a := testApp(t)
+	id := "123e4567-e89b-42d3-a456-426614174005"
+	secret := strings.Repeat("e", 43)
+	cookie, first := exchange(t, a, id, secret)
+	body, _ := json.Marshal(identityRequest{ID: id, Secret: secret, DisplayName: "Calm Koala"})
+	r := httptest.NewRequest("POST", "/api/identity/exchange", bytes.NewReader(body))
+	r.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	a.exchangeIdentity(w, r)
+	if w.Code != 200 {
+		t.Fatalf("repeat exchange: %d %s", w.Code, w.Body.String())
+	}
+	var second principal
+	_ = json.Unmarshal(w.Body.Bytes(), &second)
+	if second.CSRF != first.CSRF || len(w.Result().Cookies()) != 0 {
+		t.Fatal("matching session was rotated")
+	}
+	var sessions int
+	_ = a.db.QueryRow("SELECT count(*) FROM sessions WHERE identity_id=?", id).Scan(&sessions)
+	if sessions != 1 {
+		t.Fatalf("found %d sessions, want 1", sessions)
+	}
+}
+
 func TestRoomPersistenceAndOwnerProtection(t *testing.T) {
 	a := testApp(t)
 	ownerCookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174001", strings.Repeat("a", 43))
