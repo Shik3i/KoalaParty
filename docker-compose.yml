@@ -11,6 +11,9 @@ services:
       KOALAPARTY_WEB_ROOT: ${KOALAPARTY_WEB_ROOT:-/app/web}
       KOALAPARTY_TRUSTED_ORIGINS: ${KOALAPARTY_TRUSTED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
       KOALAPARTY_COOKIE_SECURE: ${KOALAPARTY_COOKIE_SECURE:-false}
+      KOALAPARTY_PRODUCTION: ${KOALAPARTY_PRODUCTION:-false}
+      KOALAPARTY_TRUSTED_PROXIES: ${KOALAPARTY_TRUSTED_PROXIES:-172.16.0.0/12}
+      KOALAPARTY_PUBLIC_ROOMS: ${KOALAPARTY_PUBLIC_ROOMS:-false}
       KOALAPARTY_SESSION_TTL: ${KOALAPARTY_SESSION_TTL:-168h}
       KOALAPARTY_ACTIVITY_MAX_AGE: ${KOALAPARTY_ACTIVITY_MAX_AGE:-720h}
       KOALAPARTY_ACTIVITY_MAX_EVENTS: ${KOALAPARTY_ACTIVITY_MAX_EVENTS:-200}
@@ -19,6 +22,21 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - koalaparty-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 100
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     healthcheck:
       test: ["CMD", "/koalaparty", "healthcheck"]
       interval: 15s

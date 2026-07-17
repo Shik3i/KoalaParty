@@ -35,6 +35,7 @@ export interface Snapshot {
   playback: { media: Media | null; status: string; position: number; revision: number; updatedAt: string };
   events: Activity[];
   revision: number;
+  publicRoomsEnabled: boolean;
 }
 export function currentPlaybackPosition(playback: Snapshot['playback'], receivedAt: number, now = Date.now()): number {
   if (playback.status !== 'playing') return playback.position;

@@ -175,9 +175,9 @@
               value={room.visibility}
               disabled={commandPending}
               onchange={(e) => command('room.visibility', { visibility: e.currentTarget.value })}
-              ><option value="unlisted">Unlisted</option><option value="public">Public</option><option value="private"
-                >Private</option
-              ><option value="friends_only">Friends only</option></select
+              ><option value="unlisted">Unlisted</option>{#if room.publicRoomsEnabled}<option value="public"
+                  >Public</option
+                >{/if}<option value="private">Private</option><option value="friends_only">Friends only</option></select
             ></label
           >{/if}
       </div>

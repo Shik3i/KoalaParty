@@ -16,6 +16,7 @@ KoalaParty/
 ├── scripts/                 Release metadata validation and its unit tests
 ├── Dockerfile               Reproducible frontend/backend production image
 ├── docker-compose.yml       Local build-and-run stack
+├── docker-compose.example.yml Hardened pinned-image deployment example
 ├── CHANGELOG.md             Release notes and unreleased changes
 └── Makefile                 Common development and verification commands
 ```

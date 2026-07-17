@@ -238,6 +238,10 @@ func (a *application) friendAction(w http.ResponseWriter, r *http.Request, p pri
 	w.WriteHeader(204)
 }
 func (a *application) discover(w http.ResponseWriter, r *http.Request) {
+	if !a.publicRooms {
+		problem(w, 404, "public_rooms_disabled", "Public room discovery is disabled during the early beta.")
+		return
+	}
 	rows, e := a.db.Query(`SELECT r.id,coalesce(m.title,''),coalesce(m.thumbnail_url,''),p.status FROM rooms r JOIN playback_states p ON p.room_id=r.id LEFT JOIN media_items m ON m.id=p.current_media_id WHERE r.visibility='public' AND r.deleted_at IS NULL ORDER BY r.last_active_at DESC LIMIT 50`)
 	if e != nil {
 		problem(w, 500, "database_error", "Discovery failed.")
@@ -260,6 +264,10 @@ func (a *application) discover(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 func (a *application) report(w http.ResponseWriter, r *http.Request, p principal) {
+	if !a.publicRooms {
+		problem(w, 404, "public_rooms_disabled", "Public rooms are disabled.")
+		return
+	}
 	var in struct {
 		Reason string `json:"reason"`
 	}

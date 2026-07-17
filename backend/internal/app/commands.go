@@ -306,6 +306,9 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			return snapshot{}, errors.New("invalid visibility")
 		}
 		if in.Visibility == "public" {
+			if !a.publicRooms {
+				return snapshot{}, errors.New("public rooms are disabled")
+			}
 			var ownerAccount sql.NullString
 			_ = tx.QueryRow("SELECT i.account_id FROM rooms r JOIN identities i ON i.id=r.owner_identity_id WHERE r.id=?", room).Scan(&ownerAccount)
 			if !ownerAccount.Valid {

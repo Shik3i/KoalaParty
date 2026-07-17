@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,6 +28,8 @@ type application struct {
 	activityMaxAge    time.Duration
 	activityMaxEvents int
 	roomMaxIdle       time.Duration
+	trustedProxies    []*net.IPNet
+	publicRooms       bool
 }
 
 func env(key, fallback string) string {
@@ -55,33 +58,19 @@ func Healthcheck() error {
 }
 
 func Run() error {
-	db, e := database.Open(env("KOALAPARTY_DB", "koalaparty.db"))
+	cfg, e := loadConfig()
+	if e != nil {
+		return fmt.Errorf("configuration: %w", e)
+	}
+	db, e := database.Open(cfg.dbPath)
 	if e != nil {
 		return e
 	}
 	defer db.Close()
-	ttl, _ := time.ParseDuration(env("KOALAPARTY_SESSION_TTL", "168h"))
-	if ttl <= 0 {
-		ttl = 168 * time.Hour
-	}
-	a := &application{db: db, hub: newHub(), sessionTTL: ttl, cookieSecure: env("KOALAPARTY_COOKIE_SECURE", "false") == "true", trustedOrigins: map[string]bool{}}
-	a.activityMaxAge, _ = time.ParseDuration(env("KOALAPARTY_ACTIVITY_MAX_AGE", "720h"))
-	if a.activityMaxAge <= 0 {
-		a.activityMaxAge = 720 * time.Hour
-	}
-	a.roomMaxIdle, _ = time.ParseDuration(env("KOALAPARTY_ROOM_MAX_IDLE", "8760h"))
-	if a.roomMaxIdle <= 0 {
-		a.roomMaxIdle = 8760 * time.Hour
-	}
-	if _, e := fmt.Sscanf(env("KOALAPARTY_ACTIVITY_MAX_EVENTS", "200"), "%d", &a.activityMaxEvents); e != nil || a.activityMaxEvents < 10 {
-		a.activityMaxEvents = 200
-	}
-	for _, o := range strings.Split(env("KOALAPARTY_TRUSTED_ORIGINS", "http://localhost:5173,http://localhost:8080"), ",") {
-		a.trustedOrigins[strings.TrimSpace(o)] = true
-	}
+	a := &application{db: db, hub: newHub(), sessionTTL: cfg.sessionTTL, cookieSecure: cfg.cookieSecure, trustedOrigins: cfg.trustedOrigins, trustedProxies: cfg.trustedProxies, activityMaxAge: cfg.activityMaxAge, activityMaxEvents: cfg.activityMaxEvents, roomMaxIdle: cfg.roomMaxIdle, publicRooms: cfg.publicRooms}
 	mux := http.NewServeMux()
-	authLimiter := newRateLimiter(20, time.Minute)
-	commandLimiter := newRateLimiter(180, time.Minute)
+	authLimiter := newRateLimiter(20, time.Minute, a.trustedProxies)
+	commandLimiter := newRateLimiter(180, time.Minute, a.trustedProxies)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		info := CurrentBuildInformation()
 		writeJSON(w, 200, map[string]string{"status": "ok", "version": info.Version})
@@ -108,12 +97,12 @@ func Run() error {
 	mux.HandleFunc("GET /api/rooms/{roomId}/ws", a.requireAuth(a.websocket))
 	mux.HandleFunc("POST /api/rooms/{roomId}/reports", a.requireAuth(a.report))
 	mux.HandleFunc("GET /api/discover", a.discover)
-	webRoot := env("KOALAPARTY_WEB_ROOT", "../frontend/build")
+	webRoot := cfg.webRoot
 	mux.Handle("/", spaHandler(webRoot))
 	maintenanceCtx, cancelMaintenance := context.WithCancel(context.Background())
 	defer cancelMaintenance()
 	go a.maintenanceLoop(maintenanceCtx)
-	srv := &http.Server{Addr: env("KOALAPARTY_ADDR", ":8080"), Handler: securityHeaders(mux, contentSecurityPolicy(webRoot)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	srv := &http.Server{Addr: cfg.addr, Handler: securityHeaders(mux, contentSecurityPolicy(webRoot)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	go func() {

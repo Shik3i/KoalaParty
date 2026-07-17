@@ -1,0 +1,39 @@
+# Copy this file and .env.example to the deployment host. Pin an exact released version.
+services:
+  koalaparty:
+    image: ghcr.io/shik3i/koalaparty:${KOALAPARTY_VERSION:?Set an exact release version}
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      KOALAPARTY_ADDR: :8080
+      KOALAPARTY_DB: /data/koalaparty.db
+      KOALAPARTY_WEB_ROOT: /app/web
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - koalaparty-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 100
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "/koalaparty", "healthcheck"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  koalaparty-data:

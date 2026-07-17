@@ -10,16 +10,21 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 - Responsive KoalaSync cross-promotion with locally bundled Netflix, YouTube, Twitch, Prime Video, Disney+, Jellyfin, and Emby marks.
 - Unit and browser coverage for legal disclosures, local platform artwork, external links, and responsive rendering.
 - MIT License for open-source use, modification, distribution, and self-hosting.
+- Host-only operator commands for verified SQLite backups/restores, report review and delisting, room deletion, and privacy-preserving account deletion.
+- Hardened pinned-image Compose example with a read-only root filesystem, dropped capabilities, resource limits, and log rotation.
 
 ### Changed
 
 - YouTube playback now presents an explicit third-party consent notice before loading the privacy-enhanced player.
 - The footer links directly to Privacy, Imprint, GitHub, and the KoalaSync landing page.
 - YouTube thumbnails no longer contact third-party hosts before explicit playback consent.
+- Public room discovery is opt-in and disabled by default for early-beta deployments.
+- Production mode now rejects insecure cookies, non-HTTPS origins, malformed durations, booleans, proxy networks, and retention values instead of silently accepting unsafe fallbacks.
 
 ### Fixed
 
 - Crawlers now receive a valid local `robots.txt` instead of the application fallback document.
+- Rate limits now identify clients through forwarding headers only when the immediate peer is an explicitly trusted proxy, preventing global throttling behind Caddy and header spoofing from untrusted peers.
 
 ## [0.1.0] - 2026-07-17
 

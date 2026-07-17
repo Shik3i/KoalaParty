@@ -12,7 +12,7 @@ Privacy-first shared YouTube rooms. Synchronized playback and a collaborative qu
 - Server-authoritative play, pause, seek, queue, reorder, skip, and reconnect behavior.
 - Persistent anonymous browser identities; optional accounts and friend-only rooms.
 - Owner/admin/member roles, per-member capabilities, kick, ban, visibility, and activity history.
-- Public discovery with controlled provider metadata only.
+- Optional public discovery with controlled provider metadata; disabled by default for early-beta deployments.
 - Responsive SvelteKit UI with accessible loading, empty, error, connection, light, dark, and system-theme states.
 - Go, WebSockets, SQLite WAL, embedded migrations, Docker, health/readiness probes, and Caddy-ready TLS deployment.
 
@@ -23,7 +23,6 @@ Requirements: Go 1.26.5, Node.js 24 LTS, npm 12, and Docker.
 ```sh
 git clone https://github.com/Shik3i/KoalaParty.git
 cd KoalaParty
-cp .env.example .env
 cd frontend && npm ci && cd ..
 make verify
 docker compose up --build
@@ -36,12 +35,12 @@ Open `http://127.0.0.1:8080`. The anonymous identity belongs to the current brow
 Release images support `linux/amd64` and `linux/arm64`:
 
 ```sh
-docker pull ghcr.io/shik3i/koalaparty:latest
 cp .env.example .env
+docker pull ghcr.io/shik3i/koalaparty:0.1.0
 docker compose -f deploy/docker-compose.ghcr.yml up -d
 ```
 
-Before public deployment, set the exact HTTPS origin in `KOALAPARTY_TRUSTED_ORIGINS`, enable `KOALAPARTY_COOKIE_SECURE=true`, and configure Caddy or another TLS reverse proxy. See [deployment](docs/deployment.md).
+Before public deployment, pin an exact image version, replace `party.example.com`, verify `KOALAPARTY_TRUSTED_PROXIES` against the container's immediate proxy peer, and configure Caddy or another TLS reverse proxy. Public room discovery remains disabled until `KOALAPARTY_PUBLIC_ROOMS=true` is explicitly selected. See [deployment](docs/deployment.md).
 
 ## Verification
 

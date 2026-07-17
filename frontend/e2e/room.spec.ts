@@ -132,9 +132,13 @@ test('mobile navigation and room empty states remain usable', async ({ browser }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Discover' })).toBeVisible();
+  await page.getByRole('link', { name: 'Discover' }).click();
+  await expect(page.getByRole('heading', { name: 'Invite-only early beta' })).toBeVisible();
+  await page.goto('/');
   await page.getByRole('button', { name: 'Create a room' }).click();
   await expect(page).toHaveURL(/\/room\/[A-Z2-7]{16}$/);
   await expect(page.getByText('The queue is empty.')).toBeVisible();
+  await expect(page.getByRole('option', { name: 'Public' })).toHaveCount(0);
   await page.getByRole('tab', { name: 'People' }).click();
   await expect(page.getByText('(you)')).toBeVisible();
   await context.close();

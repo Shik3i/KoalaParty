@@ -11,7 +11,7 @@ export default defineConfig({
     command: 'npm run build && cd ../backend && go run ./cmd/server',
     url: 'http://127.0.0.1:4173/api/health',
     timeout: 120_000,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     env: {
       KOALAPARTY_ADDR: ':4173',
       KOALAPARTY_DB: '../frontend/e2e.db',

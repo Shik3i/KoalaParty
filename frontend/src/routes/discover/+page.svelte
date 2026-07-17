@@ -3,10 +3,15 @@
   type Room = { id: string; label: string; title: string; thumbnail: string; status: string; participants: number };
   let rooms: Room[] = [];
   let error = '';
+  let disabled = false;
   let loading = true;
   onMount(async () => {
     try {
       const r = await fetch('/api/discover');
+      if (r.status === 404) {
+        disabled = true;
+        return;
+      }
       if (!r.ok) throw new Error('Discovery is unavailable.');
       rooms = await r.json();
     } catch (e) {
@@ -29,7 +34,11 @@
       role="alert"
     >
       {error}
-    </p>{:else if !rooms.length}<div class="empty panel">
+    </p>{:else if disabled}<div class="empty panel">
+      <span>🔗</span>
+      <h2>Invite-only early beta</h2>
+      <p>Public room discovery is currently disabled. Join a room with its invite link or code.</p>
+    </div>{:else if !rooms.length}<div class="empty panel">
       <span>🌱</span>
       <h2>It’s quiet here</h2>
       <p>No public rooms are active. Unlisted rooms never appear here.</p>

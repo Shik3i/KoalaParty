@@ -13,7 +13,7 @@ node scripts/verify-release.mjs v0.1.0
 docker compose build
 ```
 
-The Playwright suite uses isolated browser contexts for owner, member, and banned identities plus two tabs sharing one owner session. It checks room creation/join, presence, multi-tab session reuse, consent-gated YouTube loading, advancing pause positions, queue synchronization, server-side permission denial, admin restoration, owner protection, ban reconnect denial, and owner restoration after reload. SQLite unit tests verify clean migration, WAL/foreign keys, persistence, stale revision rejection, Argon2id round trips, activity retention, and abandoned-room cleanup.
+The Playwright suite uses isolated browser contexts for owner, member, and banned identities plus two tabs sharing one owner session. It checks room creation/join, presence, multi-tab session reuse, consent-gated YouTube loading, advancing pause positions, queue synchronization, server-side permission denial, admin restoration, owner protection, ban reconnect denial, and owner restoration after reload. SQLite unit tests verify clean migration, WAL/foreign keys, persistence, stale revision rejection, Argon2id round trips, activity retention, abandoned-room cleanup, online backup/restore integrity, privacy deletion, and report handling. Configuration tests cover production fail-fast validation and trusted-proxy address parsing, including spoofed forwarding headers.
 
 `scripts/verify-release.test.mjs` covers strict stable SemVer tag parsing and exact changelog-section extraction. CI also runs `govulncheck`, `npm audit --audit-level=high`, a Docker build, `/api/ready`, and `/api/version` against a clean container. Release jobs repeat the test gates before publishing.
 
