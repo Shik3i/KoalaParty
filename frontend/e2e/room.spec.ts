@@ -32,6 +32,9 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   await owner.goto('/');
   await owner.getByRole('button', { name: 'Create a room' }).click();
   await expect(owner).toHaveURL(/\/room\/([A-Z2-7]{16})$/);
+  await expect(owner.locator('script[src*="youtube.com/iframe_api"]')).toHaveCount(0);
+  await owner.getByRole('button', { name: 'Start watching' }).click();
+  await expect(owner.locator('script[src*="youtube.com/iframe_api"]')).toHaveCount(1);
   const roomId = owner.url().split('/').at(-1)!;
   const member = await memberContext.newPage();
   await member.goto(`/room/${roomId}`);
@@ -62,6 +65,7 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   expect((await command(member, roomId, 'member.role', { identityId: ownerId, role: 'member' })).status).toBe(403);
   const third = await thirdContext.newPage();
   await third.goto(`/room/${roomId}`);
+  await expect(third.getByRole('heading', { name: /Koala|Wombat|Possum|Kookaburra/ })).toBeVisible();
   const thirdId = await identityId(third);
   expect((await command(member, roomId, 'member.ban', { identityId: thirdId })).status).toBe(200);
   await third.reload();

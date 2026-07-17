@@ -1,13 +1,22 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   let {
+    enabled = false,
     videoId = null,
     status = 'paused',
     position = 0,
     onEnded = () => {},
-  }: { videoId?: string | null; status?: string; position?: number; onEnded?: () => void } = $props();
+  }: {
+    enabled?: boolean;
+    videoId?: string | null;
+    status?: string;
+    position?: number;
+    onEnded?: () => void;
+  } = $props();
   let host: HTMLDivElement;
   let player: any = null;
+  let disposed = false;
+  let loading = false;
   let ready = false;
   let lastVideo: string | null = null;
   type YTWindow = Window & { YT?: any; onYouTubeIframeAPIReady?: () => void };
@@ -27,29 +36,33 @@
       }
     });
   }
-  onMount(() => {
-    let disposed = false;
-    void loadAPI().then(() => {
-      if (disposed) return;
-      const w = window as YTWindow;
-      player = new w.YT.Player(host, {
-        host: 'https://www.youtube-nocookie.com',
-        playerVars: { origin: location.origin, rel: 0 },
-        events: {
-          onReady: () => {
-            ready = true;
-            sync();
-          },
-          onStateChange: (e: any) => {
-            if (e.data === 0) onEnded();
-          },
+  async function initialize() {
+    loading = true;
+    await loadAPI();
+    if (disposed) return;
+    const w = window as YTWindow;
+    player = new w.YT.Player(host, {
+      host: 'https://www.youtube-nocookie.com',
+      playerVars: { origin: location.origin, rel: 0 },
+      events: {
+        onReady: () => {
+          ready = true;
+          sync();
         },
-      });
+        onStateChange: (e: any) => {
+          if (e.data === 0) onEnded();
+        },
+      },
     });
+  }
+  onMount(() => {
     return () => {
       disposed = true;
       player?.destroy();
     };
+  });
+  $effect(() => {
+    if (enabled && !loading && !player) void initialize();
   });
   function sync() {
     if (!ready || !videoId) return;

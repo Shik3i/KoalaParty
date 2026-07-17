@@ -129,6 +129,7 @@
       <div class="main-column">
         <div class="player-wrap">
           <YouTubePlayer
+            enabled={watching}
             videoId={room.playback.media?.providerId}
             status={watching ? room.playback.status : 'paused'}
             position={room.playback.position}

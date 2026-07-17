@@ -1,0 +1,14 @@
+.git
+.github
+.cache
+.env
+**/node_modules
+**/.svelte-kit
+**/build
+**/test-results
+**/playwright-report
+frontend/e2e.db*
+*.db
+*.db-shm
+*.db-wal
+
