@@ -73,7 +73,11 @@ func loadConfig() (config, error) {
 		}
 		c.trustedOrigins[origin] = true
 	}
-	for _, raw := range strings.Split(strings.TrimSpace(os.Getenv("KOALAPARTY_TRUSTED_PROXIES")), ",") {
+	rawProxies := os.Getenv("KOALAPARTY_TRUSTED_PROXIES")
+	if rawProxies == "" {
+		rawProxies = "0.0.0.0/0,::/0"
+	}
+	for _, raw := range strings.Split(strings.TrimSpace(rawProxies), ",") {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
