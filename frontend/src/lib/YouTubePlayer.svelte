@@ -5,6 +5,7 @@
     videoId = null,
     status = 'paused',
     position = 0,
+    positionAt = 0,
     canControl = true,
     canSeek = true,
     hasQueue = false,
@@ -18,6 +19,7 @@
     videoId?: string | null;
     status?: string;
     position?: number;
+    positionAt?: number;
     canControl?: boolean;
     canSeek?: boolean;
     hasQueue?: boolean;
@@ -36,24 +38,32 @@
   let lastVideo: string | null = null;
   let playerError = $state('');
 
-  // Sync bookkeeping. The server is authoritative: `expectedPlaying`/`expectedPosition`
-  // track the state we last drove the player into so we can tell a genuine user
-  // gesture (native play/pause/scrubber) apart from our own programmatic updates.
+  // The server is authoritative. `status`/`position`/`positionAt` describe the last
+  // confirmed playback change: at `positionAt` (client clock) the media was at
+  // `position`, advancing since then only while `status === 'playing'`. We never
+  // re-baseline on unrelated snapshots, so the expected position stays correct.
   const ENDED = 0,
     PLAYING = 1,
     PAUSED = 2;
-  const SEEK_THRESHOLD = 2; // unexpected jump (seconds) that counts as a user seek
-  const RESYNC_THRESHOLD = 2.5; // drift (seconds) before we re-align a follower
-  let expectedPlaying = false;
-  let expectedPosition = 0;
-  let guardUntil = 0; // suppress seek detection right after we drive the player
+  const POLL_MS = 500;
+  const SEEK_JUMP = 1.5; // discontinuity in the player's own timeline => local scrub
+  const DRIFT_MAX = 1.8; // divergence from the expected server position => realign
+  let guardUntil = 0; // suppress the monitor right after we drive the player
+  let localSeekUntil = 0; // suppress drift correction while our own seek round-trips
+  let prevTime = 0; // last observed media time (for discontinuity detection)
+  let prevWall = 0; // wall clock at prevTime
   let monitor: ReturnType<typeof setInterval> | null = null;
 
   function currentTime(): number {
     return player?.getCurrentTime?.() ?? 0;
   }
-  function guard(ms = 1400) {
+  function guard(ms = 1200) {
     guardUntil = Date.now() + ms;
+  }
+  // Where the media should be right now according to the server.
+  function expectedPosition(): number {
+    if (status !== 'playing') return Math.max(0, position);
+    return Math.max(0, position + (Date.now() - positionAt) / 1000);
   }
 
   type YTWindow = Window & { YT?: any; onYouTubeIframeAPIReady?: () => void };
@@ -121,13 +131,13 @@
       return;
     }
     if (!ready || !lastVideo) return;
-    if (state === PLAYING && !expectedPlaying) {
+    if (state === PLAYING && status !== 'playing') {
       if (canControl) onPlay(currentTime());
       else {
         guard();
         player.pauseVideo?.();
       }
-    } else if (state === PAUSED && expectedPlaying) {
+    } else if (state === PAUSED && status === 'playing') {
       if (canControl) onPause(currentTime());
       else {
         guard();
@@ -137,31 +147,49 @@
   }
   function startMonitor() {
     stopMonitor();
-    monitor = setInterval(tick, 1000);
+    prevTime = currentTime();
+    prevWall = Date.now();
+    monitor = setInterval(tick, POLL_MS);
   }
   function stopMonitor() {
     if (monitor) clearInterval(monitor);
     monitor = null;
   }
-  // YouTube exposes no "seeked" event, so we watch the playhead: a jump larger
-  // than one poll interval can explain is a scrubber drag.
+  // YouTube exposes no "seeked" event. We distinguish a local scrub (a discontinuity
+  // in the player's OWN timeline) from ordinary drift (divergence from the server's
+  // expected position). The first is broadcast; the second is silently corrected.
   function tick() {
     if (!player || !ready || !lastVideo) return;
+    const now = Date.now();
     const t = currentTime();
-    if (Date.now() < guardUntil) {
-      expectedPosition = t;
+    const state = player.getPlayerState?.();
+    if (now < guardUntil) {
+      prevTime = t;
+      prevWall = now;
       return;
     }
-    const state = player.getPlayerState?.();
-    const tolerance = state === PLAYING ? SEEK_THRESHOLD : 1;
-    if ((state === PLAYING || state === PAUSED) && Math.abs(t - expectedPosition) > tolerance) {
-      if (canSeek) onSeek(t);
-      else {
+    const playing = state === PLAYING;
+    const natural = playing ? (now - prevWall) / 1000 : 0;
+    const jump = t - prevTime - natural;
+    prevTime = t;
+    prevWall = now;
+    if (Math.abs(jump) > SEEK_JUMP) {
+      if (canSeek) {
+        onSeek(t);
+        localSeekUntil = now + 4000;
+      } else {
         guard();
-        player.seekTo(expectedPosition, true);
+        player.seekTo(expectedPosition(), true);
       }
+      return;
     }
-    expectedPosition = t;
+    if (now < localSeekUntil || (state !== PLAYING && state !== PAUSED)) return;
+    const expected = expectedPosition();
+    if (Math.abs(t - expected) > DRIFT_MAX) {
+      guard();
+      player.seekTo(expected, true);
+      prevTime = expected;
+    }
   }
   onMount(() => {
     return () => {
@@ -173,9 +201,11 @@
   $effect(() => {
     if (enabled && !loading && !failed && !player) void initialize();
   });
+  // Runs only when the server reports a real playback change (media, status, or a
+  // new position anchor) — never on unrelated snapshots — so it will not fight the
+  // monitor's continuous correction.
   function sync() {
     if (!ready) return;
-    expectedPlaying = status === 'playing';
     if (!videoId) {
       if (lastVideo) {
         player.stopVideo?.();
@@ -184,22 +214,28 @@
       }
       return;
     }
+    const target = Math.max(0, expectedPosition());
     if (lastVideo !== videoId) {
-      const request = { videoId, startSeconds: Math.max(0, position) };
       guard(3000);
+      const request = { videoId, startSeconds: target };
       if (status === 'playing') player.loadVideoById(request);
       else player.cueVideoById(request);
       lastVideo = videoId;
-      expectedPosition = Math.max(0, position);
-    } else {
-      if (Math.abs(currentTime() - position) > RESYNC_THRESHOLD) {
-        guard();
-        player.seekTo(position, true);
-        expectedPosition = position;
-      }
-      if (status === 'playing') player.playVideo?.();
-      else player.pauseVideo?.();
+      prevTime = target;
+      prevWall = Date.now();
+      localSeekUntil = 0;
+      return;
     }
+    // A confirmed change arrived: stop suppressing correction and realign now.
+    localSeekUntil = 0;
+    if (Math.abs(currentTime() - target) > DRIFT_MAX) {
+      guard();
+      player.seekTo(target, true);
+      prevTime = target;
+      prevWall = Date.now();
+    }
+    if (status === 'playing') player.playVideo?.();
+    else player.pauseVideo?.();
   }
   $effect(() => {
     videoId;
@@ -209,6 +245,7 @@
     videoId;
     status;
     position;
+    positionAt;
     sync();
   });
 </script>

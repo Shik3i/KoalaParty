@@ -3,10 +3,13 @@
   import { page } from '$app/state';
   import { api, establish, websocketURL } from '$lib/api';
   import YouTubePlayer from '$lib/YouTubePlayer.svelte';
-  import { currentPlaybackPosition, formatActivity, parseYouTube, type Snapshot, type Member } from '$lib/room';
+  import { formatActivity, parseYouTube, type Snapshot, type Member } from '$lib/room';
   const roomId = (page.params.roomId ?? '').toUpperCase();
   let room: Snapshot | null = null;
-  let roomReceivedAt = Date.now();
+  // The playback anchor is only re-baselined when playback actually changes
+  // (status, position, or media), so the extrapolated live position stays correct
+  // across unrelated snapshots (a member joining, a queue edit, …).
+  let playbackAnchor = { position: 0, status: 'paused', mediaId: '', at: Date.now() };
   let disposed = false;
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -36,9 +39,22 @@
   const manages = () => me()?.role === 'owner' || me()?.role === 'admin';
   function updateRoom(next: Snapshot) {
     if (room && next.revision < room.revision) return;
+    const pb = next.playback;
+    const mediaId = pb.media?.id ?? '';
+    if (
+      !room ||
+      pb.position !== playbackAnchor.position ||
+      pb.status !== playbackAnchor.status ||
+      mediaId !== playbackAnchor.mediaId
+    ) {
+      playbackAnchor = { position: pb.position, status: pb.status, mediaId, at: Date.now() };
+    }
     room = next;
-    roomReceivedAt = Date.now();
   }
+  const livePosition = () =>
+    playbackAnchor.status === 'playing'
+      ? playbackAnchor.position + (Date.now() - playbackAnchor.at) / 1000
+      : playbackAnchor.position;
   function showNotice(message: string, clearAfter = 0, kind: 'info' | 'success' | 'error' = 'info') {
     if (noticeTimer) clearTimeout(noticeTimer);
     notice = message;
@@ -56,6 +72,28 @@
   }
   function autofocus(node: HTMLElement) {
     node.focus();
+  }
+  // The member menu lives inside scrollable, clipped panels. Position it as a
+  // fixed popover anchored to its trigger so it is never clipped or hidden behind
+  // neighbouring content.
+  function anchoredMenu(details: HTMLDetailsElement) {
+    const menu = details.querySelector<HTMLElement>('.menu');
+    const reposition = () => {
+      if (!menu || !details.open) return;
+      const rect = details.getBoundingClientRect();
+      menu.style.top = `${rect.bottom + 4}px`;
+      menu.style.right = `${window.innerWidth - rect.right}px`;
+    };
+    details.addEventListener('toggle', reposition);
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return {
+      destroy() {
+        details.removeEventListener('toggle', reposition);
+        window.removeEventListener('scroll', reposition, true);
+        window.removeEventListener('resize', reposition);
+      },
+    };
   }
   function scheduleSeek(position: number) {
     if (seekTimer) clearTimeout(seekTimer);
@@ -390,7 +428,8 @@
             enabled={watching}
             videoId={room.playback.media?.providerId}
             status={watching ? room.playback.status : 'paused'}
-            position={currentPlaybackPosition(room.playback, roomReceivedAt)}
+            position={playbackAnchor.position}
+            positionAt={playbackAnchor.at}
             canControl={can('playback.play_pause')}
             canSeek={can('playback.seek')}
             hasQueue={room.queue.length > 0}
@@ -421,7 +460,7 @@
               class="play-toggle"
               onclick={() =>
                 command(room!.playback.status === 'playing' ? 'player.pause' : 'player.play', {
-                  position: currentPlaybackPosition(room!.playback, roomReceivedAt),
+                  position: livePosition(),
                 })}
               disabled={commandPending || !can('playback.play_pause')}
               >{room.playback.status === 'playing' ? 'Pause' : 'Play'}</button
@@ -564,7 +603,7 @@
                 <div>
                   <b>{member.displayName}{member.identityId === room.me ? ' (you)' : ''}</b><small>{member.role}</small>
                 </div>
-                {#if manages() && member.role !== 'owner' && member.identityId !== room.me}<details>
+                {#if manages() && member.role !== 'owner' && member.identityId !== room.me}<details use:anchoredMenu>
                     <summary aria-label={`Manage ${member.displayName}`}>•••</summary>
                     <div class="menu">
                       <button class="ghost" disabled={commandPending} onclick={() => memberAction(member, 'role')}
@@ -897,7 +936,7 @@
     padding: 0.4rem;
   }
   .menu {
-    position: absolute;
+    position: fixed;
     right: 0;
     top: 2rem;
     width: 145px;
@@ -905,7 +944,7 @@
     border: 1px solid var(--border-subtle);
     padding: 0.4rem;
     border-radius: var(--radius-sm);
-    z-index: 4;
+    z-index: 60;
     box-shadow: var(--shadow-panel);
   }
   .menu button {

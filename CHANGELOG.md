@@ -4,7 +4,14 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
-## [0.3.1] - 2026-07-18
+## [0.3.2] - 2026-07-18
+
+### Fixed
+
+- Seeking now propagates immediately. The player watches for a discontinuity in its own timeline, so a scrub is detected even while the player briefly buffers — previously the seek was swallowed during buffering and only took effect after the next play/pause.
+- Playback stays far tighter in sync. The live position is now anchored to the last confirmed playback change and extrapolated from there, instead of being re-based to "now" on every unrelated snapshot (which collapsed the expected position backwards and caused several seconds of drift).
+- Followers are continuously realigned. The player periodically corrects drift toward the server's expected position (silently, without re-broadcasting), keeping participants within a small tolerance instead of drifting 3–4 seconds apart.
+- The member management menu (make admin, kick, ban) is no longer clipped by the surrounding scroll panels; it renders as a fixed popover above other content.
 
 ### Added
 
