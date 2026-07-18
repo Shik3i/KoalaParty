@@ -4,6 +4,7 @@
   import { flip } from 'svelte/animate';
   import { page } from '$app/state';
   import { api, establish, websocketURL } from '$lib/api';
+  import { randomUUID } from '$lib/identity';
   import YouTubePlayer from '$lib/YouTubePlayer.svelte';
   import { formatActivity, parseYouTube, type Snapshot, type Member } from '$lib/room';
   import {
@@ -22,6 +23,8 @@
     CheckCircle,
     WarningCircle,
     Info,
+    ArrowsOut,
+    ArrowsIn,
   } from 'phosphor-svelte';
   const roomId = (page.params.roomId ?? '').toUpperCase();
   let room: Snapshot | null = null;
@@ -40,6 +43,7 @@
   let connected = false;
   let everConnected = false;
   let watching = false;
+  let theater = false;
   let videoURL = '';
   let mobileTab: 'queue' | 'people' | 'activity' = 'queue';
   let dragging: string | null = null;
@@ -210,7 +214,7 @@
           method: 'POST',
           body: JSON.stringify({
             type,
-            requestId: crypto.randomUUID(),
+            requestId: randomUUID(),
             expectedRevision: room.revision,
             payload,
           }),
@@ -451,7 +455,7 @@
           </div>
         </div>
       </section>{/if}
-    <section class="room-grid">
+    <section class="room-grid" class:theater>
       <div class="main-column">
         <div class="player-wrap">
           <YouTubePlayer
@@ -518,6 +522,16 @@
               >{watching
                 ? 'Play, pause and scrub with the video’s own controls — everyone stays in sync.'
                 : 'Start watching to scrub and follow along.'}</span
+            ><button
+              class="secondary theater-toggle"
+              aria-pressed={theater}
+              aria-label={theater ? 'Exit theater mode' : 'Theater mode'}
+              title={theater ? 'Exit theater mode' : 'Theater mode'}
+              onclick={() => (theater = !theater)}
+              >{#if theater}<ArrowsIn size={17} weight="bold" />{:else}<ArrowsOut
+                  size={17}
+                  weight="bold"
+                />{/if}</button
             >
           </div>
           <form
@@ -799,6 +813,18 @@
     display: grid;
     grid-template-columns: minmax(0, 2.2fr) minmax(310px, 0.8fr);
     gap: 1rem;
+  }
+  .room-grid.theater {
+    grid-template-columns: 1fr;
+  }
+  .room-grid.theater .main-column {
+    width: 100%;
+    max-width: min(100%, 142vh);
+    margin-inline: auto;
+  }
+  .theater-toggle {
+    margin-left: auto;
+    padding: 0.55rem 0.6rem;
   }
   .settings {
     padding: 1rem;

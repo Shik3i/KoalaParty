@@ -15,17 +15,12 @@ import (
 // fallback.
 var youtubeTitleClient = &http.Client{Timeout: 4 * time.Second}
 
-// resolveMediaTitle returns the best available title for a video: the oEmbed
-// title when metadata lookups are enabled and succeed, otherwise the caller's
-// fallback, otherwise a stable placeholder. The result is always trimmed and
-// capped to the storage limit.
-func (a *application) resolveMediaTitle(ctx context.Context, videoID, fallback string) string {
-	title := strings.TrimSpace(fallback)
-	if a.fetchTitle != nil {
-		if fetched := a.fetchTitle(ctx, videoID); fetched != "" {
-			title = fetched
-		}
-	}
+// fallbackTitle is the title stored immediately when a video is queued, before
+// any network lookup: the caller's title, or a stable placeholder. It never
+// blocks, so adding a video is always instant even when the server cannot reach
+// YouTube. The real title is filled in afterwards by enrichTitle.
+func fallbackTitle(clientTitle, videoID string) string {
+	title := strings.TrimSpace(clientTitle)
 	if title == "" {
 		title = "YouTube video " + videoID
 	}
@@ -33,6 +28,35 @@ func (a *application) resolveMediaTitle(ctx context.Context, videoID, fallback s
 		title = strings.TrimSpace(title[:200])
 	}
 	return title
+}
+
+// enrichTitle resolves the real oEmbed title in the background and, if it
+// differs from what is stored, updates the media row and rebroadcasts the room
+// so every client sees the proper title. Runs in its own goroutine; all failures
+// are silent and simply leave the placeholder in place.
+func (a *application) enrichTitle(room, mediaID, videoID string) {
+	if a.fetchTitle == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	title := a.fetchTitle(ctx, videoID)
+	if title == "" {
+		return
+	}
+	if len(title) > 200 {
+		title = strings.TrimSpace(title[:200])
+	}
+	res, err := a.db.Exec("UPDATE media_items SET title=? WHERE id=? AND title<>?", title, mediaID, title)
+	if err != nil {
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return
+	}
+	if s, err := a.snapshot(ctx, room, ""); err == nil {
+		a.hub.broadcast(room, s)
+	}
 }
 
 // fetchYouTubeTitle resolves the human-readable title for a video via YouTube's

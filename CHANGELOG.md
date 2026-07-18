@@ -4,6 +4,23 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-18
+
+### Fixed
+
+- Adding a video is now instant. The video is queued immediately with a placeholder title while the real YouTube title is fetched in the background and filled in a moment later. Previously the add request blocked on the title lookup (up to several seconds), which could make adding feel like the app had frozen — especially when the server's outbound connection to YouTube was slow or unavailable.
+- Anonymous identities now work over plain-HTTP LAN addresses. `crypto.randomUUID()` only exists in secure contexts, so opening a self-hosted instance over `http://<lan-ip>` previously threw when creating an identity or sending a command; a `getRandomValues`-based UUID fallback now handles those origins.
+- Added a global error boundary: an unexpected client-side error now shows a recoverable message instead of a blank page.
+
+### Added
+
+- Theater mode: a toggle enlarges the player to the full content width and moves the queue/people/activity panel below it, like YouTube's theater view.
+
+### Changed
+
+- Redesigned the theme switcher into an on-brand segmented control with sun / moon / monitor icons instead of a plain dropdown.
+- Renamed the landing "Start a living room" card to "Jump into a room" and refreshed its copy.
+
 ## [0.4.1] - 2026-07-18
 
 ### Changed

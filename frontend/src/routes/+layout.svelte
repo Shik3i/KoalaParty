@@ -4,7 +4,7 @@
   import '../lib/styles/themes/dark.css';
   import '../lib/styles/base.css';
   import { onMount } from 'svelte';
-  import { Compass, FilmSlate, UsersThree, UserCircle, ShieldStar } from 'phosphor-svelte';
+  import { Compass, FilmSlate, UsersThree, UserCircle, ShieldStar, Sun, Moon, Monitor } from 'phosphor-svelte';
   import { applyTheme, initialTheme, type Theme } from '$lib/theme';
   import { establish, type Principal } from '$lib/api';
   let { children } = $props();
@@ -17,9 +17,15 @@
       principal = await establish();
     } catch {}
   });
-  function change() {
-    applyTheme(theme);
+  function setTheme(next: Theme) {
+    theme = next;
+    applyTheme(next);
   }
+  const themeOptions: { value: Theme; label: string }[] = [
+    { value: 'system', label: 'System theme' },
+    { value: 'light', label: 'Light theme' },
+    { value: 'dark', label: 'Dark theme' },
+  ];
 </script>
 
 <svelte:head>
@@ -49,15 +55,37 @@
         ><ShieldStar size={17} weight="bold" />Admin</a
       >{/if}<a href="/account"><UserCircle size={17} weight="bold" />Account</a>
   </nav>
-  <label class="theme"
-    ><span class="sr-only">Theme</span><select bind:value={theme} onchange={change}
-      ><option value="system">System theme</option><option value="light">Light theme</option><option value="dark"
-        >Dark theme</option
-      ></select
-    ></label
-  >
+  <div class="theme" role="group" aria-label="Theme">
+    {#each themeOptions as option}<button
+        type="button"
+        class:active={theme === option.value}
+        aria-pressed={theme === option.value}
+        aria-label={option.label}
+        title={option.label}
+        onclick={() => setTheme(option.value)}
+        >{#if option.value === 'system'}<Monitor size={16} weight="bold" />{:else if option.value === 'light'}<Sun
+            size={16}
+            weight="bold"
+          />{:else}<Moon size={16} weight="bold" />{/if}</button
+      >{/each}
+  </div>
 </header>
-<div id="main">{@render children()}</div>
+<div id="main">
+  <svelte:boundary onerror={(error) => console.error('App error boundary:', error)}>
+    {@render children()}
+    {#snippet failed(error, reset)}
+      <main class="boundary-error">
+        <span aria-hidden="true">🐨</span>
+        <h1>Something hiccuped</h1>
+        <p>An unexpected error interrupted the page. Your room is safe — try again.</p>
+        <div class="boundary-actions">
+          <button onclick={reset}>Try again</button><a class="button secondary" href="/">Back home</a>
+        </div>
+        <pre>{error}</pre>
+      </main>
+    {/snippet}
+  </svelte:boundary>
+</div>
 <footer>
   <span>KoalaParty · MIT licensed · No tracking. No ads.</span><span
     ><a href="/privacy">Privacy</a> · <a href="/imprint">Imprint</a> ·
@@ -74,6 +102,34 @@
     z-index: 20;
     background: var(--surface-elevated);
     padding: 0.7rem;
+  }
+  .boundary-error {
+    max-width: 560px;
+    margin: 5rem auto;
+    padding: 2.5rem clamp(1rem, 4vw, 2.5rem);
+    text-align: center;
+  }
+  .boundary-error span {
+    font-size: 3rem;
+  }
+  .boundary-error .boundary-actions {
+    display: flex;
+    gap: 0.7rem;
+    justify-content: center;
+    margin: 1.5rem 0;
+    flex-wrap: wrap;
+  }
+  .boundary-error pre {
+    text-align: left;
+    overflow: auto;
+    max-height: 8rem;
+    padding: 0.8rem;
+    background: var(--surface-panel);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    white-space: pre-wrap;
   }
   .skip:focus {
     top: 1rem;
@@ -116,10 +172,29 @@
     color: var(--accent-primary);
   }
   .theme {
-    width: 9.2rem;
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    background: var(--surface-panel);
   }
-  .theme select {
-    padding: 0.5rem;
+  .theme button {
+    padding: 0.34rem 0.5rem;
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: 999px;
+    transition:
+      background 0.15s ease,
+      color 0.15s ease;
+  }
+  .theme button:hover {
+    color: var(--text-primary);
+    transform: none;
+  }
+  .theme button.active {
+    background: var(--accent-muted);
+    color: var(--text-primary);
   }
   footer {
     display: flex;
@@ -150,8 +225,6 @@
     }
     .theme {
       margin-left: auto;
-      width: 7.5rem;
-      min-width: 0;
     }
     footer {
       flex-direction: column;

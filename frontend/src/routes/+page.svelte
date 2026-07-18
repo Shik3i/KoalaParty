@@ -70,8 +70,8 @@
   </section>
   <aside class="join panel">
     <div class="room-mark" aria-hidden="true">🐨</div>
-    <h2>Start a living room</h2>
-    <p class="muted">Paste an invite link to join friends — or leave it empty to open a fresh room.</p>
+    <h2>Jump into a room</h2>
+    <p class="muted">Paste an invite link to join friends — or leave it empty to spin up a new room.</p>
     <form
       onsubmit={(e) => {
         e.preventDefault();

@@ -44,6 +44,24 @@ function randomSecret() {
     .replaceAll('/', '_')
     .replaceAll('=', '');
 }
+// crypto.randomUUID() only exists in secure contexts (HTTPS / localhost). Over a
+// plain-HTTP LAN address — common when self-hosting a watch party — it is
+// undefined and would throw. crypto.getRandomValues() works everywhere, so we
+// build a v4 UUID from it as a fallback.
+export function randomUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      // Fall through to the manual implementation.
+    }
+  }
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0'));
+  return `${h[0]}${h[1]}${h[2]}${h[3]}-${h[4]}${h[5]}-${h[6]}${h[7]}-${h[8]}${h[9]}-${h[10]}${h[11]}${h[12]}${h[13]}${h[14]}${h[15]}`;
+}
 // Playful anonymous names. Kept in sync with the backend room-label pools
 // (backend/internal/app/names.go).
 const nameEmojis = [
@@ -171,7 +189,7 @@ export function getIdentity(): LocalIdentity {
     }
   }
   const value = {
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     secret: randomSecret(),
     displayName: randomDisplayName(),
     avatarSeed: randomSecret().slice(0, 12),

@@ -99,9 +99,11 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	if management && role == "member" {
 		return snapshot{}, errDenied
 	}
-	// Resolve the media title before opening the transaction: the oEmbed lookup
-	// is a network call and must not hold a SQLite write open.
-	var mediaTitle string
+	// A queued video is stored immediately with a placeholder title so the add is
+	// instant; the real oEmbed title is fetched afterwards by enrichTitle. This
+	// keeps adding a video fast even when the server's outbound network to YouTube
+	// is slow or unavailable.
+	var mediaTitle, enrichVideoID string
 	if c.Type == "queue.add" || c.Type == "queue.play_now" {
 		var in struct {
 			VideoID string `json:"videoId"`
@@ -110,7 +112,10 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		if json.Unmarshal(c.Payload, &in) != nil || !youtubeID.MatchString(in.VideoID) {
 			return snapshot{}, errors.New("invalid YouTube video ID")
 		}
-		mediaTitle = a.resolveMediaTitle(ctx, in.VideoID, in.Title)
+		mediaTitle = fallbackTitle(in.Title, in.VideoID)
+		if a.fetchTitle != nil {
+			enrichVideoID = in.VideoID
+		}
 	}
 	tx, e := a.db.BeginTx(ctx, nil)
 	if e != nil {
@@ -366,6 +371,9 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		if id, ok := payload["identityId"].(string); ok {
 			a.hub.disconnect(room, id)
 		}
+	}
+	if enrichVideoID != "" {
+		go a.enrichTitle(room, "YT"+enrichVideoID, enrichVideoID)
 	}
 	return a.snapshot(ctx, room, p.IdentityID)
 }
