@@ -76,10 +76,26 @@ func TestDiscoveryIsUnavailableUntilExplicitlyEnabled(t *testing.T) {
 	if w.Code != 404 {
 		t.Fatalf("disabled discovery returned %d", w.Code)
 	}
-	a.publicRooms = true
+	a.setPublicRooms(true)
 	w = httptest.NewRecorder()
 	a.discover(w, httptest.NewRequest("GET", "/api/discover", nil))
 	if w.Code != 200 || w.Body.String() != "[]\n" {
 		t.Fatalf("enabled discovery returned %d %q", w.Code, w.Body.String())
+	}
+}
+
+func TestRateLimiterTrustAllProxies(t *testing.T) {
+	t.Setenv("KOALAPARTY_TRUSTED_PROXIES", "")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	limiter := newRateLimiter(1, time.Minute, cfg.trustedProxies)
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "172.18.0.3:4321" // docker proxy IP
+	req.Header.Set("X-Forwarded-For", "198.51.100.4, 10.1.2.3")
+	if got := limiter.clientIP(req); got != "198.51.100.4" {
+		t.Fatalf("trust all proxy client IP = %q, expected 198.51.100.4", got)
 	}
 }
