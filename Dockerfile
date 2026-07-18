@@ -24,7 +24,8 @@ COPY --from=backend /koalaparty /koalaparty
 COPY --from=frontend /src/frontend/build /app/web
 ENV KOALAPARTY_ADDR=:8080 \
     KOALAPARTY_DB=/data/koalaparty.db \
-    KOALAPARTY_WEB_ROOT=/app/web
+    KOALAPARTY_WEB_ROOT=/app/web \
+    KOALAPARTY_PRODUCTION=true
 USER koala
 EXPOSE 8080
 ENTRYPOINT ["/koalaparty"]
