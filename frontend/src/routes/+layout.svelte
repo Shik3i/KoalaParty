@@ -5,11 +5,16 @@
   import '../lib/styles/base.css';
   import { onMount } from 'svelte';
   import { applyTheme, initialTheme, type Theme } from '$lib/theme';
+  import { establish, type Principal } from '$lib/api';
   let { children } = $props();
   let theme: Theme = $state('system');
-  onMount(() => {
+  let principal: Principal | null = $state(null);
+  onMount(async () => {
     theme = initialTheme();
     applyTheme(theme);
+    try {
+      principal = await establish();
+    } catch {}
   });
   function change() {
     applyTheme(theme);
@@ -21,9 +26,8 @@
 <header class="site-header">
   <a class="brand" href="/"><span aria-hidden="true">🐨</span> KoalaParty</a>
   <nav aria-label="Main navigation">
-    <a href="/discover">Discover</a><a href="/rooms">My rooms</a><a href="/friends">Friends</a><a href="/account"
-      >Account</a
-    >
+    <a href="/discover">Discover</a><a href="/rooms">My rooms</a><a href="/friends">Friends</a
+    >{#if principal?.isAdmin}<a href="/admin">Admin</a>{/if}<a href="/account">Account</a>
   </nav>
   <label class="theme"
     ><span class="sr-only">Theme</span><select bind:value={theme} onchange={change}

@@ -308,7 +308,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			return snapshot{}, errors.New("invalid visibility")
 		}
 		if in.Visibility == "public" {
-			if !a.publicRooms {
+			if !a.getPublicRooms() {
 				return snapshot{}, errors.New("public rooms are disabled")
 			}
 			var ownerAccount sql.NullString

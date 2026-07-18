@@ -123,6 +123,19 @@
     await command(playNow ? 'queue.play_now' : 'queue.add', { videoId: id, title: `YouTube video ${id}` });
     videoURL = '';
   }
+  async function pasteFromClipboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      videoURL = text.trim();
+      showNotice('Pasted from clipboard!', 1200);
+    } catch {
+      showNotice('Clipboard permission denied or unavailable.', 2000);
+    }
+  }
+  async function quickAdd(id: string) {
+    videoURL = id;
+    await add(false);
+  }
   async function copyInvite() {
     try {
       await navigator.clipboard.writeText(location.href);
@@ -358,18 +371,47 @@
             }}
           >
             <label
-              ><span>YouTube URL</span><input
-                bind:value={videoURL}
-                maxlength="2048"
-                placeholder="https://youtube.com/watch?v=…"
-              /></label
-            ><button disabled={commandPending || !can('queue.add')}>Add to queue</button><button
+              ><span>YouTube URL</span>
+              <div class="input-container">
+                <input bind:value={videoURL} maxlength="2048" placeholder="https://youtube.com/watch?v=…" />
+                <button type="button" class="ghost paste-btn" onclick={pasteFromClipboard} title="Paste from clipboard"
+                  >📋</button
+                >
+              </div>
+            </label><button disabled={commandPending || !can('queue.add')}>Add to queue</button><button
               type="button"
               class="secondary"
               onclick={() => add(true)}
               disabled={commandPending || !can('media.play_now')}>Play now</button
             >
           </form>
+          <div class="presets">
+            <span class="presets-label">Quick Add:</span>
+            <button
+              type="button"
+              class="ghost preset-btn"
+              onclick={() => quickAdd('dQw4w9WgXcQ')}
+              disabled={commandPending || !can('queue.add')}>🍿 Rickroll</button
+            >
+            <button
+              type="button"
+              class="ghost preset-btn"
+              onclick={() => quickAdd('jfKfPfyJRdk')}
+              disabled={commandPending || !can('queue.add')}>🎵 Lofi Girl</button
+            >
+            <button
+              type="button"
+              class="ghost preset-btn"
+              onclick={() => quickAdd('4xDzrJKXOOY')}
+              disabled={commandPending || !can('queue.add')}>🌊 Synthwave</button
+            >
+            <button
+              type="button"
+              class="ghost preset-btn"
+              onclick={() => quickAdd('aqz-KE-bpKQ')}
+              disabled={commandPending || !can('queue.add')}>🐰 Bunny</button
+            >
+          </div>
           {#if room.playback.media}<div class="now">
               {#if watching}<img src={room.playback.media.thumbnail} alt="" />{:else}<span
                   class="thumbnail-placeholder"
@@ -912,5 +954,54 @@
     .add label {
       grid-column: auto;
     }
+  }
+  .input-container {
+    display: flex;
+    align-items: center;
+    position: relative;
+    width: 100%;
+  }
+  .input-container input {
+    padding-right: 2.5rem;
+    width: 100%;
+  }
+  .paste-btn {
+    position: absolute;
+    right: 0.2rem;
+    background: none !important;
+    border: none !important;
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 0.4rem;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+  }
+  .paste-btn:hover {
+    opacity: 1;
+  }
+  .presets {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+  }
+  .presets-label {
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+  .preset-btn {
+    background: var(--surface-elevated) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-sm);
+    padding: 0.25rem 0.5rem !important;
+    font-size: 0.78rem !important;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .preset-btn:hover {
+    border-color: var(--accent-primary) !important;
+    color: var(--accent-primary) !important;
   }
 </style>

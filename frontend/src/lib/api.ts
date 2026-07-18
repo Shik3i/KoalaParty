@@ -4,8 +4,12 @@ export interface Principal {
   accountId?: string;
   displayName: string;
   csrfToken: string;
+  isAdmin?: boolean;
 }
 let principal: Principal | null = null;
+export function getPrincipal() {
+  return principal;
+}
 let establishing: Promise<Principal> | null = null;
 async function currentPrincipal(): Promise<Principal | null> {
   const response = await fetch('/api/me');

@@ -24,6 +24,7 @@ type principal struct {
 	AccountID   string `json:"accountId,omitempty"`
 	DisplayName string `json:"displayName"`
 	CSRF        string `json:"csrfToken"`
+	IsAdmin     bool   `json:"isAdmin,omitempty"`
 }
 type identityRequest struct {
 	ID          string `json:"id"`
@@ -144,6 +145,9 @@ func (a *application) principalByIdentity(id string) (principal, error) {
 	err := a.db.QueryRow("SELECT id,account_id,display_name FROM identities WHERE id=?", id).Scan(&p.IdentityID, &account, &p.DisplayName)
 	if account.Valid {
 		p.AccountID = account.String
+		var isAdmin int
+		_ = a.db.QueryRow("SELECT is_admin FROM accounts WHERE id=?", p.AccountID).Scan(&isAdmin)
+		p.IsAdmin = isAdmin == 1
 	}
 	return p, err
 }
@@ -157,6 +161,9 @@ func (a *application) authenticate(r *http.Request) (principal, error) {
 	e = a.db.QueryRow(`SELECT i.id,i.account_id,i.display_name,s.csrf_token FROM sessions s JOIN identities i ON i.id=s.identity_id WHERE s.token_hash=? AND s.expires_at>CURRENT_TIMESTAMP`, tokenHash(c.Value)).Scan(&p.IdentityID, &account, &p.DisplayName, &p.CSRF)
 	if account.Valid {
 		p.AccountID = account.String
+		var isAdmin int
+		_ = a.db.QueryRow("SELECT is_admin FROM accounts WHERE id=?", p.AccountID).Scan(&isAdmin)
+		p.IsAdmin = isAdmin == 1
 	}
 	return p, e
 }

@@ -12,7 +12,9 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -22,13 +24,15 @@ import (
 type application struct {
 	db                *sql.DB
 	hub               *hub
-	sessionTTL        time.Duration
 	cookieSecure      bool
 	trustedOrigins    map[string]bool
+	trustedProxies    []*net.IPNet
+
+	mu                sync.RWMutex
+	sessionTTL        time.Duration
 	activityMaxAge    time.Duration
 	activityMaxEvents int
 	roomMaxIdle       time.Duration
-	trustedProxies    []*net.IPNet
 	publicRooms       bool
 }
 
@@ -68,6 +72,9 @@ func Run() error {
 	}
 	defer db.Close()
 	a := &application{db: db, hub: newHub(), sessionTTL: cfg.sessionTTL, cookieSecure: cfg.cookieSecure, trustedOrigins: cfg.trustedOrigins, trustedProxies: cfg.trustedProxies, activityMaxAge: cfg.activityMaxAge, activityMaxEvents: cfg.activityMaxEvents, roomMaxIdle: cfg.roomMaxIdle, publicRooms: cfg.publicRooms}
+	if err := a.loadSettingsFromDB(); err != nil {
+		return fmt.Errorf("load db settings: %w", err)
+	}
 	mux := http.NewServeMux()
 	authLimiter := newRateLimiter(20, time.Minute, a.trustedProxies)
 	commandLimiter := newRateLimiter(180, time.Minute, a.trustedProxies)
@@ -109,6 +116,12 @@ func Run() error {
 	mux.HandleFunc("GET /api/rooms/{roomId}/ws", a.requireAuth(a.websocket))
 	mux.HandleFunc("POST /api/rooms/{roomId}/reports", a.requireAuth(a.report))
 	mux.HandleFunc("GET /api/discover", a.discover)
+	mux.HandleFunc("GET /api/admin/stats", a.requireAdmin(a.adminStats))
+	mux.HandleFunc("GET /api/admin/settings", a.requireAdmin(a.adminSettings))
+	mux.HandleFunc("POST /api/admin/settings", a.requireAdmin(a.adminSettings))
+	mux.HandleFunc("GET /api/admin/reports", a.requireAdmin(a.adminReports))
+	mux.HandleFunc("POST /api/admin/reports/{reportId}/resolve", a.requireAdmin(a.resolveReport))
+	mux.HandleFunc("POST /api/admin/reports/{reportId}/delist", a.requireAdmin(a.delistReport))
 	webRoot := cfg.webRoot
 	mux.Handle("/", spaHandler(webRoot))
 	maintenanceCtx, cancelMaintenance := context.WithCancel(context.Background())
@@ -170,4 +183,135 @@ func securityHeaders(next http.Handler, csp string) http.Handler {
 		w.Header().Set("Content-Security-Policy", csp)
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (a *application) requireAdmin(next func(http.ResponseWriter, *http.Request, principal)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, e := a.authenticate(r)
+		if e != nil {
+			problem(w, 401, "authentication_required", "Establish an identity first.")
+			return
+		}
+		if r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("X-CSRF-Token") != p.CSRF {
+			problem(w, 403, "csrf_failed", "CSRF token is missing or invalid.")
+			return
+		}
+		if p.AccountID == "" {
+			problem(w, 403, "admin_required", "Administrator privileges required.")
+			return
+		}
+		var isAdmin int
+		err := a.db.QueryRow("SELECT is_admin FROM accounts WHERE id=?", p.AccountID).Scan(&isAdmin)
+		if err != nil || isAdmin != 1 {
+			problem(w, 403, "admin_required", "Administrator privileges required.")
+			return
+		}
+		next(w, r, p)
+	}
+}
+
+func (a *application) getSessionTTL() time.Duration {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.sessionTTL
+}
+
+func (a *application) setSessionTTL(d time.Duration) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sessionTTL = d
+}
+
+func (a *application) getActivityMaxAge() time.Duration {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.activityMaxAge
+}
+
+func (a *application) setActivityMaxAge(d time.Duration) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.activityMaxAge = d
+}
+
+func (a *application) getActivityMaxEvents() int {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.activityMaxEvents
+}
+
+func (a *application) setActivityMaxEvents(n int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.activityMaxEvents = n
+}
+
+func (a *application) getRoomMaxIdle() time.Duration {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.roomMaxIdle
+}
+
+func (a *application) setRoomMaxIdle(d time.Duration) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.roomMaxIdle = d
+}
+
+func (a *application) getPublicRooms() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.publicRooms
+}
+
+func (a *application) setPublicRooms(b bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.publicRooms = b
+}
+
+func (a *application) loadSettingsFromDB() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	rows, err := a.db.Query("SELECT key, value FROM settings")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var key, val string
+		if err := rows.Scan(&key, &val); err != nil {
+			return err
+		}
+		switch key {
+		case "session_ttl":
+			d, err := time.ParseDuration(val)
+			if err == nil {
+				a.sessionTTL = d
+			}
+		case "activity_max_age":
+			d, err := time.ParseDuration(val)
+			if err == nil {
+				a.activityMaxAge = d
+			}
+		case "activity_max_events":
+			n, err := strconv.Atoi(val)
+			if err == nil {
+				a.activityMaxEvents = n
+			}
+		case "room_max_idle":
+			d, err := time.ParseDuration(val)
+			if err == nil {
+				a.roomMaxIdle = d
+			}
+		case "public_rooms":
+			b, err := strconv.ParseBool(val)
+			if err == nil {
+				a.publicRooms = b
+			}
+		}
+	}
+	return rows.Err()
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/Shik3i/KoalaParty/backend/internal/database"
@@ -61,13 +62,20 @@ func Operator(args []string, stdout io.Writer) error {
 			return fmt.Errorf("usage: koalaparty operator delete-account <username>")
 		}
 		return deleteAccount(db, args[1])
+	case "set-admin":
+		if len(args) != 3 || (args[2] != "0" && args[2] != "1") {
+			return fmt.Errorf("usage: koalaparty operator set-admin <username> <1|0>")
+		}
+		isAdmin, _ := strconv.Atoi(args[2])
+		result, execErr := db.Exec("UPDATE accounts SET is_admin=? WHERE username=? COLLATE NOCASE", isAdmin, strings.TrimSpace(args[1]))
+		return requireChanged(result, execErr, "account")
 	default:
 		return operatorUsage()
 	}
 }
 
 func operatorUsage() error {
-	return fmt.Errorf("usage: koalaparty operator <backup|restore|reports|delete-room|delete-account> ...")
+	return fmt.Errorf("usage: koalaparty operator <backup|restore|reports|delete-room|delete-account|set-admin> ...")
 }
 
 func operateReports(db *sql.DB, args []string, stdout io.Writer) error {

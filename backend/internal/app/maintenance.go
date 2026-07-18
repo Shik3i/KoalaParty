@@ -19,10 +19,10 @@ func (a *application) maintenanceLoop(ctx context.Context) {
 	}
 }
 func (a *application) runMaintenance(ctx context.Context) {
-	cutoff := time.Now().Add(-a.activityMaxAge).UTC().Format("2006-01-02 15:04:05")
+	cutoff := time.Now().Add(-a.getActivityMaxAge()).UTC().Format("2006-01-02 15:04:05")
 	_, _ = a.db.ExecContext(ctx, "DELETE FROM room_events WHERE created_at < ?", cutoff)
-	_, _ = a.db.ExecContext(ctx, `DELETE FROM room_events WHERE id IN (SELECT id FROM (SELECT id,row_number() OVER(PARTITION BY room_id ORDER BY created_at DESC) n FROM room_events) WHERE n>?)`, a.activityMaxEvents)
-	roomCutoff := time.Now().Add(-a.roomMaxIdle).UTC().Format("2006-01-02 15:04:05")
+	_, _ = a.db.ExecContext(ctx, `DELETE FROM room_events WHERE id IN (SELECT id FROM (SELECT id,row_number() OVER(PARTITION BY room_id ORDER BY created_at DESC) n FROM room_events) WHERE n>?)`, a.getActivityMaxEvents())
+	roomCutoff := time.Now().Add(-a.getRoomMaxIdle()).UTC().Format("2006-01-02 15:04:05")
 	rows, e := a.db.QueryContext(ctx, "SELECT id FROM rooms WHERE deleted_at IS NULL AND last_active_at < ?", roomCutoff)
 	if e == nil {
 		var ids []string

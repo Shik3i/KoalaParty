@@ -238,7 +238,7 @@ func (a *application) friendAction(w http.ResponseWriter, r *http.Request, p pri
 	w.WriteHeader(204)
 }
 func (a *application) discover(w http.ResponseWriter, r *http.Request) {
-	if !a.publicRooms {
+	if !a.getPublicRooms() {
 		problem(w, 404, "public_rooms_disabled", "Public room discovery is disabled during the early beta.")
 		return
 	}
@@ -264,7 +264,7 @@ func (a *application) discover(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 func (a *application) report(w http.ResponseWriter, r *http.Request, p principal) {
-	if !a.publicRooms {
+	if !a.getPublicRooms() {
 		problem(w, 404, "public_rooms_disabled", "Public rooms are disabled.")
 		return
 	}

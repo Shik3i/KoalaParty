@@ -207,7 +207,7 @@ func (a *application) joinAndSnapshot(ctx context.Context, id string, p principa
 	return a.snapshot(ctx, id, p.IdentityID)
 }
 func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, error) {
-	s := snapshot{ID: id, Label: roomLabel(id), Me: me, Members: []member{}, Queue: []queueItem{}, Events: []event{}, PublicRoomsEnabled: a.publicRooms}
+	s := snapshot{ID: id, Label: roomLabel(id), Me: me, Members: []member{}, Queue: []queueItem{}, Events: []event{}, PublicRoomsEnabled: a.getPublicRooms()}
 	if e := a.db.QueryRowContext(ctx, "SELECT visibility,revision FROM rooms WHERE id=?", id).Scan(&s.Visibility, &s.Revision); e != nil {
 		return s, e
 	}

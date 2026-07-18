@@ -4,6 +4,14 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-18
+
+### Added
+
+- Web-based Admin Console (`/admin`) to view stats (online users, registered users, active rooms) and manage reports.
+- Database-backed dynamic settings editor for configuration variables.
+- One-click "Quick-Add Presets" and "Paste from Clipboard" helpers in the room queue UI.
+
 ## [0.2.1] - 2026-07-18
 
 ### Changed

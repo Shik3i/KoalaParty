@@ -192,3 +192,15 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 		a.hub.broadcast(room, s)
 	}
 }
+
+func (h *hub) onlineCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	unique := map[string]struct{}{}
+	for _, clients := range h.rooms {
+		for c := range clients {
+			unique[c.identity] = struct{}{}
+		}
+	}
+	return len(unique)
+}
