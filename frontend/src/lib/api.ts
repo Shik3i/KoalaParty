@@ -13,7 +13,7 @@ export function getPrincipal() {
 let establishing: Promise<Principal> | null = null;
 async function currentPrincipal(): Promise<Principal | null> {
   const response = await fetch('/api/me');
-  if (response.status === 401) return null;
+  if (response.status === 204 || response.status === 401) return null;
   if (!response.ok) throw new Error(await message(response));
   return (await response.json()) as Principal;
 }

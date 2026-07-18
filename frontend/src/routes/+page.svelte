@@ -17,8 +17,13 @@
       creating = false;
     }
   }
-  function join() {
+  function joinOrCreate() {
+    error = '';
     const value = roomCode.trim();
+    if (!value) {
+      createRoom();
+      return;
+    }
     const match = value.match(/(?:room\/)?([A-Z2-7]{16})$/i);
     if (!match) {
       error = 'Enter a valid 16-character room code or link.';
@@ -35,28 +40,26 @@
     <h1>Watch YouTube together.<br /><span>Keep it private.</span></h1>
     <p class="lede">Shared playback and a collaborative queue without accounts, advertising, analytics, or tracking.</p>
     <div class="actions">
-      <button onclick={createRoom} disabled={creating}>{creating ? 'Creating…' : 'Create a room'}</button><a
-        class="button secondary"
-        href="/discover">Browse public rooms</a
-      >
+      <a class="button secondary" href="/discover">Browse public rooms</a>
     </div>
-    {#if error}<p class="error" role="alert">{error}</p>{/if}
     <p class="warning">Anonymous rooms belong to this browser. Link an account before clearing browser storage.</p>
   </section>
   <aside class="join panel">
     <div class="room-mark" aria-hidden="true">🌿</div>
-    <h2>Join the living room</h2>
-    <p class="muted">Paste an invite link or room code.</p>
+    <h2>Start a living room</h2>
+    <p class="muted">Paste an invite link to join friends — or leave it empty to open a fresh room.</p>
     <form
       onsubmit={(e) => {
         e.preventDefault();
-        join();
+        joinOrCreate();
       }}
     >
       <label>Room link or code<input bind:value={roomCode} placeholder="7FD3KQ9X…" autocomplete="off" /></label><button
-        type="submit">Join room</button
+        type="submit"
+        disabled={creating}>{creating ? 'Creating…' : roomCode.trim() ? 'Join room' : 'Create a room'}</button
       >
     </form>
+    {#if error}<p class="error" role="alert">{error}</p>{/if}
     <div class="signals"><span>● Live sync</span><span>∞ Permanent</span><span>◌ Account optional</span></div>
   </aside>
 </main>

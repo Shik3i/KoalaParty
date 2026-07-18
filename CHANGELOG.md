@@ -4,6 +4,27 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-18
+
+### Fixed
+
+- Playback now stays in sync when the viewer uses the video's own controls: play, pause, and seek performed directly in the YouTube player are broadcast to every participant and recorded in the activity feed. Previously only the in-app buttons synchronized, so scrubbing or pausing inside the player was invisible to others.
+- Live synchronization during local `npm run dev`: the Vite dev proxy now forwards WebSocket connections, so rooms no longer sit on a permanent "Reconnecting" state in development.
+
+### Added
+
+- Real YouTube video titles, resolved server-side through YouTube's public oEmbed endpoint when a video is queued and shown in the queue, now-playing, and activity feed. Configurable with `KOALAPARTY_YOUTUBE_METADATA` (default `true`); set to `false` for zero outbound calls, which falls back to the video ID.
+- One-click "Play from queue" control on the idle player to start the queue without hunting for the skip button.
+- `HEALTHCHECK` in the Docker image using the built-in `healthcheck` subcommand, so plain `docker run` and GHCR deployments report health without Compose.
+
+### Changed
+
+- Unified the landing page into a single entry point: the room field creates a fresh room when empty and joins when a code or link is present, replacing the separate create/join buttons.
+- Replaced the manual "seek in seconds" field with direct scrubbing on the player's own timeline, now that seeks synchronize.
+- Improved light-theme contrast for muted text and warnings to meet WCAG AA; the home and room pages score 100 for Lighthouse accessibility, best practices, and SEO.
+- `/api/me` now returns `204 No Content` instead of `401` for anonymous first-time visitors, removing a spurious browser-console error.
+- Documented the server-side oEmbed title lookup in the privacy policy and notes, and corrected the release description in the README.
+
 ## [0.2.7] - 2026-07-18
 
 ### Added

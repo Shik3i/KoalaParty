@@ -37,7 +37,7 @@ Release images support `linux/amd64` and `linux/arm64`:
 
 ```sh
 cp .env.example .env
-docker pull ghcr.io/shik3i/koalaparty:0.2.7
+docker pull ghcr.io/shik3i/koalaparty:0.3.0
 docker compose -f deploy/docker-compose.ghcr.yml up -d
 ```
 
@@ -65,7 +65,7 @@ CI additionally runs dependency scanning, a frontend audit, Docker build/health 
 
 ## Releases
 
-Stable tags matching `vX.Y.Z` publish a multi-architecture GHCR image with SBOM, provenance, and attestation, plus checksummed deployment bundles and a GitHub Release generated from the matching changelog section.
+Pushing a stable tag matching `vX.Y.Z` runs the full verification suite (including the tag/changelog check in `scripts/verify-release.mjs`), then builds and pushes a multi-architecture GHCR image (`linux/amd64`, `linux/arm64`) with SBOM, provenance, and a signed build attestation.
 
 ## License
 

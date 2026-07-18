@@ -23,6 +23,7 @@ type config struct {
 	roomMaxIdle       time.Duration
 	publicRooms       bool
 	production        bool
+	youtubeMetadata   bool
 }
 
 func loadConfig() (config, error) {
@@ -38,14 +39,19 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
+	youtubeMetadata, err := parseBool("KOALAPARTY_YOUTUBE_METADATA", true)
+	if err != nil {
+		return config{}, err
+	}
 	c := config{
-		addr:           env("KOALAPARTY_ADDR", ":8080"),
-		dbPath:         env("KOALAPARTY_DB", "koalaparty.db"),
-		webRoot:        env("KOALAPARTY_WEB_ROOT", "../frontend/build"),
-		cookieSecure:   cookieSecure,
-		trustedOrigins: map[string]bool{},
-		publicRooms:    publicRooms,
-		production:     production,
+		addr:            env("KOALAPARTY_ADDR", ":8080"),
+		dbPath:          env("KOALAPARTY_DB", "koalaparty.db"),
+		webRoot:         env("KOALAPARTY_WEB_ROOT", "../frontend/build"),
+		cookieSecure:    cookieSecure,
+		trustedOrigins:  map[string]bool{},
+		publicRooms:     publicRooms,
+		production:      production,
+		youtubeMetadata: youtubeMetadata,
 	}
 	if c.sessionTTL, err = parseDuration("KOALAPARTY_SESSION_TTL", "168h"); err != nil {
 		return config{}, err

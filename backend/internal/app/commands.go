@@ -99,6 +99,19 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	if management && role == "member" {
 		return snapshot{}, errDenied
 	}
+	// Resolve the media title before opening the transaction: the oEmbed lookup
+	// is a network call and must not hold a SQLite write open.
+	var mediaTitle string
+	if c.Type == "queue.add" || c.Type == "queue.play_now" {
+		var in struct {
+			VideoID string `json:"videoId"`
+			Title   string `json:"title"`
+		}
+		if json.Unmarshal(c.Payload, &in) != nil || !youtubeID.MatchString(in.VideoID) {
+			return snapshot{}, errors.New("invalid YouTube video ID")
+		}
+		mediaTitle = a.resolveMediaTitle(ctx, in.VideoID, in.Title)
+	}
 	tx, e := a.db.BeginTx(ctx, nil)
 	if e != nil {
 		return snapshot{}, e
@@ -139,14 +152,8 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		if json.Unmarshal(c.Payload, &in) != nil || !youtubeID.MatchString(in.VideoID) {
 			return snapshot{}, errors.New("invalid YouTube video ID")
 		}
-		if len(in.Title) > 200 {
-			in.Title = in.Title[:200]
-		}
-		if strings.TrimSpace(in.Title) == "" {
-			in.Title = "YouTube video " + in.VideoID
-		}
 		mediaID := "YT" + in.VideoID
-		_, e = tx.Exec("INSERT INTO media_items(id,provider,provider_media_id,title,thumbnail_url) VALUES(?,'youtube',?,?,?) ON CONFLICT(provider,provider_media_id) DO UPDATE SET title=excluded.title", mediaID, in.VideoID, in.Title, "https://i.ytimg.com/vi/"+in.VideoID+"/mqdefault.jpg")
+		_, e = tx.Exec("INSERT INTO media_items(id,provider,provider_media_id,title,thumbnail_url) VALUES(?,'youtube',?,?,?) ON CONFLICT(provider,provider_media_id) DO UPDATE SET title=excluded.title", mediaID, in.VideoID, mediaTitle, "https://i.ytimg.com/vi/"+in.VideoID+"/mqdefault.jpg")
 		if e == nil && c.Type == "queue.add" {
 			var pos int
 			_ = tx.QueryRow("SELECT coalesce(max(position),-1)+1 FROM room_queue_items WHERE room_id=?", room).Scan(&pos)
@@ -156,7 +163,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			eventType = "media.activated"
 		}
 		payload["videoId"] = in.VideoID
-		payload["title"] = in.Title
+		payload["title"] = mediaTitle
 	case "queue.remove":
 		var in struct {
 			ItemID string `json:"itemId"`

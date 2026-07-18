@@ -5,12 +5,22 @@
     videoId = null,
     status = 'paused',
     position = 0,
+    canControl = true,
+    canSeek = true,
+    onPlay = () => {},
+    onPause = () => {},
+    onSeek = () => {},
     onEnded = () => {},
   }: {
     enabled?: boolean;
     videoId?: string | null;
     status?: string;
     position?: number;
+    canControl?: boolean;
+    canSeek?: boolean;
+    onPlay?: (position: number) => void;
+    onPause?: (position: number) => void;
+    onSeek?: (position: number) => void;
     onEnded?: () => void;
   } = $props();
   let host: HTMLDivElement;
@@ -21,6 +31,27 @@
   let ready = false;
   let lastVideo: string | null = null;
   let playerError = $state('');
+
+  // Sync bookkeeping. The server is authoritative: `expectedPlaying`/`expectedPosition`
+  // track the state we last drove the player into so we can tell a genuine user
+  // gesture (native play/pause/scrubber) apart from our own programmatic updates.
+  const ENDED = 0,
+    PLAYING = 1,
+    PAUSED = 2;
+  const SEEK_THRESHOLD = 2; // unexpected jump (seconds) that counts as a user seek
+  const RESYNC_THRESHOLD = 2.5; // drift (seconds) before we re-align a follower
+  let expectedPlaying = false;
+  let expectedPosition = 0;
+  let guardUntil = 0; // suppress seek detection right after we drive the player
+  let monitor: ReturnType<typeof setInterval> | null = null;
+
+  function currentTime(): number {
+    return player?.getCurrentTime?.() ?? 0;
+  }
+  function guard(ms = 1400) {
+    guardUntil = Date.now() + ms;
+  }
+
   type YTWindow = Window & { YT?: any; onYouTubeIframeAPIReady?: () => void };
   async function loadAPI() {
     const w = window as YTWindow;
@@ -68,19 +99,70 @@
         onReady: () => {
           ready = true;
           sync();
+          startMonitor();
         },
-        onStateChange: (e: any) => {
-          if (e.data === 0) onEnded();
-        },
+        onStateChange: (e: any) => handleStateChange(e.data),
         onError: () => {
           playerError = 'This video is unavailable or cannot be embedded.';
         },
       },
     });
   }
+  // React to the local viewer operating the native player chrome and forward the
+  // gesture to the server. If the viewer lacks the capability, snap the player
+  // back to the authoritative state instead of emitting.
+  function handleStateChange(state: number) {
+    if (state === ENDED) {
+      onEnded();
+      return;
+    }
+    if (!ready || !lastVideo) return;
+    if (state === PLAYING && !expectedPlaying) {
+      if (canControl) onPlay(currentTime());
+      else {
+        guard();
+        player.pauseVideo?.();
+      }
+    } else if (state === PAUSED && expectedPlaying) {
+      if (canControl) onPause(currentTime());
+      else {
+        guard();
+        player.playVideo?.();
+      }
+    }
+  }
+  function startMonitor() {
+    stopMonitor();
+    monitor = setInterval(tick, 1000);
+  }
+  function stopMonitor() {
+    if (monitor) clearInterval(monitor);
+    monitor = null;
+  }
+  // YouTube exposes no "seeked" event, so we watch the playhead: a jump larger
+  // than one poll interval can explain is a scrubber drag.
+  function tick() {
+    if (!player || !ready || !lastVideo) return;
+    const t = currentTime();
+    if (Date.now() < guardUntil) {
+      expectedPosition = t;
+      return;
+    }
+    const state = player.getPlayerState?.();
+    const tolerance = state === PLAYING ? SEEK_THRESHOLD : 1;
+    if ((state === PLAYING || state === PAUSED) && Math.abs(t - expectedPosition) > tolerance) {
+      if (canSeek) onSeek(t);
+      else {
+        guard();
+        player.seekTo(expectedPosition, true);
+      }
+    }
+    expectedPosition = t;
+  }
   onMount(() => {
     return () => {
       disposed = true;
+      stopMonitor();
       player?.destroy();
     };
   });
@@ -89,6 +171,7 @@
   });
   function sync() {
     if (!ready) return;
+    expectedPlaying = status === 'playing';
     if (!videoId) {
       if (lastVideo) {
         player.stopVideo?.();
@@ -99,14 +182,19 @@
     }
     if (lastVideo !== videoId) {
       const request = { videoId, startSeconds: Math.max(0, position) };
+      guard(3000);
       if (status === 'playing') player.loadVideoById(request);
       else player.cueVideoById(request);
       lastVideo = videoId;
+      expectedPosition = Math.max(0, position);
     } else {
-      const delta = Math.abs((player.getCurrentTime?.() || 0) - position);
-      if (delta > 2.5) player.seekTo(position, true);
-      if (status === 'playing') player.playVideo();
-      else player.pauseVideo();
+      if (Math.abs(currentTime() - position) > RESYNC_THRESHOLD) {
+        guard();
+        player.seekTo(position, true);
+        expectedPosition = position;
+      }
+      if (status === 'playing') player.playVideo?.();
+      else player.pauseVideo?.();
     }
   }
   $effect(() => {

@@ -105,6 +105,12 @@
       under Article 6(1)(a) GDPR. Reload the page to stop the embedded player and withdraw consent for future requests;
       this does not affect processing that already occurred.
     </p>
+    <p>
+      When a video is added to a room, the server makes one request to YouTube's public oEmbed endpoint to resolve the
+      video's title. This is a server-to-YouTube request: it reveals the video ID and the server's IP address, never
+      your browser or IP. Operators can disable it entirely with <code>KOALAPARTY_YOUTUBE_METADATA=false</code>, in
+      which case titles fall back to the video ID.
+    </p>
   </section>
 
   <section>

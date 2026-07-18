@@ -28,4 +28,5 @@ ENV KOALAPARTY_ADDR=:8080 \
     KOALAPARTY_PRODUCTION=true
 USER koala
 EXPOSE 8080
+HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=5 CMD ["/koalaparty", "healthcheck"]
 ENTRYPOINT ["/koalaparty"]

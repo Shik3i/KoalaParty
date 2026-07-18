@@ -17,7 +17,6 @@
   let connected = false;
   let watching = false;
   let videoURL = '';
-  let seekTo = 0;
   let mobileTab: 'queue' | 'people' | 'activity' = 'queue';
   let dragging: string | null = null;
   let settingsOpen = false;
@@ -326,7 +325,12 @@
             enabled={watching}
             videoId={room.playback.media?.providerId}
             status={watching ? room.playback.status : 'paused'}
-            position={room.playback.position}
+            position={currentPlaybackPosition(room.playback, roomReceivedAt)}
+            canControl={can('playback.play_pause')}
+            canSeek={can('playback.seek')}
+            onPlay={(pos) => command('player.play', { position: pos })}
+            onPause={(pos) => command('player.pause', { position: pos })}
+            onSeek={(pos) => command('player.seek', { position: pos })}
             onEnded={() => can('queue.skip') && command('queue.skip')}
           />{#if !watching}<button
               class="start"
@@ -338,30 +342,27 @@
             <p class="youtube-consent">
               By selecting “Start watching”, you consent to loading YouTube's privacy-enhanced player.
               <a href="/privacy">Privacy details</a>
-            </p>{/if}
+            </p>{/if}{#if watching && !room.playback.media && room.queue.length && can('queue.skip')}<button
+              class="start"
+              onclick={() => command('queue.skip')}
+              disabled={commandPending}>▶ Play from queue</button
+            >{/if}
         </div>
         <div class="controls panel">
           <div class="transport">
             <button
+              class="play-toggle"
               onclick={() =>
                 command(room!.playback.status === 'playing' ? 'player.pause' : 'player.play', {
                   position: currentPlaybackPosition(room!.playback, roomReceivedAt),
                 })}
               disabled={commandPending || !can('playback.play_pause')}
               >{room.playback.status === 'playing' ? 'Pause' : 'Play'}</button
-            ><label class="seek"
-              ><span>Seek in seconds</span><input
-                type="number"
-                min="0"
-                max="604800"
-                bind:value={seekTo}
-                disabled={commandPending || !can('playback.seek')}
-              /></label
-            ><button
-              class="secondary"
-              onclick={() => command('player.seek', { position: Number(seekTo) })}
-              disabled={commandPending || !can('playback.seek')}>Seek</button
-            ><span class="revision">Revision {room.revision}</span>
+            ><span class="transport-hint"
+              >{watching
+                ? 'Play, pause and scrub with the video’s own controls — everyone stays in sync.'
+                : 'Start watching to scrub and follow along.'}</span
+            >
           </div>
           <form
             class="add"
@@ -660,17 +661,16 @@
     gap: 0.7rem;
     align-items: end;
   }
-  .seek {
-    grid-template-columns: auto 6rem;
+  .transport {
     align-items: center;
   }
-  .seek input {
-    width: 7rem;
+  .play-toggle {
+    min-width: 6.5rem;
   }
-  .revision {
-    margin-left: auto;
+  .transport-hint {
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: 0.82rem;
+    line-height: 1.4;
   }
   .add {
     border-top: 1px solid var(--border-subtle);
@@ -934,16 +934,6 @@
     }
     .room-actions {
       justify-content: flex-start;
-    }
-    .transport {
-      display: grid;
-      grid-template-columns: auto 1fr auto;
-    }
-    .seek {
-      display: none;
-    }
-    .revision {
-      margin: 0;
     }
     .room-shell {
       padding: 0.7rem;

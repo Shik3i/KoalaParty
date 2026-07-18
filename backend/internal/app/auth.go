@@ -181,7 +181,18 @@ func (a *application) requireAuth(next func(http.ResponseWriter, *http.Request, 
 		next(w, r, p)
 	}
 }
-func (a *application) me(w http.ResponseWriter, r *http.Request, p principal) { writeJSON(w, 200, p) }
+
+// me reports the current principal, or 204 when no session exists yet. Using a
+// 2xx for the anonymous case keeps first-visit probes out of the browser's
+// error console (unlike a 401).
+func (a *application) me(w http.ResponseWriter, r *http.Request) {
+	p, e := a.authenticate(r)
+	if e != nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, 200, p)
+}
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	d := json.NewDecoder(r.Body)

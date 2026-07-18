@@ -28,6 +28,11 @@ type application struct {
 	trustedOrigins map[string]bool
 	trustedProxies []*net.IPNet
 
+	// fetchTitle resolves a human-readable YouTube title for a video ID. It is
+	// nil when metadata lookups are disabled (and in tests) so the command path
+	// makes no outbound requests.
+	fetchTitle func(ctx context.Context, videoID string) string
+
 	mu                sync.RWMutex
 	sessionTTL        time.Duration
 	activityMaxAge    time.Duration
@@ -72,6 +77,9 @@ func Run() error {
 	}
 	defer db.Close()
 	a := &application{db: db, hub: newHub(), sessionTTL: cfg.sessionTTL, cookieSecure: cfg.cookieSecure, trustedOrigins: cfg.trustedOrigins, trustedProxies: cfg.trustedProxies, activityMaxAge: cfg.activityMaxAge, activityMaxEvents: cfg.activityMaxEvents, roomMaxIdle: cfg.roomMaxIdle, publicRooms: cfg.publicRooms}
+	if cfg.youtubeMetadata {
+		a.fetchTitle = fetchYouTubeTitle
+	}
 	if err := a.loadSettingsFromDB(); err != nil {
 		return fmt.Errorf("load db settings: %w", err)
 	}
@@ -91,7 +99,7 @@ func Run() error {
 		writeJSON(w, 200, map[string]string{"status": "ready"})
 	})
 	mux.HandleFunc("POST /api/identity/exchange", authLimiter.wrap(a.exchangeIdentity))
-	mux.HandleFunc("GET /api/me", a.requireAuth(a.me))
+	mux.HandleFunc("GET /api/me", a.me)
 	mux.HandleFunc("POST /api/accounts/register", a.requireAuth(a.register))
 	mux.HandleFunc("POST /api/accounts/login", authLimiter.wrap(a.login))
 	mux.HandleFunc("POST /api/accounts/logout", a.requireAuth(a.logout))
