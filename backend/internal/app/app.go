@@ -22,11 +22,11 @@ import (
 )
 
 type application struct {
-	db                *sql.DB
-	hub               *hub
-	cookieSecure      bool
-	trustedOrigins    map[string]bool
-	trustedProxies    []*net.IPNet
+	db             *sql.DB
+	hub            *hub
+	cookieSecure   bool
+	trustedOrigins map[string]bool
+	trustedProxies []*net.IPNet
 
 	mu                sync.RWMutex
 	sessionTTL        time.Duration
