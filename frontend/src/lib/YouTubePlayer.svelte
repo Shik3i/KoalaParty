@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { Play, Warning, Hourglass, SkipForward } from 'phosphor-svelte';
   let {
     enabled = false,
     videoId = null,
@@ -14,6 +15,7 @@
     onSeek = () => {},
     onEnded = () => {},
     onSkip = undefined,
+    onDuration = () => {},
   }: {
     enabled?: boolean;
     videoId?: string | null;
@@ -28,6 +30,7 @@
     onSeek?: (position: number) => void;
     onEnded?: () => void;
     onSkip?: (() => void) | undefined;
+    onDuration?: (duration: number) => void;
   } = $props();
   let host: HTMLDivElement;
   let player: any = null;
@@ -158,11 +161,17 @@
   // YouTube exposes no "seeked" event. We distinguish a local scrub (a discontinuity
   // in the player's OWN timeline) from ordinary drift (divergence from the server's
   // expected position). The first is broadcast; the second is silently corrected.
+  let reportedDuration = 0;
   function tick() {
     if (!player || !ready || !lastVideo) return;
     const now = Date.now();
     const t = currentTime();
     const state = player.getPlayerState?.();
+    const duration = player.getDuration?.() ?? 0;
+    if (duration > 0 && Math.abs(duration - reportedDuration) > 0.5) {
+      reportedDuration = duration;
+      onDuration(duration);
+    }
     if (now < guardUntil) {
       prevTime = t;
       prevWall = now;
@@ -253,13 +262,17 @@
 <div class="player">
   <div bind:this={host}></div>
   {#if playerError}<div class="player-error" role="alert">
-      <span>⚠</span>
+      <span><Warning size={38} weight="fill" /></span>
       <p>{playerError}</p>
       <small>Try another video or reload the room.</small>
-      {#if onSkip}<button class="secondary skip-broken" onclick={onSkip}>Skip this video</button>{/if}
+      {#if onSkip}<button class="secondary skip-broken" onclick={onSkip}
+          ><SkipForward size={16} weight="fill" />Skip this video</button
+        >{/if}
     </div>{/if}
   {#if !videoId}<div class="empty">
-      <span>{hasQueue ? '⏳' : '▶'}</span>
+      <span
+        >{#if hasQueue}<Hourglass size={40} weight="regular" />{:else}<Play size={40} weight="fill" />{/if}</span
+      >
       <p>{hasQueue ? 'Nothing playing right now.' : 'Add a YouTube video to start watching.'}</p>
     </div>{/if}
 </div>

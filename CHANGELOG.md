@@ -4,7 +4,18 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
-## [0.3.2] - 2026-07-18
+## [0.4.0] - 2026-07-18
+
+### Added
+
+- A synchronized playback progress bar under the player with elapsed/total time, visible to everyone in the room (even before pressing "Start watching") and reflecting the shared position live.
+- Consistent [Phosphor](https://phosphoricons.com/) icons across navigation, room controls, queue actions, status toasts, player states, and the landing page (the playful quick-add emoji are kept).
+- Space Grotesk display typeface for headings, self-hosted (no third-party font requests) and bundled with its SIL Open Font License.
+- Open Graph and Twitter Card metadata plus light/dark `theme-color`, so shared links render with a proper title and description.
+
+### Changed
+
+- Motion pass, all respecting `prefers-reduced-motion`: status toasts slide in, the confirm dialog fades and scales, queue reordering animates items into place, buttons lift subtly on hover, and the landing hero has a slow ambient glow.
 
 ### Fixed
 

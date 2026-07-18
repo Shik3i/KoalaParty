@@ -1,3 +1,10 @@
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/space-grotesk-latin.woff2') format('woff2');
+}
 * {
   box-sizing: border-box;
 }
@@ -31,10 +38,24 @@ button,
   gap: 0.45rem;
   align-items: center;
   justify-content: center;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.12s ease,
+    box-shadow 0.15s ease;
 }
 button:hover,
 .button:hover {
   background: var(--accent-hover);
+}
+button:not(:disabled):not(.ghost):hover,
+.button:hover {
+  transform: translateY(-1px);
+}
+button:not(:disabled):active,
+.button:active {
+  transform: translateY(0);
 }
 button.secondary,
 .button.secondary {
@@ -84,12 +105,17 @@ h3,
 p {
   margin-top: 0;
 }
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+}
 h1 {
-  letter-spacing: -0.04em;
+  letter-spacing: -0.03em;
   line-height: 1.03;
 }
 h2 {
-  letter-spacing: -0.025em;
+  letter-spacing: -0.02em;
 }
 .panel {
   background: var(--surface-panel);

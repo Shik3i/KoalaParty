@@ -2,6 +2,17 @@
   import { goto } from '$app/navigation';
   import { api } from '$lib/api';
   import KoalaSyncPromo from '$lib/KoalaSyncPromo.svelte';
+  import {
+    Compass,
+    Broadcast,
+    Infinity as InfinityIcon,
+    UserCircle,
+    FilmSlate,
+    ListPlus,
+    ShieldCheck,
+    GithubLogo,
+    ArrowRight,
+  } from 'phosphor-svelte';
   let roomCode = '';
   let creating = false;
   let error = '';
@@ -47,17 +58,18 @@
 
 <svelte:head><title>KoalaParty — Watch YouTube together privately</title></svelte:head>
 <main class="landing">
+  <div class="hero-glow" aria-hidden="true"></div>
   <section class="hero">
     <div class="eyebrow">Your permanent digital living room</div>
     <h1>Watch YouTube together.<br /><span>Keep it private.</span></h1>
     <p class="lede">Shared playback and a collaborative queue without accounts, advertising, analytics, or tracking.</p>
     <div class="actions">
-      <a class="button secondary" href="/discover">Browse public rooms</a>
+      <a class="button secondary" href="/discover"><Compass size={18} weight="bold" />Browse public rooms</a>
     </div>
     <p class="warning">Anonymous rooms belong to this browser. Link an account before clearing browser storage.</p>
   </section>
   <aside class="join panel">
-    <div class="room-mark" aria-hidden="true">🌿</div>
+    <div class="room-mark" aria-hidden="true">🐨</div>
     <h2>Start a living room</h2>
     <p class="muted">Paste an invite link to join friends — or leave it empty to open a fresh room.</p>
     <form
@@ -68,23 +80,44 @@
     >
       <label>Room link or code<input bind:value={roomCode} placeholder="7FD3KQ9X…" autocomplete="off" /></label><button
         type="submit"
-        disabled={creating}>{creating ? 'Creating…' : roomCode.trim() ? 'Join room' : 'Create a room'}</button
+        disabled={creating}
+        >{creating ? 'Creating…' : roomCode.trim() ? 'Join room' : 'Create a room'}<ArrowRight
+          size={17}
+          weight="bold"
+        /></button
       >
     </form>
     {#if error}<p class="error" role="alert">{error}</p>{/if}
-    <div class="signals"><span>● Live sync</span><span>∞ Permanent</span><span>◌ Account optional</span></div>
+    <div class="signals">
+      <span><Broadcast size={15} weight="bold" />Live sync</span><span
+        ><InfinityIcon size={15} weight="bold" />Permanent</span
+      ><span><UserCircle size={15} weight="bold" />Account optional</span>
+    </div>
   </aside>
 </main>
 <section class="features">
-  <article><b>Shared player</b><span>Play, pause, seek, and stay together.</span></article>
-  <article><b>Open queue</b><span>Everyone can add and arrange videos by default.</span></article>
-  <article><b>Real privacy</b><span>No analytics scripts, ads, fingerprinting, or third-party fonts.</span></article>
-  <article><b>Public source</b><span>Self-host with Go, SQLite, Docker, and Caddy.</span></article>
+  <article>
+    <FilmSlate size={24} weight="duotone" /><b>Shared player</b><span>Play, pause, seek, and stay together.</span>
+  </article>
+  <article>
+    <ListPlus size={24} weight="duotone" /><b>Open queue</b><span>Everyone can add and arrange videos by default.</span>
+  </article>
+  <article>
+    <ShieldCheck size={24} weight="duotone" /><b>Real privacy</b><span
+      >No analytics scripts, ads, fingerprinting, or third-party fonts.</span
+    >
+  </article>
+  <article>
+    <GithubLogo size={24} weight="duotone" /><b>Public source</b><span
+      >Self-host with Go, SQLite, Docker, and Caddy.</span
+    >
+  </article>
 </section>
 <KoalaSyncPromo />
 
 <style>
   .landing {
+    position: relative;
     max-width: 1180px;
     margin: auto;
     padding: clamp(3rem, 9vw, 8rem) clamp(1rem, 4vw, 3rem);
@@ -92,6 +125,32 @@
     grid-template-columns: 1.15fr 0.75fr;
     gap: clamp(2rem, 7vw, 7rem);
     align-items: center;
+  }
+  .hero-glow {
+    position: absolute;
+    inset: -20% -10% auto -10%;
+    height: 60%;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(40% 55% at 20% 30%, color-mix(in srgb, var(--accent-primary) 24%, transparent), transparent 70%),
+      radial-gradient(35% 50% at 80% 20%, color-mix(in srgb, var(--accent-hover) 20%, transparent), transparent 70%);
+    filter: blur(28px);
+    opacity: 0.9;
+    animation: heroDrift 16s ease-in-out infinite alternate;
+  }
+  @keyframes heroDrift {
+    from {
+      transform: translate3d(-2%, -1%, 0) scale(1);
+    }
+    to {
+      transform: translate3d(3%, 2%, 0) scale(1.08);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-glow {
+      animation: none;
+    }
   }
   .eyebrow {
     text-transform: uppercase;
@@ -149,6 +208,14 @@
     color: var(--text-muted);
     font-size: 0.78rem;
   }
+  .signals span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .signals :global(svg) {
+    color: var(--accent-primary);
+  }
   .features {
     max-width: 1180px;
     margin: 0 auto 4rem;
@@ -166,6 +233,14 @@
     padding: 1.5rem;
     display: grid;
     gap: 0.5rem;
+    transition: background 0.15s ease;
+  }
+  .features article:hover {
+    background: var(--surface-hover);
+  }
+  .features article :global(svg) {
+    color: var(--accent-primary);
+    margin-bottom: 0.2rem;
   }
   .features span {
     color: var(--text-muted);

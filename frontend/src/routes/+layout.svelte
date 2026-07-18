@@ -4,6 +4,7 @@
   import '../lib/styles/themes/dark.css';
   import '../lib/styles/base.css';
   import { onMount } from 'svelte';
+  import { Compass, FilmSlate, UsersThree, UserCircle, ShieldStar } from 'phosphor-svelte';
   import { applyTheme, initialTheme, type Theme } from '$lib/theme';
   import { establish, type Principal } from '$lib/api';
   let { children } = $props();
@@ -21,13 +22,32 @@
   }
 </script>
 
-<svelte:head><meta name="theme-color" content="#14271e" /></svelte:head>
+<svelte:head>
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f2f3e9" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d1b15" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="KoalaParty" />
+  <meta property="og:title" content="KoalaParty — Watch YouTube together privately" />
+  <meta
+    property="og:description"
+    content="Synchronized YouTube watch parties with a shared queue — no accounts, ads, analytics, or tracking."
+  />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="KoalaParty — Watch YouTube together privately" />
+  <meta
+    name="twitter:description"
+    content="Synchronized YouTube watch parties with a shared queue — no accounts, ads, analytics, or tracking."
+  />
+</svelte:head>
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
   <a class="brand" href="/"><span aria-hidden="true">🐨</span> KoalaParty</a>
   <nav aria-label="Main navigation">
-    <a href="/discover">Discover</a><a href="/rooms">My rooms</a><a href="/friends">Friends</a
-    >{#if principal?.isAdmin}<a href="/admin">Admin</a>{/if}<a href="/account">Account</a>
+    <a href="/discover"><Compass size={17} weight="bold" />Discover</a><a href="/rooms"
+      ><FilmSlate size={17} weight="bold" />My rooms</a
+    ><a href="/friends"><UsersThree size={17} weight="bold" />Friends</a>{#if principal?.isAdmin}<a href="/admin"
+        ><ShieldStar size={17} weight="bold" />Admin</a
+      >{/if}<a href="/account"><UserCircle size={17} weight="bold" />Account</a>
   </nav>
   <label class="theme"
     ><span class="sr-only">Theme</span><select bind:value={theme} onchange={change}
@@ -83,10 +103,17 @@
     margin-left: auto;
   }
   .site-header nav a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
     color: var(--text-secondary);
     text-decoration: none;
     font-weight: 650;
     font-size: 0.9rem;
+    transition: color 0.15s ease;
+  }
+  .site-header nav a:hover {
+    color: var(--accent-primary);
   }
   .theme {
     width: 9.2rem;

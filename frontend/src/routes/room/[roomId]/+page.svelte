@@ -1,9 +1,28 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { fly, scale, fade } from 'svelte/transition';
+  import { flip } from 'svelte/animate';
   import { page } from '$app/state';
   import { api, establish, websocketURL } from '$lib/api';
   import YouTubePlayer from '$lib/YouTubePlayer.svelte';
   import { formatActivity, parseYouTube, type Snapshot, type Member } from '$lib/room';
+  import {
+    LinkSimple,
+    Gear,
+    X,
+    Play,
+    Pause,
+    SkipForward,
+    Plus,
+    ClipboardText,
+    DotsSixVertical,
+    DotsThreeVertical,
+    CaretUp,
+    CaretDown,
+    CheckCircle,
+    WarningCircle,
+    Info,
+  } from 'phosphor-svelte';
   const roomId = (page.params.roomId ?? '').toUpperCase();
   let room: Snapshot | null = null;
   // The playback anchor is only re-baselined when playback actually changes
@@ -47,14 +66,21 @@
       pb.status !== playbackAnchor.status ||
       mediaId !== playbackAnchor.mediaId
     ) {
+      if (mediaId !== playbackAnchor.mediaId) mediaDuration = 0;
       playbackAnchor = { position: pb.position, status: pb.status, mediaId, at: Date.now() };
     }
     room = next;
   }
-  const livePosition = () =>
+  const livePosition = (now = Date.now()) =>
     playbackAnchor.status === 'playing'
-      ? playbackAnchor.position + (Date.now() - playbackAnchor.at) / 1000
+      ? playbackAnchor.position + (now - playbackAnchor.at) / 1000
       : playbackAnchor.position;
+  let mediaDuration = 0;
+  let nowTick = Date.now();
+  function fmtTime(seconds: number) {
+    const s = Math.max(0, Math.floor(seconds));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
   function showNotice(message: string, clearAfter = 0, kind: 'info' | 'success' | 'error' = 'info') {
     if (noticeTimer) clearTimeout(noticeTimer);
     notice = message;
@@ -129,11 +155,13 @@
         if (!disposed) error = e instanceof Error ? e.message : 'Could not join room.';
       }
     })();
+    const progressTimer = setInterval(() => (nowTick = Date.now()), 500);
     return () => {
       disposed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (noticeTimer) clearTimeout(noticeTimer);
       if (seekTimer) clearTimeout(seekTimer);
+      clearInterval(progressTimer);
       const activeSocket = socket;
       socket = null;
       activeSocket?.close();
@@ -336,13 +364,15 @@
         <span class:offline={!connected} class="connection" role="status">{connected ? 'Live' : 'Reconnecting'}</span
         ><span class="visibility">{room.visibility.replace('_', '-')}</span><button
           class="secondary"
-          onclick={copyInvite}>Copy invite</button
+          onclick={copyInvite}><LinkSimple size={16} weight="bold" />Copy invite</button
         ><button
           class="secondary"
           onclick={() => {
             settingsOpen = !settingsOpen;
             if (settingsOpen) loadInvites();
-          }}>{settingsOpen ? 'Close settings' : 'Room settings'}</button
+          }}
+          >{#if settingsOpen}<X size={16} weight="bold" />Close settings{:else}<Gear size={16} weight="bold" />Room
+            settings{/if}</button
         >
       </div>
     </header>
@@ -438,12 +468,13 @@
             onSeek={scheduleSeek}
             onEnded={() => can('queue.skip') && command('queue.skip')}
             onSkip={can('queue.skip') ? () => command('queue.skip') : undefined}
+            onDuration={(d) => (mediaDuration = d)}
           />{#if !watching}<button
               class="start"
               onclick={() => {
                 watching = true;
                 showNotice('Playback enabled — you can now control the video.', 2200, 'success');
-              }}>▶ Start watching</button
+              }}><Play size={18} weight="fill" />Start watching</button
             >
             <p class="youtube-consent">
               By selecting “Start watching”, you consent to loading YouTube's privacy-enhanced player.
@@ -451,9 +482,25 @@
             </p>{/if}{#if watching && !room.playback.media && room.queue.length && can('queue.skip')}<button
               class="start"
               onclick={() => command('queue.skip')}
-              disabled={commandPending}>▶ Play from queue</button
+              disabled={commandPending}><Play size={18} weight="fill" />Play from queue</button
             >{/if}
         </div>
+        {#if room.playback.media}{@const pos = livePosition(nowTick)}{@const pct =
+            mediaDuration > 0 ? Math.min(100, (pos / mediaDuration) * 100) : 0}
+          <div
+            class="scrubber"
+            role="progressbar"
+            aria-label="Playback progress"
+            aria-valuemin="0"
+            aria-valuemax={Math.round(mediaDuration)}
+            aria-valuenow={Math.round(pos)}
+            aria-valuetext={mediaDuration > 0 ? `${fmtTime(pos)} of ${fmtTime(mediaDuration)}` : fmtTime(pos)}
+          >
+            <div class="scrubber-track"><div class="scrubber-fill" style="width:{pct}%"></div></div>
+            <div class="scrubber-time">
+              <span>{fmtTime(pos)}</span><span>{mediaDuration > 0 ? fmtTime(mediaDuration) : '–:--'}</span>
+            </div>
+          </div>{/if}
         <div class="controls panel">
           <div class="transport">
             <button
@@ -463,7 +510,10 @@
                   position: livePosition(),
                 })}
               disabled={commandPending || !can('playback.play_pause')}
-              >{room.playback.status === 'playing' ? 'Pause' : 'Play'}</button
+              >{#if room.playback.status === 'playing'}<Pause size={18} weight="fill" />Pause{:else}<Play
+                  size={18}
+                  weight="fill"
+                />Play{/if}</button
             ><span class="transport-hint"
               >{watching
                 ? 'Play, pause and scrub with the video’s own controls — everyone stays in sync.'
@@ -481,15 +531,21 @@
               ><span>YouTube URL</span>
               <div class="input-container">
                 <input bind:value={videoURL} maxlength="2048" placeholder="https://youtube.com/watch?v=…" />
-                <button type="button" class="ghost paste-btn" onclick={pasteFromClipboard} title="Paste from clipboard"
-                  >📋</button
+                <button
+                  type="button"
+                  class="ghost paste-btn"
+                  onclick={pasteFromClipboard}
+                  aria-label="Paste from clipboard"
+                  title="Paste from clipboard"><ClipboardText size={18} weight="bold" /></button
                 >
               </div>
-            </label><button disabled={commandPending || !can('queue.add')}>Add to queue</button><button
+            </label><button disabled={commandPending || !can('queue.add')}
+              ><Plus size={16} weight="bold" />Add to queue</button
+            ><button
               type="button"
               class="secondary"
               onclick={() => add(true)}
-              disabled={commandPending || !can('media.play_now')}>Play now</button
+              disabled={commandPending || !can('media.play_now')}><Play size={16} weight="fill" />Play now</button
             >
           </form>
           <div class="presets">
@@ -553,41 +609,45 @@
             <button
               class="ghost"
               onclick={() => command('queue.skip')}
-              disabled={commandPending || !room.queue.length || !can('queue.skip')}>Skip next</button
+              disabled={commandPending || !room.queue.length || !can('queue.skip')}
+              ><SkipForward size={15} weight="fill" />Skip next</button
             >
           </header>
           {#if !room.queue.length}<div class="empty">
               <span>🎋</span>
               <p>The queue is empty.<br />Add a YouTube link together.</p>
             </div>{:else}<ol class="queue">
-              {#each room.queue as item, i}<li
+              {#each room.queue as item, i (item.id)}<li
+                  animate:flip={{ duration: 260 }}
                   draggable={!commandPending && can('queue.reorder')}
                   ondragstart={() => (dragging = item.id)}
                   ondragover={(e) => e.preventDefault()}
                   ondrop={() => drop(item.id)}
                 >
-                  <span class="handle" aria-hidden="true">⠿</span>{#if watching}<img
-                      src={item.media.thumbnail}
-                      alt=""
-                    />{:else}<span class="thumbnail-placeholder" aria-hidden="true">▶</span>{/if}
+                  <span class="handle" aria-hidden="true"><DotsSixVertical size={16} weight="bold" /></span
+                  >{#if watching}<img src={item.media.thumbnail} alt="" />{:else}<span
+                      class="thumbnail-placeholder"
+                      aria-hidden="true"><Play size={16} weight="fill" /></span
+                    >{/if}
                   <div><small>{i + 1} · YouTube</small><b>{item.media.title}</b></div>
                   {#if can('queue.reorder')}<div class="reorder">
                       <button
                         class="ghost"
                         aria-label={`Move ${item.media.title} up`}
                         onclick={() => move(item.id, -1)}
-                        disabled={commandPending || i === 0}>▲</button
+                        disabled={commandPending || i === 0}><CaretUp size={14} weight="bold" /></button
                       ><button
                         class="ghost"
                         aria-label={`Move ${item.media.title} down`}
                         onclick={() => move(item.id, 1)}
-                        disabled={commandPending || i === room.queue.length - 1}>▼</button
+                        disabled={commandPending || i === room.queue.length - 1}
+                        ><CaretDown size={14} weight="bold" /></button
                       >
                     </div>{/if}<button
                     class="ghost icon"
                     aria-label={`Remove ${item.media.title}`}
                     onclick={() => command('queue.remove', { itemId: item.id })}
-                    disabled={commandPending || !can('queue.remove')}>×</button
+                    disabled={commandPending || !can('queue.remove')}><X size={16} weight="bold" /></button
                   >
                 </li>{/each}
             </ol>{/if}
@@ -604,7 +664,9 @@
                   <b>{member.displayName}{member.identityId === room.me ? ' (you)' : ''}</b><small>{member.role}</small>
                 </div>
                 {#if manages() && member.role !== 'owner' && member.identityId !== room.me}<details use:anchoredMenu>
-                    <summary aria-label={`Manage ${member.displayName}`}>•••</summary>
+                    <summary aria-label={`Manage ${member.displayName}`}
+                      ><DotsThreeVertical size={18} weight="bold" /></summary
+                    >
                     <div class="menu">
                       <button class="ghost" disabled={commandPending} onclick={() => memberAction(member, 'role')}
                         >{member.role === 'admin' ? 'Make member' : 'Make admin'}</button
@@ -627,10 +689,34 @@
       <div class="activity-tabs"><b>Activity</b><span>Chat <small>Later</small></span></div>
       {@render Activity(room.events)}
     </section>
-    {#if notice}<div class="status status--{noticeKind}" role="status" aria-live="polite">{notice}</div>{/if}
+    {#if notice}<div
+        class="status status--{noticeKind}"
+        role="status"
+        aria-live="polite"
+        transition:fly={{ y: 12, duration: 220 }}
+      >
+        {#if noticeKind === 'success'}<CheckCircle
+            size={17}
+            weight="fill"
+          />{:else if noticeKind === 'error'}<WarningCircle size={17} weight="fill" />{:else}<Info
+            size={17}
+            weight="fill"
+          />{/if}<span>{notice}</span>
+      </div>{/if}
     {#if confirmDialog}<div class="modal-backdrop">
-        <button class="modal-scrim" aria-label="Cancel" onclick={() => resolveConfirm(false)}></button>
-        <div class="modal panel" role="alertdialog" aria-modal="true" aria-label={confirmDialog.title}>
+        <button
+          class="modal-scrim"
+          aria-label="Cancel"
+          onclick={() => resolveConfirm(false)}
+          transition:fade={{ duration: 160 }}
+        ></button>
+        <div
+          class="modal panel"
+          role="alertdialog"
+          aria-modal="true"
+          aria-label={confirmDialog.title}
+          transition:scale={{ start: 0.94, duration: 180 }}
+        >
           <p>{confirmDialog.title}</p>
           <div class="modal-actions">
             <button class="secondary" onclick={() => resolveConfirm(false)}>Cancel</button><button
@@ -782,6 +868,29 @@
   }
   .youtube-consent a {
     color: #d7f4e2;
+  }
+  .scrubber {
+    margin-top: 0.6rem;
+  }
+  .scrubber-track {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--surface-hover);
+    overflow: hidden;
+  }
+  .scrubber-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent-primary), var(--accent-hover));
+    transition: width 0.5s linear;
+  }
+  .scrubber-time {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.35rem;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
   }
   .controls {
     padding: 1rem;
@@ -1010,30 +1119,20 @@
     box-shadow: var(--shadow-panel);
     max-width: min(92vw, 30rem);
     z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
   }
-  .status::before {
-    content: '';
-    display: inline-block;
-    width: 0.5rem;
-    height: 0.5rem;
-    border-radius: 50%;
-    margin-right: 0.5rem;
-    vertical-align: middle;
-    background: var(--text-muted);
+  .status :global(svg) {
+    flex: 0 0 auto;
   }
   .status--success {
     border-color: color-mix(in srgb, var(--success) 55%, var(--border-subtle));
     color: var(--success);
   }
-  .status--success::before {
-    background: var(--success);
-  }
   .status--error {
     border-color: color-mix(in srgb, var(--danger) 55%, var(--border-subtle));
     color: var(--danger);
-  }
-  .status--error::before {
-    background: var(--danger);
   }
   .spinner {
     width: 2.2rem;
