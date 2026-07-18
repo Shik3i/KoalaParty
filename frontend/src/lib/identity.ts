@@ -44,6 +44,113 @@ function randomSecret() {
     .replaceAll('/', '_')
     .replaceAll('=', '');
 }
+// Playful anonymous names. Kept in sync with the backend room-label pools
+// (backend/internal/app/names.go).
+const nameEmojis = [
+  '🐨',
+  '🦘',
+  '🐰',
+  '🦊',
+  '🦉',
+  '🐼',
+  '🦦',
+  '🦔',
+  '🐧',
+  '🦩',
+  '🦢',
+  '🐢',
+  '🐸',
+  '🦎',
+  '🦇',
+  '🦫',
+  '🦥',
+  '🦡',
+  '🐹',
+  '🐝',
+  '🦋',
+  '🐙',
+  '🦈',
+  '🐳',
+  '🦭',
+  '🦜',
+  '🦚',
+  '🌿',
+  '🍄',
+  '⭐',
+  '🌙',
+  '🎋',
+  '🍿',
+];
+const nameAdjectives = [
+  'Calm',
+  'Gentle',
+  'Mossy',
+  'Quiet',
+  'Sunny',
+  'Cozy',
+  'Bamboo',
+  'Forest',
+  'Bouncy',
+  'Sleepy',
+  'Clever',
+  'Fuzzy',
+  'Happy',
+  'Brave',
+  'Swift',
+  'Wandering',
+  'Cheerful',
+  'Curious',
+  'Mellow',
+  'Nimble',
+  'Plucky',
+  'Jolly',
+  'Breezy',
+  'Dapper',
+  'Snug',
+  'Wild',
+];
+const nameAnimals = [
+  'Koala',
+  'Wombat',
+  'Kookaburra',
+  'Possum',
+  'Quokka',
+  'Kangaroo',
+  'Wallaby',
+  'Platypus',
+  'Echidna',
+  'Dingo',
+  'Numbat',
+  'Otter',
+  'Fox',
+  'Owl',
+  'Panda',
+  'Hedgehog',
+  'Penguin',
+  'Badger',
+  'Beaver',
+  'Sloth',
+  'Hare',
+  'Rabbit',
+  'Gecko',
+  'Squirrel',
+  'Hamster',
+  'Turtle',
+  'Frog',
+  'Flamingo',
+  'Swan',
+  'Bat',
+];
+function pick<T>(items: T[]): T {
+  return items[Math.floor(Math.random() * items.length)];
+}
+function randomDisplayName(): string {
+  const emoji = pick(nameEmojis);
+  const animal = pick(nameAnimals);
+  const name = `${emoji} ${pick(nameAdjectives)} ${animal}`;
+  // The server caps display names at 32 bytes; drop the adjective if we overrun.
+  return new TextEncoder().encode(name).length <= 32 ? name : `${emoji} ${animal}`;
+}
 export function getIdentity(): LocalIdentity {
   if (fallback) return fallback;
   const raw = read();
@@ -66,7 +173,7 @@ export function getIdentity(): LocalIdentity {
   const value = {
     id: crypto.randomUUID(),
     secret: randomSecret(),
-    displayName: `Koala ${Math.floor(100 + Math.random() * 900)}`,
+    displayName: randomDisplayName(),
     avatarSeed: randomSecret().slice(0, 12),
   };
   persist(value);

@@ -72,13 +72,14 @@ func newID(bytes int) string {
 	return strings.TrimRight(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b), "=")
 }
 func roomLabel(id string) string {
-	adjectives := []string{"Calm", "Gentle", "Mossy", "Quiet", "Sunny", "Cozy", "Bamboo", "Forest"}
-	animals := []string{"Koala", "Wombat", "Kookaburra", "Possum"}
 	var n uint64
 	for _, c := range []byte(id) {
 		n = n*31 + uint64(c)
 	}
-	return fmt.Sprintf("%s %s %03d", adjectives[n%uint64(len(adjectives))], animals[(n/7)%uint64(len(animals))], n%1000)
+	emoji := nameEmojis[n%uint64(len(nameEmojis))]
+	adjective := nameAdjectives[(n/13)%uint64(len(nameAdjectives))]
+	animal := nameAnimals[(n/131)%uint64(len(nameAnimals))]
+	return fmt.Sprintf("%s %s %s", emoji, adjective, animal)
 }
 func (a *application) createRoom(w http.ResponseWriter, r *http.Request, p principal) {
 	id := newID(10)

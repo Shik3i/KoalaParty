@@ -52,7 +52,7 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   await expect(owner.locator('.queue li')).toHaveCount(0);
   const member = await memberContext.newPage();
   await member.goto(`/room/${roomId}`);
-  await expect(member.getByRole('heading', { name: /Koala|Wombat|Possum|Kookaburra/ })).toBeVisible();
+  await expect(member.locator('.room-header h1')).toBeVisible();
   await expect(owner.locator('.members li')).toHaveCount(2);
   await expect(member.locator('.members li')).toHaveCount(2);
   await member.getByRole('button', { name: 'Play', exact: true }).click();
@@ -89,7 +89,7 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   expect((await command(member, roomId, 'member.role', { identityId: ownerId, role: 'member' })).status).toBe(403);
   const third = await thirdContext.newPage();
   await third.goto(`/room/${roomId}`);
-  await expect(third.getByRole('heading', { name: /Koala|Wombat|Possum|Kookaburra/ })).toBeVisible();
+  await expect(third.locator('.room-header h1')).toBeVisible();
   const thirdId = await identityId(third);
   expect((await command(member, roomId, 'member.ban', { identityId: thirdId })).status).toBe(200);
   await third.reload();

@@ -4,6 +4,12 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-18
+
+### Changed
+
+- Much greater variety in generated names: anonymous display names and room labels now draw from a shared pool of emoji, adjectives, and ~30 animals (over 25,000 combinations) instead of everyone being "Koala" — e.g. "🦋 Cheerful Kangaroo", "🦊 Calm Koala". Display names stay within the server's length limit.
+
 ## [0.4.0] - 2026-07-18
 
 ### Added
