@@ -7,10 +7,12 @@
     position = 0,
     canControl = true,
     canSeek = true,
+    hasQueue = false,
     onPlay = () => {},
     onPause = () => {},
     onSeek = () => {},
     onEnded = () => {},
+    onSkip = undefined,
   }: {
     enabled?: boolean;
     videoId?: string | null;
@@ -18,10 +20,12 @@
     position?: number;
     canControl?: boolean;
     canSeek?: boolean;
+    hasQueue?: boolean;
     onPlay?: (position: number) => void;
     onPause?: (position: number) => void;
     onSeek?: (position: number) => void;
     onEnded?: () => void;
+    onSkip?: (() => void) | undefined;
   } = $props();
   let host: HTMLDivElement;
   let player: any = null;
@@ -215,10 +219,11 @@
       <span>⚠</span>
       <p>{playerError}</p>
       <small>Try another video or reload the room.</small>
+      {#if onSkip}<button class="secondary skip-broken" onclick={onSkip}>Skip this video</button>{/if}
     </div>{/if}
   {#if !videoId}<div class="empty">
-      <span>▶</span>
-      <p>Add a YouTube video to start watching.</p>
+      <span>{hasQueue ? '⏳' : '▶'}</span>
+      <p>{hasQueue ? 'Nothing playing right now.' : 'Add a YouTube video to start watching.'}</p>
     </div>{/if}
 </div>
 
@@ -259,6 +264,9 @@
   }
   .player-error p {
     margin: 0.5rem 0;
+  }
+  .skip-broken {
+    margin-top: 0.9rem;
   }
   .empty span {
     font-size: 2.4rem;

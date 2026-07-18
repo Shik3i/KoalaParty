@@ -10,6 +10,18 @@
     error = '';
     try {
       const room = await api<{ id: string }>('/api/rooms', { method: 'POST' });
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(`${location.origin}/room/${room.id}`);
+        copied = true;
+      } catch {
+        /* clipboard blocked — the room page will prompt to copy manually */
+      }
+      try {
+        sessionStorage.setItem('koalaparty.created', JSON.stringify({ id: room.id.toUpperCase(), copied }));
+      } catch {
+        /* sessionStorage unavailable */
+      }
       await goto(`/room/${room.id}`);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Could not create room';

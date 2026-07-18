@@ -190,17 +190,17 @@ test('account room library, private invitations, transfer, sessions and deletion
   await member.goto(roomURL);
   await expect(member.locator('.room-header h1')).toHaveText(roomLabel ?? '');
 
-  owner.once('dialog', (dialog) => dialog.accept());
   await owner.getByRole('button', { name: 'Transfer', exact: true }).click();
+  await owner.getByRole('alertdialog').getByRole('button', { name: 'Transfer' }).click();
   await expect(member.getByText('owner', { exact: true })).toBeVisible();
 
-  owner.once('dialog', (dialog) => dialog.accept());
   await owner.getByRole('button', { name: 'Leave room' }).click();
+  await owner.getByRole('alertdialog').getByRole('button', { name: 'Leave room' }).click();
   await expect(owner).toHaveURL(/\/rooms$/);
 
   await member.getByRole('button', { name: 'Room settings' }).click();
-  member.once('dialog', (dialog) => dialog.accept());
   await member.getByRole('button', { name: 'Delete room' }).click();
+  await member.getByRole('alertdialog').getByRole('button', { name: 'Delete room' }).click();
   await expect(member).toHaveURL(/\/rooms$/);
 
   await owner.goto('/account');

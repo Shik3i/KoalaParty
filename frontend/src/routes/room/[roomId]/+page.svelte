@@ -14,7 +14,9 @@
   let commandPending = false;
   let error = '';
   let notice = '';
+  let noticeKind: 'info' | 'success' | 'error' = 'info';
   let connected = false;
+  let everConnected = false;
   let watching = false;
   let videoURL = '';
   let mobileTab: 'queue' | 'people' | 'activity' = 'queue';
@@ -23,6 +25,9 @@
   let settingsLoading = false;
   let invites: { username: string; createdAt: string }[] = [];
   let inviteUsername = '';
+  let seekTimer: ReturnType<typeof setTimeout> | null = null;
+  let confirmDialog: { title: string; confirmLabel: string; danger: boolean; resolve: (ok: boolean) => void } | null =
+    null;
   const me = () => room?.members.find((m) => m.identityId === room?.me);
   const can = (cap: string) => {
     const m = me();
@@ -34,10 +39,45 @@
     room = next;
     roomReceivedAt = Date.now();
   }
-  function showNotice(message: string, clearAfter = 0) {
+  function showNotice(message: string, clearAfter = 0, kind: 'info' | 'success' | 'error' = 'info') {
     if (noticeTimer) clearTimeout(noticeTimer);
     notice = message;
+    noticeKind = kind;
     if (clearAfter > 0) noticeTimer = setTimeout(() => (notice = ''), clearAfter);
+  }
+  function ask(title: string, confirmLabel: string, danger = false): Promise<boolean> {
+    return new Promise((resolve) => {
+      confirmDialog = { title, confirmLabel, danger, resolve };
+    });
+  }
+  function resolveConfirm(ok: boolean) {
+    confirmDialog?.resolve(ok);
+    confirmDialog = null;
+  }
+  function autofocus(node: HTMLElement) {
+    node.focus();
+  }
+  function scheduleSeek(position: number) {
+    if (seekTimer) clearTimeout(seekTimer);
+    seekTimer = setTimeout(() => command('player.seek', { position }), 300);
+  }
+  function announceCreation() {
+    try {
+      const raw = sessionStorage.getItem('koalaparty.created');
+      if (!raw) return;
+      const info = JSON.parse(raw) as { id?: string; copied?: boolean };
+      if (info.id !== roomId) return;
+      sessionStorage.removeItem('koalaparty.created');
+      showNotice(
+        info.copied
+          ? 'Room created — invite link copied. Share it to invite people!'
+          : 'Room created — use “Copy invite” to share it.',
+        4500,
+        'success',
+      );
+    } catch {
+      /* sessionStorage unavailable */
+    }
   }
   onMount(() => {
     void (async () => {
@@ -46,6 +86,7 @@
         if (disposed) return;
         updateRoom(await api(`/api/rooms/${roomId}`));
         if (!disposed) connect();
+        announceCreation();
       } catch (e) {
         if (!disposed) error = e instanceof Error ? e.message : 'Could not join room.';
       }
@@ -54,6 +95,7 @@
       disposed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (noticeTimer) clearTimeout(noticeTimer);
+      if (seekTimer) clearTimeout(seekTimer);
       const activeSocket = socket;
       socket = null;
       activeSocket?.close();
@@ -66,14 +108,15 @@
     ws.onopen = () => {
       if (socket !== ws) return;
       connected = true;
-      showNotice('Connected', 1800);
+      if (everConnected) showNotice('Reconnected', 1800, 'success');
+      everConnected = true;
     };
     ws.onclose = () => {
       if (socket !== ws) return;
       socket = null;
       connected = false;
       if (disposed) return;
-      showNotice('Connection lost. Reconnecting…');
+      showNotice('Connection lost. Reconnecting…', 0, 'error');
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         connect();
@@ -84,9 +127,9 @@
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'snapshot') updateRoom(data.payload);
-        else if (data.type === 'error') showNotice(data.message || 'The server denied that action.');
+        else if (data.type === 'error') showNotice(data.message || 'The server denied that action.', 0, 'error');
       } catch {
-        showNotice('Received an invalid room update. Reconnecting…');
+        showNotice('Received an invalid room update. Reconnecting…', 0, 'error');
         ws.close();
       }
     };
@@ -108,7 +151,7 @@
         }),
       );
     } catch (e) {
-      showNotice(e instanceof Error ? e.message : 'Action failed.');
+      showNotice(e instanceof Error ? e.message : 'Action failed.', 0, 'error');
     } finally {
       commandPending = false;
     }
@@ -116,7 +159,7 @@
   async function add(playNow = false) {
     const id = parseYouTube(videoURL);
     if (!id) {
-      showNotice('Enter a valid YouTube video URL or video ID.');
+      showNotice('Enter a valid YouTube video URL or video ID.', 3000, 'error');
       return;
     }
     await command(playNow ? 'queue.play_now' : 'queue.add', { videoId: id, title: `YouTube video ${id}` });
@@ -126,9 +169,9 @@
     try {
       const text = await navigator.clipboard.readText();
       videoURL = text.trim();
-      showNotice('Pasted from clipboard!', 1200);
+      showNotice('Pasted from clipboard!', 1200, 'success');
     } catch {
-      showNotice('Clipboard permission denied or unavailable.', 2000);
+      showNotice('Clipboard permission denied or unavailable.', 2000, 'error');
     }
   }
   async function quickAdd(id: string) {
@@ -138,9 +181,9 @@
   async function copyInvite() {
     try {
       await navigator.clipboard.writeText(location.href);
-      showNotice('Invite link copied.', 2200);
+      showNotice('Invite link copied.', 2200, 'success');
     } catch {
-      showNotice('Could not copy the invite link. Copy it from the address bar.');
+      showNotice('Could not copy the invite link. Copy it from the address bar.', 0, 'error');
     }
   }
   function drop(target: string) {
@@ -156,13 +199,24 @@
     dragging = null;
     command('queue.reorder', { itemIds: ids });
   }
+  function move(itemId: string, delta: number) {
+    if (!room) return;
+    const ids = room.queue.map((q) => q.id);
+    const from = ids.indexOf(itemId);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= ids.length) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    command('queue.reorder', { itemIds: ids });
+  }
   async function memberAction(member: Member, action: 'kick' | 'ban' | 'role') {
     if (action === 'role')
       await command('member.role', {
         identityId: member.identityId,
         role: member.role === 'admin' ? 'member' : 'admin',
       });
-    else if (confirm(`${action === 'ban' ? 'Ban' : 'Kick'} ${member.displayName}?`))
+    else if (
+      await ask(`${action === 'ban' ? 'Ban' : 'Kick'} ${member.displayName}?`, action === 'ban' ? 'Ban' : 'Kick', true)
+    )
       await command(`member.${action}`, { identityId: member.identityId });
   }
   async function loadInvites() {
@@ -171,7 +225,7 @@
     try {
       invites = await api(`/api/rooms/${roomId}/invites`);
     } catch (e) {
-      showNotice(e instanceof Error ? e.message : 'Could not load invitations.');
+      showNotice(e instanceof Error ? e.message : 'Could not load invitations.', 0, 'error');
     } finally {
       settingsLoading = false;
     }
@@ -185,43 +239,54 @@
       });
       inviteUsername = '';
       await loadInvites();
-      showNotice('Invitation added.', 2200);
+      showNotice('Invitation added.', 2200, 'success');
     } catch (e) {
-      showNotice(e instanceof Error ? e.message : 'Could not add invitation.');
+      showNotice(e instanceof Error ? e.message : 'Could not add invitation.', 0, 'error');
     }
   }
   async function revokeInvite(username: string) {
     try {
       await api(`/api/rooms/${roomId}/invites/${encodeURIComponent(username)}`, { method: 'DELETE' });
       invites = invites.filter((invite) => invite.username !== username);
-      showNotice('Invitation revoked.', 2200);
+      showNotice('Invitation revoked.', 2200, 'success');
     } catch (e) {
-      showNotice(e instanceof Error ? e.message : 'Could not revoke invitation.');
+      showNotice(e instanceof Error ? e.message : 'Could not revoke invitation.', 0, 'error');
     }
   }
   async function leaveOrDelete() {
     const owner = me()?.role === 'owner';
-    if (!confirm(owner ? 'Delete this room permanently?' : 'Leave this room?')) return;
+    if (
+      !(await ask(
+        owner ? 'Delete this room permanently for everyone?' : 'Leave this room?',
+        owner ? 'Delete room' : 'Leave room',
+        true,
+      ))
+    )
+      return;
     try {
       await api(`/api/rooms/${roomId}${owner ? '' : '/membership'}`, { method: 'DELETE' });
       location.href = '/rooms';
     } catch (e) {
-      showNotice(e instanceof Error ? e.message : 'Room action failed.');
+      showNotice(e instanceof Error ? e.message : 'Room action failed.', 0, 'error');
     }
   }
   async function transfer(member: Member) {
-    if (!confirm(`Transfer ownership to ${member.displayName}? You will become an admin.`)) return;
+    if (!(await ask(`Transfer ownership to ${member.displayName}? You will become an admin.`, 'Transfer'))) return;
     await command('room.transfer', { identityId: member.identityId });
   }
 </script>
 
 <svelte:head><title>{room?.label || roomId} · KoalaParty</title></svelte:head>
+<svelte:window onkeydown={(e) => confirmDialog && e.key === 'Escape' && resolveConfirm(false)} />
 {#if error}<main class="fatal panel">
     <span>🌧️</span>
     <h1>Couldn’t enter this room</h1>
     <p class="error">{error}</p>
     <a class="button" href="/">Back home</a>
-  </main>{:else if !room}<main class="fatal"><p>Joining room…</p></main>{:else}
+  </main>{:else if !room}<main class="fatal loading" aria-busy="true">
+    <div class="spinner" aria-hidden="true"></div>
+    <p>Joining room…</p>
+  </main>{:else}
   <main class="room-shell">
     <header class="room-header">
       <div>
@@ -328,15 +393,17 @@
             position={currentPlaybackPosition(room.playback, roomReceivedAt)}
             canControl={can('playback.play_pause')}
             canSeek={can('playback.seek')}
+            hasQueue={room.queue.length > 0}
             onPlay={(pos) => command('player.play', { position: pos })}
             onPause={(pos) => command('player.pause', { position: pos })}
-            onSeek={(pos) => command('player.seek', { position: pos })}
+            onSeek={scheduleSeek}
             onEnded={() => can('queue.skip') && command('queue.skip')}
+            onSkip={can('queue.skip') ? () => command('queue.skip') : undefined}
           />{#if !watching}<button
               class="start"
               onclick={() => {
                 watching = true;
-                showNotice('Playback enabled', 2200);
+                showNotice('Playback enabled — you can now control the video.', 2200, 'success');
               }}>▶ Start watching</button
             >
             <p class="youtube-consent">
@@ -465,7 +532,19 @@
                       alt=""
                     />{:else}<span class="thumbnail-placeholder" aria-hidden="true">▶</span>{/if}
                   <div><small>{i + 1} · YouTube</small><b>{item.media.title}</b></div>
-                  <button
+                  {#if can('queue.reorder')}<div class="reorder">
+                      <button
+                        class="ghost"
+                        aria-label={`Move ${item.media.title} up`}
+                        onclick={() => move(item.id, -1)}
+                        disabled={commandPending || i === 0}>▲</button
+                      ><button
+                        class="ghost"
+                        aria-label={`Move ${item.media.title} down`}
+                        onclick={() => move(item.id, 1)}
+                        disabled={commandPending || i === room.queue.length - 1}>▼</button
+                      >
+                    </div>{/if}<button
                     class="ghost icon"
                     aria-label={`Remove ${item.media.title}`}
                     onclick={() => command('queue.remove', { itemId: item.id })}
@@ -509,7 +588,20 @@
       <div class="activity-tabs"><b>Activity</b><span>Chat <small>Later</small></span></div>
       {@render Activity(room.events)}
     </section>
-    {#if notice}<div class="status" aria-live="polite">{notice}</div>{/if}
+    {#if notice}<div class="status status--{noticeKind}" role="status" aria-live="polite">{notice}</div>{/if}
+    {#if confirmDialog}<div class="modal-backdrop">
+        <button class="modal-scrim" aria-label="Cancel" onclick={() => resolveConfirm(false)}></button>
+        <div class="modal panel" role="alertdialog" aria-modal="true" aria-label={confirmDialog.title}>
+          <p>{confirmDialog.title}</p>
+          <div class="modal-actions">
+            <button class="secondary" onclick={() => resolveConfirm(false)}>Cancel</button><button
+              class={confirmDialog.danger ? 'danger' : ''}
+              onclick={() => resolveConfirm(true)}
+              use:autofocus>{confirmDialog.confirmLabel}</button
+            >
+          </div>
+        </div>
+      </div>{/if}
   </main>{/if}
 {#snippet Activity(events: Snapshot['events'])}<div class="events">
     {#if !events.length}<p class="muted">No activity yet.</p>{/if}{#each [...events].reverse() as event}<article>
@@ -871,10 +963,100 @@
     transform: translateX(-50%);
     background: var(--surface-elevated);
     border: 1px solid var(--border-subtle);
-    padding: 0.5rem 0.8rem;
+    padding: 0.5rem 0.9rem;
     border-radius: 2rem;
     min-height: 2rem;
     font-size: 0.8rem;
+    font-weight: 650;
+    box-shadow: var(--shadow-panel);
+    max-width: min(92vw, 30rem);
+    z-index: 20;
+  }
+  .status::before {
+    content: '';
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+    background: var(--text-muted);
+  }
+  .status--success {
+    border-color: color-mix(in srgb, var(--success) 55%, var(--border-subtle));
+    color: var(--success);
+  }
+  .status--success::before {
+    background: var(--success);
+  }
+  .status--error {
+    border-color: color-mix(in srgb, var(--danger) 55%, var(--border-subtle));
+    color: var(--danger);
+  }
+  .status--error::before {
+    background: var(--danger);
+  }
+  .spinner {
+    width: 2.2rem;
+    height: 2.2rem;
+    margin: 0 auto 1rem;
+    border: 3px solid var(--border-subtle);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .reorder {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
+  }
+  .reorder button {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.35rem;
+    line-height: 1.1;
+  }
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    z-index: 50;
+  }
+  .modal-scrim {
+    position: fixed;
+    inset: 0;
+    border: 0;
+    border-radius: 0;
+    background: rgba(5, 8, 6, 0.55);
+    cursor: default;
+  }
+  .modal-scrim:hover {
+    background: rgba(5, 8, 6, 0.55);
+  }
+  .modal {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 26rem;
+    padding: 1.4rem;
+    display: grid;
+    gap: 1.2rem;
+  }
+  .modal p {
+    margin: 0;
+    font-size: 1.02rem;
+    line-height: 1.5;
+  }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.6rem;
   }
   .mobile-tabs,
   .hidden-desktop {

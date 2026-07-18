@@ -4,6 +4,20 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-18
+
+### Added
+
+- The invite link is copied to your clipboard automatically when you create a room, with a confirmation shown in the new room.
+- Queue items can be reordered with up/down buttons, so reordering now works on touch devices and by keyboard in addition to drag-and-drop.
+- A "Skip this video" button appears when a video cannot be played or embedded, so an unplayable video no longer blocks the room.
+
+### Changed
+
+- Kick, ban, leave, delete, and ownership-transfer confirmations now use an in-app themed dialog (Escape or the backdrop cancels) instead of the browser's native prompt.
+- Status messages are colour-coded for success and error states.
+- Added a bundled `favicon.ico` (silencing the previous 404), a loading spinner for the "Joining room…" state, a queue-aware idle-player message, and debounced player seek commands.
+
 ## [0.3.0] - 2026-07-18
 
 ### Fixed
