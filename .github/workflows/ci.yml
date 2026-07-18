@@ -80,7 +80,9 @@ jobs:
       - name: Smoke-test Docker image
         run: |
           set -euo pipefail
-          docker run -d --name koalaparty-ci -p 127.0.0.1:8080:8080 koalaparty:ci
+          docker run -d --name koalaparty-ci \
+            -e KOALAPARTY_TRUSTED_ORIGINS=https://smoke.koalaparty.test \
+            -p 127.0.0.1:8080:8080 koalaparty:ci
           trap 'docker logs koalaparty-ci; docker rm -f koalaparty-ci' EXIT
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8080/api/ready; then
