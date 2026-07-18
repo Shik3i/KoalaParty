@@ -30,7 +30,7 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
-	cookieSecure, err := parseBool("KOALAPARTY_COOKIE_SECURE", false)
+	cookieSecure, err := parseBool("KOALAPARTY_COOKIE_SECURE", production)
 	if err != nil {
 		return config{}, err
 	}

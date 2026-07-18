@@ -4,7 +4,7 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
-## [0.2.5] - 2026-07-18
+## [0.2.6] - 2026-07-18
 
 ### Added
 
