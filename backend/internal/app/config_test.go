@@ -99,3 +99,19 @@ func TestRateLimiterTrustAllProxies(t *testing.T) {
 		t.Fatalf("trust all proxy client IP = %q, expected 198.51.100.4", got)
 	}
 }
+
+func TestRateLimiterDefaultPrivateProxiesSecureAgainstSpoofing(t *testing.T) {
+	t.Setenv("KOALAPARTY_TRUSTED_PROXIES", "")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	limiter := newRateLimiter(1, time.Minute, cfg.trustedProxies)
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "172.18.0.3:4321"
+	req.Header.Set("X-Forwarded-For", "1.1.1.1, 198.51.100.4")
+	if got := limiter.clientIP(req); got != "198.51.100.4" {
+		t.Fatalf("spoofed client IP accepted = %q, expected 198.51.100.4", got)
+	}
+}

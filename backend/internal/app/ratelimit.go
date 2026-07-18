@@ -35,43 +35,28 @@ func remoteIP(remoteAddr string) net.IP {
 func (l *rateLimiter) clientIP(r *http.Request) string {
 	peer := remoteIP(r.RemoteAddr)
 	trusted := false
-	trustAll := false
 	for _, network := range l.trustedProxies {
-		if ones, _ := network.Mask.Size(); ones == 0 {
-			trustAll = true
-		}
 		if peer != nil && network.Contains(peer) {
 			trusted = true
+			break
 		}
 	}
 	if trusted {
-		xff := r.Header.Get("X-Forwarded-For")
-		if xff != "" {
-			parts := strings.Split(xff, ",")
-			if trustAll {
-				for _, part := range parts {
-					candidate := net.ParseIP(strings.TrimSpace(part))
-					if candidate != nil {
-						return candidate.String()
-					}
+		parts := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			candidate := net.ParseIP(strings.TrimSpace(parts[i]))
+			if candidate == nil {
+				continue
+			}
+			candidateTrusted := false
+			for _, network := range l.trustedProxies {
+				if network.Contains(candidate) {
+					candidateTrusted = true
+					break
 				}
-			} else {
-				for i := len(parts) - 1; i >= 0; i-- {
-					candidate := net.ParseIP(strings.TrimSpace(parts[i]))
-					if candidate == nil {
-						continue
-					}
-					candidateTrusted := false
-					for _, network := range l.trustedProxies {
-						if network.Contains(candidate) {
-							candidateTrusted = true
-							break
-						}
-					}
-					if !candidateTrusted {
-						return candidate.String()
-					}
-				}
+			}
+			if !candidateTrusted {
+				return candidate.String()
 			}
 		}
 	}

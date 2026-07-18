@@ -75,7 +75,7 @@ func loadConfig() (config, error) {
 	}
 	rawProxies := os.Getenv("KOALAPARTY_TRUSTED_PROXIES")
 	if rawProxies == "" {
-		rawProxies = "0.0.0.0/0,::/0"
+		rawProxies = "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,::1/128,fc00::/7,fe80::/10"
 	}
 	for _, raw := range strings.Split(strings.TrimSpace(rawProxies), ",") {
 		raw = strings.TrimSpace(raw)
