@@ -25,6 +25,7 @@
     Info,
     ArrowsOut,
     ArrowsIn,
+    Pulse,
   } from 'phosphor-svelte';
   const roomId = (page.params.roomId ?? '').toUpperCase();
   let room: Snapshot | null = null;
@@ -147,7 +148,13 @@
       /* sessionStorage unavailable */
     }
   }
+  const consentKey = 'koalaparty.youtube.consent';
   onMount(() => {
+    try {
+      if (localStorage.getItem(consentKey) === '1') watching = true;
+    } catch {
+      /* storage unavailable */
+    }
     void (async () => {
       try {
         await establish();
@@ -477,6 +484,11 @@
               class="start"
               onclick={() => {
                 watching = true;
+                try {
+                  localStorage.setItem(consentKey, '1');
+                } catch {
+                  /* storage unavailable */
+                }
                 showNotice('Playback enabled — you can now control the video.', 2200, 'success');
               }}><Play size={18} weight="fill" />Start watching</button
             >
@@ -707,7 +719,7 @@
       </aside>
     </section>
     <section class="activity-panel panel">
-      <div class="activity-tabs"><b>Activity</b><span>Chat <small>Later</small></span></div>
+      <div class="activity-tabs"><Pulse size={16} weight="bold" /><b>Activity</b></div>
       {@render Activity(room.events)}
     </section>
     {#if notice}<div
@@ -889,6 +901,14 @@
     transform: translate(-50%, -50%);
     font-size: 1.05rem;
     padding: 1rem 1.4rem;
+  }
+  /* Keep the centering transform on hover/active so the global lift does not
+     yank the absolutely-positioned button out of place. */
+  .start:hover {
+    transform: translate(-50%, calc(-50% - 1px));
+  }
+  .start:active {
+    transform: translate(-50%, -50%);
   }
   .youtube-consent {
     position: absolute;
@@ -1131,17 +1151,14 @@
   }
   .activity-tabs {
     display: flex;
-    gap: 1.2rem;
+    align-items: center;
+    gap: 0.5rem;
     padding: 0.9rem 1rem;
     border-bottom: 1px solid var(--border-subtle);
+    color: var(--accent-primary);
   }
-  .activity-tabs span {
-    color: var(--text-muted);
-  }
-  .activity-tabs small {
-    background: var(--surface-hover);
-    padding: 0.15rem 0.3rem;
-    border-radius: 4px;
+  .activity-tabs b {
+    color: var(--text-primary);
   }
   .events {
     padding: 0.8rem 1rem;

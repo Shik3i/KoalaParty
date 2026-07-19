@@ -177,7 +177,11 @@
     text-decoration: none;
     font-weight: 650;
     font-size: 0.9rem;
+    white-space: nowrap;
     transition: color 0.15s ease;
+  }
+  .site-header nav a :global(svg) {
+    flex: 0 0 auto;
   }
   .site-header nav a:hover {
     color: var(--accent-primary);

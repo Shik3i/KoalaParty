@@ -4,6 +4,18 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-07-19
+
+### Changed
+
+- YouTube consent is remembered: you confirm once and afterwards any room loads the player automatically, instead of clicking "Start watching" on every visit. The privacy gate still applies on the first ever visit and returns if you clear browser storage.
+
+### Fixed
+
+- The "Start watching" and "Play from queue" buttons no longer flee from the cursor on hover — the global hover-lift was overriding their centering transform and knocking them out of place.
+- Removed the unfinished-looking "Chat · Later" placeholder from the activity panel; the header is now a clean "Activity".
+- Navigation labels no longer wrap onto two lines on narrow screens.
+
 ## [0.5.1] - 2026-07-19
 
 ### Fixed
