@@ -76,10 +76,9 @@ func roomLabel(id string) string {
 	for _, c := range []byte(id) {
 		n = n*31 + uint64(c)
 	}
-	emoji := nameEmojis[n%uint64(len(nameEmojis))]
-	adjective := nameAdjectives[(n/13)%uint64(len(nameAdjectives))]
-	animal := nameAnimals[(n/131)%uint64(len(nameAnimals))]
-	return fmt.Sprintf("%s %s %s", emoji, adjective, animal)
+	i := n % uint64(len(nameAnimals))
+	adjective := nameAdjectives[(n/131)%uint64(len(nameAdjectives))]
+	return fmt.Sprintf("%s %s %s", nameEmojis[i], adjective, nameAnimals[i])
 }
 func (a *application) createRoom(w http.ResponseWriter, r *http.Request, p principal) {
 	id := newID(10)

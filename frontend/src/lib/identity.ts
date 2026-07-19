@@ -62,112 +62,39 @@ export function randomUUID(): string {
   const h = Array.from(b, (x) => x.toString(16).padStart(2, '0'));
   return `${h[0]}${h[1]}${h[2]}${h[3]}-${h[4]}${h[5]}-${h[6]}${h[7]}-${h[8]}${h[9]}-${h[10]}${h[11]}${h[12]}${h[13]}${h[14]}${h[15]}`;
 }
-// Playful anonymous names. Kept in sync with the backend room-label pools
-// (backend/internal/app/names.go).
+// Playful anonymous names. nameEmojis and nameAnimals are index-aligned so the
+// emoji always matches the animal. Kept in sync with the backend room-label
+// pools (backend/internal/app/names.go).
+// prettier-ignore
 const nameEmojis = [
-  '🐨',
-  '🦘',
-  '🐰',
-  '🦊',
-  '🦉',
-  '🐼',
-  '🦦',
-  '🦔',
-  '🐧',
-  '🦩',
-  '🦢',
-  '🐢',
-  '🐸',
-  '🦎',
-  '🦇',
-  '🦫',
-  '🦥',
-  '🦡',
-  '🐹',
-  '🐝',
-  '🦋',
-  '🐙',
-  '🦈',
-  '🐳',
-  '🦭',
-  '🦜',
-  '🦚',
-  '🌿',
-  '🍄',
-  '⭐',
-  '🌙',
-  '🎋',
-  '🍿',
+  '🐨', '🦘', '🦊', '🦉', '🐼', '🦦', '🦔', '🐧', '🦩', '🦢',
+  '🐢', '🐸', '🦎', '🦇', '🦫', '🦥', '🦡', '🐹', '🐰', '🦋',
+  '🐝', '🐙', '🦈', '🐳', '🦭', '🦜', '🦚', '🐿️', '🦆', '🦌',
+  '🐺', '🐬',
 ];
-const nameAdjectives = [
-  'Calm',
-  'Gentle',
-  'Mossy',
-  'Quiet',
-  'Sunny',
-  'Cozy',
-  'Bamboo',
-  'Forest',
-  'Bouncy',
-  'Sleepy',
-  'Clever',
-  'Fuzzy',
-  'Happy',
-  'Brave',
-  'Swift',
-  'Wandering',
-  'Cheerful',
-  'Curious',
-  'Mellow',
-  'Nimble',
-  'Plucky',
-  'Jolly',
-  'Breezy',
-  'Dapper',
-  'Snug',
-  'Wild',
-];
+// prettier-ignore
 const nameAnimals = [
-  'Koala',
-  'Wombat',
-  'Kookaburra',
-  'Possum',
-  'Quokka',
-  'Kangaroo',
-  'Wallaby',
-  'Platypus',
-  'Echidna',
-  'Dingo',
-  'Numbat',
-  'Otter',
-  'Fox',
-  'Owl',
-  'Panda',
-  'Hedgehog',
-  'Penguin',
-  'Badger',
-  'Beaver',
-  'Sloth',
-  'Hare',
-  'Rabbit',
-  'Gecko',
-  'Squirrel',
-  'Hamster',
-  'Turtle',
-  'Frog',
-  'Flamingo',
-  'Swan',
-  'Bat',
+  'Koala', 'Kangaroo', 'Fox', 'Owl', 'Panda', 'Otter', 'Hedgehog', 'Penguin', 'Flamingo', 'Swan',
+  'Turtle', 'Frog', 'Gecko', 'Bat', 'Beaver', 'Sloth', 'Badger', 'Hamster', 'Rabbit', 'Butterfly',
+  'Bee', 'Octopus', 'Shark', 'Whale', 'Seal', 'Parrot', 'Peacock', 'Squirrel', 'Duck', 'Deer',
+  'Wolf', 'Dolphin',
+];
+// prettier-ignore
+const nameAdjectives = [
+  'Calm', 'Gentle', 'Mossy', 'Quiet', 'Sunny', 'Cozy', 'Bamboo', 'Forest',
+  'Bouncy', 'Sleepy', 'Clever', 'Fuzzy', 'Happy', 'Brave', 'Swift', 'Wandering',
+  'Cheerful', 'Curious', 'Mellow', 'Nimble', 'Plucky', 'Jolly', 'Breezy', 'Dapper',
+  'Snug', 'Wild',
 ];
 function pick<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)];
 }
 function randomDisplayName(): string {
-  const emoji = pick(nameEmojis);
-  const animal = pick(nameAnimals);
-  const name = `${emoji} ${pick(nameAdjectives)} ${animal}`;
+  const i = Math.floor(Math.random() * nameAnimals.length);
+  const emoji = nameEmojis[i];
+  const name = `${emoji} ${pick(nameAdjectives)} ${nameAnimals[i]}`;
   // The server caps display names at 32 bytes; drop the adjective if we overrun.
-  return new TextEncoder().encode(name).length <= 32 ? name : `${emoji} ${animal}`;
+  return new TextEncoder().encode(name).length <= 32 ? name : `${emoji} ${nameAnimals[i]}`;
 }
 export function getIdentity(): LocalIdentity {
   if (fallback) return fallback;

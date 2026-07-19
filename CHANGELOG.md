@@ -4,6 +4,18 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-19
+
+### Fixed
+
+- Critical: the server could crash — returning `502 Bad Gateway` for everyone trying to join a room — if the background title-enrichment goroutine introduced in 0.5.0 panicked. An unrecovered panic in a goroutine takes down the whole Go process; the goroutine now recovers (and logs) instead of crashing the server.
+- Generated names pair each animal with its own matching emoji (e.g. "🐳 Gentle Whale", "🦉 Sunny Owl", "🦈 Snug Shark"). Previously the emoji and animal were chosen independently, so you could end up as a "Kangaroo" with a butterfly emoji.
+
+### Added
+
+- The running app version is shown in the footer next to the GitHub link, linking to the matching release.
+- Online presence: the participants panel shows how many people are currently online, with a live status dot on each avatar.
+
 ## [0.5.0] - 2026-07-18
 
 ### Fixed

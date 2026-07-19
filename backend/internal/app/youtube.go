@@ -3,9 +3,11 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -35,6 +37,14 @@ func fallbackTitle(clientTitle, videoID string) string {
 // so every client sees the proper title. Runs in its own goroutine; all failures
 // are silent and simply leave the placeholder in place.
 func (a *application) enrichTitle(room, mediaID, videoID string) {
+	// This runs in its own goroutine, so an unrecovered panic here would crash the
+	// entire process (unlike a panic inside an HTTP handler, which net/http
+	// recovers per-request). Never let background work take the server down.
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, `{"level":"error","message":"enrichTitle panic","room":%q,"error":"%v"}`+"\n", room, r)
+		}
+	}()
 	if a.fetchTitle == nil {
 		return
 	}

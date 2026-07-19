@@ -669,11 +669,18 @@
         <section class:hidden-mobile={mobileTab !== 'people'}>
           <header>
             <h2>Participants</h2>
-            <span>{room.members.length}</span>
+            <span class="online-count"
+              ><span class="online-dot"></span>{room.members.filter((m) => m.active).length} online</span
+            >
           </header>
           <ul class="members">
             {#each room.members as member}<li>
-                <div class="avatar">{member.displayName.slice(0, 1).toUpperCase()}</div>
+                <div class="avatar" class:offline={!member.active}>
+                  {member.displayName.slice(0, 1).toUpperCase()}<span
+                    class="presence"
+                    title={member.active ? 'Online' : 'Offline'}
+                  ></span>
+                </div>
                 <div>
                   <b>{member.displayName}{member.identityId === room.me ? ' (you)' : ''}</b><small>{member.role}</small>
                 </div>
@@ -1053,6 +1060,7 @@
     padding: 0.3rem;
   }
   .avatar {
+    position: relative;
     width: 2rem;
     height: 2rem !important;
     flex: 0 0 auto !important;
@@ -1061,6 +1069,37 @@
     place-content: center;
     background: var(--accent-muted);
     font-weight: 900;
+  }
+  .avatar .presence {
+    position: absolute;
+    bottom: -1px;
+    right: -1px;
+    width: 0.62rem;
+    height: 0.62rem;
+    border-radius: 50%;
+    background: var(--success);
+    border: 2px solid var(--surface-panel);
+  }
+  .avatar.offline .presence {
+    background: var(--text-muted);
+  }
+  .avatar.offline {
+    opacity: 0.6;
+  }
+  .online-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    font-weight: 650;
+    color: var(--text-secondary);
+  }
+  .online-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 25%, transparent);
   }
   details {
     position: relative;

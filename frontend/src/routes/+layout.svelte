@@ -10,11 +10,16 @@
   let { children } = $props();
   let theme: Theme = $state('system');
   let principal: Principal | null = $state(null);
+  let version = $state('');
   onMount(async () => {
     theme = initialTheme();
     applyTheme(theme);
     try {
       principal = await establish();
+    } catch {}
+    try {
+      const info = (await fetch('/api/version').then((r) => r.json())) as { version?: string };
+      version = info.version ?? '';
     } catch {}
   });
   function setTheme(next: Theme) {
@@ -90,7 +95,13 @@
   <span>KoalaParty · MIT licensed · No tracking. No ads.</span><span
     ><a href="/privacy">Privacy</a> · <a href="/imprint">Imprint</a> ·
     <a href="https://github.com/Shik3i/KoalaParty" target="_blank" rel="noopener noreferrer">GitHub</a> ·
-    <a href="https://sync.koalastuff.net/" target="_blank" rel="noopener noreferrer">KoalaSync</a></span
+    <a href="https://sync.koalastuff.net/" target="_blank" rel="noopener noreferrer">KoalaSync</a>{#if version}
+      ·
+      {#if /^\d+\.\d+\.\d+$/.test(version)}<a
+          href="https://github.com/Shik3i/KoalaParty/releases/tag/v{version}"
+          target="_blank"
+          rel="noopener noreferrer">v{version}</a
+        >{:else}<span class="version">{version}</span>{/if}{/if}</span
   >
 </footer>
 
