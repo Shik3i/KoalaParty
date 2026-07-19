@@ -6,6 +6,16 @@ export interface Principal {
   csrfToken: string;
   isAdmin?: boolean;
 }
+// Carries the HTTP status so callers can tell a genuine client error (4xx) from
+// a transient server/proxy blip (5xx) — e.g. a Bad Gateway during a deploy.
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
 let principal: Principal | null = null;
 export function getPrincipal() {
   return principal;
@@ -14,7 +24,7 @@ let establishing: Promise<Principal> | null = null;
 async function currentPrincipal(): Promise<Principal | null> {
   const response = await fetch('/api/me');
   if (response.status === 204 || response.status === 401) return null;
-  if (!response.ok) throw new Error(await message(response));
+  if (!response.ok) throw new ApiError(response.status, await message(response));
   return (await response.json()) as Principal;
 }
 export async function establish(): Promise<Principal> {
@@ -32,7 +42,7 @@ export async function establish(): Promise<Principal> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: i.id, secret: i.secret, displayName: i.displayName }),
     });
-    if (!r.ok) throw new Error(await message(r));
+    if (!r.ok) throw new ApiError(r.status, await message(r));
     principal = (await r.json()) as Principal;
     return principal;
   })().finally(() => {
@@ -58,13 +68,13 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   let r = await request();
   if (r.status === 403) {
     const problem = (await r.json()) as { code?: string; message?: string };
-    if (problem.code !== 'csrf_failed') throw new Error(problem.message ?? r.statusText);
+    if (problem.code !== 'csrf_failed') throw new ApiError(403, problem.message ?? r.statusText);
     const current = await currentPrincipal();
-    if (!current) throw new Error('Session expired. Reload and try again.');
+    if (!current) throw new ApiError(401, 'Session expired. Reload and try again.');
     principal = p = current;
     r = await request();
   }
-  if (!r.ok) throw new Error(await message(r));
+  if (!r.ok) throw new ApiError(r.status, await message(r));
   if (r.status === 204) return undefined as T;
   return (await r.json()) as T;
 }

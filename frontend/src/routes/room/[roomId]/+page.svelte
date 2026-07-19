@@ -3,7 +3,7 @@
   import { fly, scale, fade } from 'svelte/transition';
   import { flip } from 'svelte/animate';
   import { page } from '$app/state';
-  import { api, establish, websocketURL } from '$lib/api';
+  import { api, establish, websocketURL, ApiError } from '$lib/api';
   import { randomUUID } from '$lib/identity';
   import YouTubePlayer from '$lib/YouTubePlayer.svelte';
   import { formatActivity, parseYouTube, type Snapshot, type Member } from '$lib/room';
@@ -39,6 +39,7 @@
   let noticeTimer: ReturnType<typeof setTimeout> | null = null;
   let commandPending = false;
   let error = '';
+  let joinAttempt = 0;
   let notice = '';
   let noticeKind: 'info' | 'success' | 'error' = 'info';
   let connected = false;
@@ -148,6 +149,34 @@
       /* sessionStorage unavailable */
     }
   }
+  // Entering a room retries on transient failures instead of dead-ending. A brief
+  // 5xx / Bad Gateway (server restarting, proxy blip) or a network error is
+  // retried with backoff; only a genuine client error (4xx: forbidden, not
+  // found, banned) stops and shows the fatal screen.
+  async function joinWithRetry() {
+    while (!disposed) {
+      try {
+        await establish();
+        if (disposed) return;
+        updateRoom(await api(`/api/rooms/${roomId}`));
+        if (disposed) return;
+        error = '';
+        joinAttempt = 0;
+        connect();
+        announceCreation();
+        return;
+      } catch (e) {
+        if (disposed) return;
+        const status = e instanceof ApiError ? e.status : undefined;
+        if (status !== undefined && status >= 400 && status < 500) {
+          error = e instanceof Error ? e.message : 'Could not join room.';
+          return;
+        }
+        joinAttempt++;
+        await new Promise((resolve) => setTimeout(resolve, Math.min(1500 * joinAttempt, 6000)));
+      }
+    }
+  }
   const consentKey = 'koalaparty.youtube.consent';
   onMount(() => {
     try {
@@ -155,17 +184,7 @@
     } catch {
       /* storage unavailable */
     }
-    void (async () => {
-      try {
-        await establish();
-        if (disposed) return;
-        updateRoom(await api(`/api/rooms/${roomId}`));
-        if (!disposed) connect();
-        announceCreation();
-      } catch (e) {
-        if (!disposed) error = e instanceof Error ? e.message : 'Could not join room.';
-      }
-    })();
+    void joinWithRetry();
     const progressTimer = setInterval(() => (nowTick = Date.now()), 500);
     return () => {
       disposed = true;
@@ -362,7 +381,8 @@
     <a class="button" href="/">Back home</a>
   </main>{:else if !room}<main class="fatal loading" aria-busy="true">
     <div class="spinner" aria-hidden="true"></div>
-    <p>Joining room…</p>
+    <p>{joinAttempt > 0 ? 'Reconnecting to the room…' : 'Joining room…'}</p>
+    {#if joinAttempt > 1}<small class="muted">The server may be restarting — this will retry automatically.</small>{/if}
   </main>{:else}
   <main class="room-shell">
     <header class="room-header">

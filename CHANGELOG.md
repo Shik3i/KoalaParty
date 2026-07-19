@@ -4,6 +4,12 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-07-19
+
+### Fixed
+
+- Entering a room no longer dead-ends on a transient failure. A brief `502 Bad Gateway` or network blip — e.g. while the server is restarting or during a deploy — now shows a "Reconnecting to the room…" state and retries automatically, recovering on its own once the server is back, instead of the old "Couldn't enter this room" screen that required a manual reload. Genuine access errors (private room, ban, unknown room) still surface immediately.
+
 ## [0.5.2] - 2026-07-19
 
 ### Changed
