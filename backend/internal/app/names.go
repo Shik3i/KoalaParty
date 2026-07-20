@@ -25,3 +25,22 @@ var (
 		"Snug", "Wild",
 	}
 )
+
+// presetVideos are the same quick-add picks offered in the room UI. A fresh room
+// starts with one of these cued so it is never a blank player. The title is a
+// placeholder; enrichTitle replaces it with the real one.
+var presetVideos = []struct{ ID, Title string }{
+	{"dQw4w9WgXcQ", "Rick Astley - Never Gonna Give You Up"},
+	{"jfKfPfyJRdk", "lofi hip hop radio"},
+	{"4xDzrJKXOOY", "Synthwave"},
+	{"aqz-KE-bpKQ", "Big Buck Bunny"},
+}
+
+// pickPreset chooses a preset deterministically from the room id.
+func pickPreset(id string) int {
+	var n uint64
+	for _, c := range []byte(id) {
+		n = n*131 + uint64(c)
+	}
+	return int(n % uint64(len(presetVideos)))
+}

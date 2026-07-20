@@ -4,6 +4,16 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-19
+
+### Added
+
+- A freshly created room now starts with a random one of the quick-add videos already cued, so the player is never a blank "add a video" screen — just press play. The real title is filled in automatically in the background.
+
+### Changed
+
+- Participant avatars now use the emoji from a member's generated name as a little profile picture, and the name is shown without the emoji prefix (e.g. a "🦭" avatar next to "Sleepy Seal", instead of a broken initial). Custom names still fall back to an initial.
+
 ## [0.5.3] - 2026-07-19
 
 ### Fixed

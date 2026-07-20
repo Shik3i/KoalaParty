@@ -87,6 +87,13 @@
     const s = Math.max(0, Math.floor(seconds));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   }
+  // Names look like "🐸 Nimble Frog": use the leading emoji as the avatar badge
+  // and show the rest as the label. Falls back to an initial for custom names.
+  function nameParts(displayName: string): { badge: string; label: string } {
+    const match = displayName.match(/^(\p{Extended_Pictographic}️?)\s+(.+)$/u);
+    if (match) return { badge: match[1], label: match[2] };
+    return { badge: (displayName.trim()[0] ?? '?').toUpperCase(), label: displayName };
+  }
   function showNotice(message: string, clearAfter = 0, kind: 'info' | 'success' | 'error' = 'info') {
     if (noticeTimer) clearTimeout(noticeTimer);
     notice = message;
@@ -706,15 +713,16 @@
             >
           </header>
           <ul class="members">
-            {#each room.members as member}<li>
+            {#each room.members as member}{@const parts = nameParts(member.displayName)}
+              <li>
                 <div class="avatar" class:offline={!member.active}>
-                  {member.displayName.slice(0, 1).toUpperCase()}<span
+                  <span aria-hidden="true">{parts.badge}</span><span
                     class="presence"
                     title={member.active ? 'Online' : 'Offline'}
                   ></span>
                 </div>
                 <div>
-                  <b>{member.displayName}{member.identityId === room.me ? ' (you)' : ''}</b><small>{member.role}</small>
+                  <b>{parts.label}{member.identityId === room.me ? ' (you)' : ''}</b><small>{member.role}</small>
                 </div>
                 {#if manages() && member.role !== 'owner' && member.identityId !== room.me}<details use:anchoredMenu>
                     <summary aria-label={`Manage ${member.displayName}`}
@@ -1109,6 +1117,8 @@
     place-content: center;
     background: var(--accent-muted);
     font-weight: 900;
+    font-size: 1.05rem;
+    line-height: 1;
   }
   .avatar .presence {
     position: absolute;

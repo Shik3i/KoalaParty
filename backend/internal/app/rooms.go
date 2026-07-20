@@ -88,12 +88,18 @@ func (a *application) createRoom(w http.ResponseWriter, r *http.Request, p princ
 		return
 	}
 	defer tx.Rollback()
+	preset := presetVideos[pickPreset(id)]
+	presetMediaID := "YT" + preset.ID
 	_, e = tx.Exec("INSERT INTO rooms(id,owner_identity_id) VALUES(?,?)", id, p.IdentityID)
 	if e == nil {
 		_, e = tx.Exec("INSERT INTO room_members(room_id,identity_id,role) VALUES(?,?,'owner')", id, p.IdentityID)
 	}
 	if e == nil {
-		_, e = tx.Exec("INSERT INTO playback_states(room_id) VALUES(?)", id)
+		_, e = tx.Exec("INSERT INTO media_items(id,provider,provider_media_id,title,thumbnail_url) VALUES(?,'youtube',?,?,?) ON CONFLICT(provider,provider_media_id) DO UPDATE SET title=excluded.title", presetMediaID, preset.ID, preset.Title, "https://i.ytimg.com/vi/"+preset.ID+"/mqdefault.jpg")
+	}
+	if e == nil {
+		// A fresh room starts with a preset cued (paused) so the player is never blank.
+		_, e = tx.Exec("INSERT INTO playback_states(room_id,current_media_id,status) VALUES(?,?,'paused')", id, presetMediaID)
 	}
 	if e == nil {
 		e = a.insertEventTx(tx, id, p.IdentityID, "room.created", map[string]any{})
@@ -106,6 +112,7 @@ func (a *application) createRoom(w http.ResponseWriter, r *http.Request, p princ
 		problem(w, 500, "database_error", "Could not create room.")
 		return
 	}
+	go a.enrichTitle(id, presetMediaID, preset.ID)
 	writeJSON(w, 201, map[string]string{"id": id, "label": roomLabel(id)})
 }
 func (a *application) roomSnapshot(w http.ResponseWriter, r *http.Request, p principal) {
