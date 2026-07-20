@@ -4,6 +4,13 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-20
+
+### Changed
+
+- Switched the interface typeface to Inter throughout (self-hosted) for a cleaner, more neutral look; removed the previous display font.
+- Removed the click-to-consent "Start watching" gate. Since a room now always has a video cued, the embedded YouTube player loads as soon as you open a room, with a small persistent notice next to it and in the privacy policy. Self-hosters should note this changes the privacy posture: YouTube's privacy-enhanced player is loaded on room entry rather than after an explicit click.
+
 ## [0.6.0] - 2026-07-19
 
 ### Added

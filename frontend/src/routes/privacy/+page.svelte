@@ -94,16 +94,15 @@
   <section>
     <h2>7. YouTube</h2>
     <p>
-      KoalaParty uses locally hosted interface assets before playback consent. YouTube thumbnails, the iframe API and
-      the privacy-enhanced player from <code>i.ytimg.com</code>, <code>youtube.com</code> and
-      <code>youtube-nocookie.com</code> load only after you select “Start watching”.
+      Interface assets are hosted locally. When you open a room, KoalaParty loads YouTube's privacy-enhanced embedded
+      player and thumbnails from <code>i.ytimg.com</code>, <code>youtube.com</code> and
+      <code>youtube-nocookie.com</code>, and a small notice next to the player states this.
     </p>
     <p>
       Google or YouTube may then receive your IP address, device and browser information, referrer, request time and
-      player interactions and may process data outside the EU/EEA under its own privacy terms. Do not select “Start
-      watching” if you do not want to load YouTube. Legal basis for initiating this optional connection: your consent
-      under Article 6(1)(a) GDPR. Reload the page to stop the embedded player and withdraw consent for future requests;
-      this does not affect processing that already occurred.
+      player interactions and may process data outside the EU/EEA under its own privacy terms. If you do not want to
+      load YouTube, do not open a room. Reload or leave the room to stop the embedded player; this does not affect
+      processing that already occurred.
     </p>
     <p>
       When a video is added to a room, the server makes one request to YouTube's public oEmbed endpoint to resolve the

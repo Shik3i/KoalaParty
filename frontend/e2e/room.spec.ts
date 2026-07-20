@@ -29,17 +29,11 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   const memberContext = await browser.newContext();
   const thirdContext = await browser.newContext();
   const owner = await ownerContext.newPage();
-  const thirdPartyRequests: string[] = [];
-  owner.on('request', (request) => {
-    if (/youtube|ytimg/i.test(new URL(request.url()).hostname)) thirdPartyRequests.push(request.url());
-  });
   await owner.goto('/');
   await owner.getByRole('button', { name: 'Create a room' }).click();
   await expect(owner).toHaveURL(/\/room\/([A-Z2-7]{16})$/);
-  await expect(owner.locator('script[src*="youtube.com/iframe_api"]')).toHaveCount(0);
-  await expect(owner.getByText(/you consent to loading YouTube's privacy-enhanced player/)).toBeVisible();
-  expect(thirdPartyRequests).toEqual([]);
-  await owner.getByRole('button', { name: 'Start watching' }).click();
+  // A new room starts with a preset cued and loads YouTube's player on entry.
+  await expect(owner.getByText(/loads YouTube's privacy-enhanced player/)).toBeVisible();
   await expect(owner.locator('script[src*="youtube.com/iframe_api"]')).toHaveCount(1);
   const roomId = owner.url().split('/').at(-1)!;
   const sameIdentity = await ownerContext.newPage();

@@ -44,7 +44,10 @@
   let noticeKind: 'info' | 'success' | 'error' = 'info';
   let connected = false;
   let everConnected = false;
-  let watching = false;
+  // The embedded YouTube player loads as soon as you enter a room (a fresh room
+  // always has a video cued). A small persistent disclosure replaces the old
+  // click-to-consent gate.
+  let watching = true;
   let theater = false;
   let videoURL = '';
   let mobileTab: 'queue' | 'people' | 'activity' = 'queue';
@@ -184,13 +187,7 @@
       }
     }
   }
-  const consentKey = 'koalaparty.youtube.consent';
   onMount(() => {
-    try {
-      if (localStorage.getItem(consentKey) === '1') watching = true;
-    } catch {
-      /* storage unavailable */
-    }
     void joinWithRetry();
     const progressTimer = setInterval(() => (nowTick = Date.now()), 500);
     return () => {
@@ -495,7 +492,7 @@
           <YouTubePlayer
             enabled={watching}
             videoId={room.playback.media?.providerId}
-            status={watching ? room.playback.status : 'paused'}
+            status={room.playback.status}
             position={playbackAnchor.position}
             positionAt={playbackAnchor.at}
             canControl={can('playback.play_pause')}
@@ -507,27 +504,17 @@
             onEnded={() => can('queue.skip') && command('queue.skip')}
             onSkip={can('queue.skip') ? () => command('queue.skip') : undefined}
             onDuration={(d) => (mediaDuration = d)}
-          />{#if !watching}<button
-              class="start"
-              onclick={() => {
-                watching = true;
-                try {
-                  localStorage.setItem(consentKey, '1');
-                } catch {
-                  /* storage unavailable */
-                }
-                showNotice('Playback enabled — you can now control the video.', 2200, 'success');
-              }}><Play size={18} weight="fill" />Start watching</button
-            >
-            <p class="youtube-consent">
-              By selecting “Start watching”, you consent to loading YouTube's privacy-enhanced player.
-              <a href="/privacy">Privacy details</a>
-            </p>{/if}{#if watching && !room.playback.media && room.queue.length && can('queue.skip')}<button
+          />{#if !room.playback.media && room.queue.length && can('queue.skip')}<button
               class="start"
               onclick={() => command('queue.skip')}
               disabled={commandPending}><Play size={18} weight="fill" />Play from queue</button
             >{/if}
         </div>
+        <p class="player-note">
+          Opening a room loads YouTube's privacy-enhanced player from youtube-nocookie.com. <a href="/privacy"
+            >Privacy details</a
+          >
+        </p>
         {#if room.playback.media}{@const pos = livePosition(nowTick)}{@const pct =
             mediaDuration > 0 ? Math.min(100, (pos / mediaDuration) * 100) : 0}
           <div
@@ -558,9 +545,7 @@
                   weight="fill"
                 />Play{/if}</button
             ><span class="transport-hint"
-              >{watching
-                ? 'Play, pause and scrub with the video’s own controls — everyone stays in sync.'
-                : 'Start watching to scrub and follow along.'}</span
+              >Play, pause and scrub with the video’s own controls — everyone stays in sync.</span
             ><button
               class="secondary theater-toggle"
               aria-pressed={theater}
@@ -938,17 +923,11 @@
   .start:active {
     transform: translate(-50%, -50%);
   }
-  .youtube-consent {
-    position: absolute;
-    inset: auto 1rem 0.8rem;
-    margin: 0;
-    color: #b9c8bf;
+  .player-note {
+    margin: 0.55rem 0 0;
+    color: var(--text-muted);
     font-size: 0.74rem;
     line-height: 1.4;
-    text-align: center;
-  }
-  .youtube-consent a {
-    color: #d7f4e2;
   }
   .scrubber {
     margin-top: 0.6rem;
