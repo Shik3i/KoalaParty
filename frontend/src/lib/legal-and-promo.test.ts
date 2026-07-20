@@ -11,7 +11,7 @@ describe('legal and KoalaSync cross-promotion', () => {
     expect(privacy).toContain('admin@koalastuff.net');
     expect(privacy).toContain('Room activity is limited to 200 visible events per room and 30 days');
     expect(privacy).toContain('youtube-nocookie.com');
-    expect(privacy).toContain('Article 6(1)(a) GDPR');
+    expect(privacy).toContain('oEmbed');
   });
 
   it('keeps platform artwork local and links to KoalaSync', () => {
