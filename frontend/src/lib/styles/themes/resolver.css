@@ -1,0 +1,72 @@
+/* Two independent axes drive the palette:
+   - the DESIGN (data-design) supplies a light and a dark palette as namespaced
+     "--light-" and "--dark-" tokens (see the per-design files);
+   - the MODE (data-theme = system|light|dark, plus prefers-color-scheme) decides
+     which of the two the live surface/text/accent tokens resolve to.
+   Keeping the mode logic here means every design only declares colours once. */
+
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  --surface-page: var(--light-surface-page);
+  --surface-panel: var(--light-surface-panel);
+  --surface-elevated: var(--light-surface-elevated);
+  --surface-hover: var(--light-surface-hover);
+  --text-primary: var(--light-text-primary);
+  --text-secondary: var(--light-text-secondary);
+  --text-muted: var(--light-text-muted);
+  --border-subtle: var(--light-border-subtle);
+  --border-strong: var(--light-border-strong);
+  --accent-primary: var(--light-accent-primary);
+  --accent-hover: var(--light-accent-hover);
+  --accent-muted: var(--light-accent-muted);
+  --danger: var(--light-danger);
+  --warning: var(--light-warning);
+  --success: var(--light-success);
+  --player-background: var(--light-player-background);
+  --activity-background: var(--light-activity-background);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --surface-page: var(--dark-surface-page);
+    --surface-panel: var(--dark-surface-panel);
+    --surface-elevated: var(--dark-surface-elevated);
+    --surface-hover: var(--dark-surface-hover);
+    --text-primary: var(--dark-text-primary);
+    --text-secondary: var(--dark-text-secondary);
+    --text-muted: var(--dark-text-muted);
+    --border-subtle: var(--dark-border-subtle);
+    --border-strong: var(--dark-border-strong);
+    --accent-primary: var(--dark-accent-primary);
+    --accent-hover: var(--dark-accent-hover);
+    --accent-muted: var(--dark-accent-muted);
+    --danger: var(--dark-danger);
+    --warning: var(--dark-warning);
+    --success: var(--dark-success);
+    --player-background: var(--dark-player-background);
+    --activity-background: var(--dark-activity-background);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --surface-page: var(--dark-surface-page);
+  --surface-panel: var(--dark-surface-panel);
+  --surface-elevated: var(--dark-surface-elevated);
+  --surface-hover: var(--dark-surface-hover);
+  --text-primary: var(--dark-text-primary);
+  --text-secondary: var(--dark-text-secondary);
+  --text-muted: var(--dark-text-muted);
+  --border-subtle: var(--dark-border-subtle);
+  --border-strong: var(--dark-border-strong);
+  --accent-primary: var(--dark-accent-primary);
+  --accent-hover: var(--dark-accent-hover);
+  --accent-muted: var(--dark-accent-muted);
+  --danger: var(--dark-danger);
+  --warning: var(--dark-warning);
+  --success: var(--dark-success);
+  --player-background: var(--dark-player-background);
+  --activity-background: var(--dark-activity-background);
+}

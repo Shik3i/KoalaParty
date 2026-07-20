@@ -1,0 +1,38 @@
+/* Grape — soft purple. */
+:root[data-design='grape'] {
+  --light-surface-page: #f2eff6;
+  --light-surface-panel: #faf7fd;
+  --light-surface-elevated: #ffffff;
+  --light-surface-hover: #e6def0;
+  --light-text-primary: #241833;
+  --light-text-secondary: #463a57;
+  --light-text-muted: #645a72;
+  --light-border-subtle: #ded4ea;
+  --light-border-strong: #b6a6cd;
+  --light-accent-primary: #6b3fa0;
+  --light-accent-hover: #552f82;
+  --light-accent-muted: #d8c9ec;
+  --light-danger: #a63c3c;
+  --light-warning: #875f0f;
+  --light-success: #32764b;
+  --light-player-background: #120c1a;
+  --light-activity-background: #ece6f3;
+
+  --dark-surface-page: #17111f;
+  --dark-surface-panel: #241a30;
+  --dark-surface-elevated: #2e2140;
+  --dark-surface-hover: #392b4d;
+  --dark-text-primary: #f0eaf7;
+  --dark-text-secondary: #cdc1da;
+  --dark-text-muted: #9a8db0;
+  --dark-border-subtle: #362949;
+  --dark-border-strong: #564372;
+  --dark-accent-primary: #b892e6;
+  --dark-accent-hover: #cbb0ee;
+  --dark-accent-muted: #382a4f;
+  --dark-danger: #ee8888;
+  --dark-warning: #e2ba6e;
+  --dark-success: #8fd2a2;
+  --dark-player-background: #0a0710;
+  --dark-activity-background: #1c1526;
+}

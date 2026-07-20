@@ -4,6 +4,17 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-20
+
+### Added
+
+- Color designs: pick a palette (Eucalyptus, Ocean, Amber, Grape or Rose) from the new dropdown in the header. It is independent of the light/dark/system theme — each design has its own light and dark variant — and your choice persists across sessions.
+- When another participant presses play, the video now starts for everyone immediately. Browsers block autoplay with sound until you interact with the page, so passive viewers now start playback muted automatically (in sync with everyone) and get a one-tap "Muted — tap for sound" button, instead of sitting on a paused video until they click.
+
+### Changed
+
+- Moved the theater-mode toggle out of the controls panel to a row directly under the player, next to the seek bar, so it is easier to find and reach.
+
 ## [0.7.0] - 2026-07-20
 
 ### Changed

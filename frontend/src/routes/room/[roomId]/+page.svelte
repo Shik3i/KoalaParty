@@ -510,27 +510,41 @@
               disabled={commandPending}><Play size={18} weight="fill" />Play from queue</button
             >{/if}
         </div>
+        <div class="player-bar">
+          <div class="scrubber-area">
+            {#if room.playback.media}{@const pos = livePosition(nowTick)}{@const pct =
+                mediaDuration > 0 ? Math.min(100, (pos / mediaDuration) * 100) : 0}
+              <div
+                class="scrubber"
+                role="progressbar"
+                aria-label="Playback progress"
+                aria-valuemin="0"
+                aria-valuemax={Math.round(mediaDuration)}
+                aria-valuenow={Math.round(pos)}
+                aria-valuetext={mediaDuration > 0 ? `${fmtTime(pos)} of ${fmtTime(mediaDuration)}` : fmtTime(pos)}
+              >
+                <div class="scrubber-track"><div class="scrubber-fill" style="width:{pct}%"></div></div>
+                <div class="scrubber-time">
+                  <span>{fmtTime(pos)}</span><span>{mediaDuration > 0 ? fmtTime(mediaDuration) : '–:--'}</span>
+                </div>
+              </div>{/if}
+          </div>
+          <button
+            class="secondary theater-toggle"
+            aria-pressed={theater}
+            aria-label={theater ? 'Exit theater mode' : 'Theater mode'}
+            title={theater ? 'Exit theater mode' : 'Theater mode'}
+            onclick={() => (theater = !theater)}
+            >{#if theater}<ArrowsIn size={17} weight="bold" />{:else}<ArrowsOut size={17} weight="bold" />{/if}<span
+              class="theater-label">{theater ? 'Exit theater' : 'Theater'}</span
+            ></button
+          >
+        </div>
         <p class="player-note">
           Opening a room loads YouTube's privacy-enhanced player from youtube-nocookie.com. <a href="/privacy"
             >Privacy details</a
           >
         </p>
-        {#if room.playback.media}{@const pos = livePosition(nowTick)}{@const pct =
-            mediaDuration > 0 ? Math.min(100, (pos / mediaDuration) * 100) : 0}
-          <div
-            class="scrubber"
-            role="progressbar"
-            aria-label="Playback progress"
-            aria-valuemin="0"
-            aria-valuemax={Math.round(mediaDuration)}
-            aria-valuenow={Math.round(pos)}
-            aria-valuetext={mediaDuration > 0 ? `${fmtTime(pos)} of ${fmtTime(mediaDuration)}` : fmtTime(pos)}
-          >
-            <div class="scrubber-track"><div class="scrubber-fill" style="width:{pct}%"></div></div>
-            <div class="scrubber-time">
-              <span>{fmtTime(pos)}</span><span>{mediaDuration > 0 ? fmtTime(mediaDuration) : '–:--'}</span>
-            </div>
-          </div>{/if}
         <div class="controls panel">
           <div class="transport">
             <button
@@ -546,16 +560,6 @@
                 />Play{/if}</button
             ><span class="transport-hint"
               >Play, pause and scrub with the video’s own controls — everyone stays in sync.</span
-            ><button
-              class="secondary theater-toggle"
-              aria-pressed={theater}
-              aria-label={theater ? 'Exit theater mode' : 'Theater mode'}
-              title={theater ? 'Exit theater mode' : 'Theater mode'}
-              onclick={() => (theater = !theater)}
-              >{#if theater}<ArrowsIn size={17} weight="bold" />{:else}<ArrowsOut
-                  size={17}
-                  weight="bold"
-                />{/if}</button
             >
           </div>
           <form
@@ -854,9 +858,29 @@
     max-width: min(100%, 142vh);
     margin-inline: auto;
   }
+  /* The theater toggle sits directly under the player, sharing a row with the
+     seek bar, so it is easy to reach instead of buried in the controls panel. */
+  .player-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    margin-top: 0.6rem;
+  }
+  .scrubber-area {
+    flex: 1;
+    min-width: 0;
+  }
   .theater-toggle {
-    margin-left: auto;
-    padding: 0.55rem 0.6rem;
+    flex: 0 0 auto;
+    padding: 0.5rem 0.8rem;
+  }
+  @media (max-width: 580px) {
+    .theater-label {
+      display: none;
+    }
+    .theater-toggle {
+      padding: 0.5rem 0.6rem;
+    }
   }
   .settings {
     padding: 1rem;
@@ -928,9 +952,6 @@
     color: var(--text-muted);
     font-size: 0.74rem;
     line-height: 1.4;
-  }
-  .scrubber {
-    margin-top: 0.6rem;
   }
   .scrubber-track {
     height: 6px;

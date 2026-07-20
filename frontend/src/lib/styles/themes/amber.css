@@ -1,0 +1,38 @@
+/* Amber — warm gold / sand. */
+:root[data-design='amber'] {
+  --light-surface-page: #f6f2e8;
+  --light-surface-panel: #fdfaf2;
+  --light-surface-elevated: #ffffff;
+  --light-surface-hover: #efe6d4;
+  --light-text-primary: #2b2113;
+  --light-text-secondary: #544732;
+  --light-text-muted: #6e6152;
+  --light-border-subtle: #e5dcc9;
+  --light-border-strong: #c3b596;
+  --light-accent-primary: #9a6a15;
+  --light-accent-hover: #7c530c;
+  --light-accent-muted: #e6d6b3;
+  --light-danger: #a63c3c;
+  --light-warning: #875f0f;
+  --light-success: #32764b;
+  --light-player-background: #15110a;
+  --light-activity-background: #f0e9da;
+
+  --dark-surface-page: #1c160d;
+  --dark-surface-panel: #292013;
+  --dark-surface-elevated: #332818;
+  --dark-surface-hover: #3d3020;
+  --dark-text-primary: #f5efe2;
+  --dark-text-secondary: #d5c9b4;
+  --dark-text-muted: #a89b83;
+  --dark-border-subtle: #423622;
+  --dark-border-strong: #6a5738;
+  --dark-accent-primary: #e0b466;
+  --dark-accent-hover: #eec98a;
+  --dark-accent-muted: #4c3d22;
+  --dark-danger: #ee8888;
+  --dark-warning: #e2ba6e;
+  --dark-success: #8fd2a2;
+  --dark-player-background: #0b0805;
+  --dark-activity-background: #211a10;
+}

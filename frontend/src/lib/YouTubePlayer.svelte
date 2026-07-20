@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Play, Warning, Hourglass, SkipForward } from 'phosphor-svelte';
+  import { Play, Warning, Hourglass, SkipForward, SpeakerSimpleSlash } from 'phosphor-svelte';
   let {
     enabled = false,
     videoId = null,
@@ -47,7 +47,8 @@
   // re-baseline on unrelated snapshots, so the expected position stays correct.
   const ENDED = 0,
     PLAYING = 1,
-    PAUSED = 2;
+    PAUSED = 2,
+    BUFFERING = 3;
   const POLL_MS = 500;
   const SEEK_JUMP = 1.5; // discontinuity in the player's own timeline => local scrub
   const DRIFT_MAX = 1.8; // divergence from the expected server position => realign
@@ -56,6 +57,12 @@
   let prevTime = 0; // last observed media time (for discontinuity detection)
   let prevWall = 0; // wall clock at prevTime
   let monitor: ReturnType<typeof setInterval> | null = null;
+  // Browsers block autoplay WITH SOUND until the tab has a user gesture, so a
+  // passive viewer would otherwise sit on a paused video when someone else presses
+  // play. We detect the blocked play, fall back to muted autoplay (always allowed),
+  // and surface a one-tap unmute — so the video starts for everyone immediately.
+  let autoplayTimer: ReturnType<typeof setTimeout> | null = null;
+  let mutedForAutoplay = $state(false);
 
   function currentTime(): number {
     return player?.getCurrentTime?.() ?? 0;
@@ -67,6 +74,41 @@
   function expectedPosition(): number {
     if (status !== 'playing') return Math.max(0, position);
     return Math.max(0, position + (Date.now() - positionAt) / 1000);
+  }
+
+  // Ask the player to start, then verify it actually did. If the browser blocked
+  // autoplay-with-sound, retry muted so playback still begins in sync everywhere.
+  function requestPlay() {
+    player.playVideo?.();
+    scheduleAutoplayCheck();
+  }
+  function scheduleAutoplayCheck() {
+    if (autoplayTimer) clearTimeout(autoplayTimer);
+    // A single snapshot is fragile: a slow network shows BUFFERING before PLAYING,
+    // while a blocked autoplay stays UNSTARTED/CUED/PAUSED. Poll a few times so we
+    // only fall back to muted playback once it is clear the sound play never took.
+    const check = (attempt: number) => {
+      autoplayTimer = null;
+      if (disposed || !player || status !== 'playing') return;
+      const state = player.getPlayerState?.();
+      if (state === PLAYING) return; // playing (with or without sound) — nothing to do
+      if (state === BUFFERING && attempt < 3) {
+        autoplayTimer = setTimeout(() => check(attempt + 1), 500);
+        return;
+      }
+      // Blocked (or stuck buffering): muted autoplay is always allowed, so start it
+      // muted and surface a one-tap unmute, then confirm the muted play took.
+      player.mute?.();
+      mutedForAutoplay = true;
+      player.playVideo?.();
+      if (attempt < 3) autoplayTimer = setTimeout(() => check(attempt + 1), 600);
+    };
+    autoplayTimer = setTimeout(() => check(0), 450);
+  }
+  function unmute() {
+    player?.unMute?.();
+    player?.setVolume?.(100);
+    mutedForAutoplay = false;
   }
 
   type YTWindow = Window & { YT?: any; onYouTubeIframeAPIReady?: () => void };
@@ -204,6 +246,7 @@
     return () => {
       disposed = true;
       stopMonitor();
+      if (autoplayTimer) clearTimeout(autoplayTimer);
       player?.destroy();
     };
   });
@@ -227,8 +270,10 @@
     if (lastVideo !== videoId) {
       guard(3000);
       const request = { videoId, startSeconds: target };
-      if (status === 'playing') player.loadVideoById(request);
-      else player.cueVideoById(request);
+      if (status === 'playing') {
+        player.loadVideoById(request);
+        scheduleAutoplayCheck();
+      } else player.cueVideoById(request);
       lastVideo = videoId;
       prevTime = target;
       prevWall = Date.now();
@@ -243,7 +288,7 @@
       prevTime = target;
       prevWall = Date.now();
     }
-    if (status === 'playing') player.playVideo?.();
+    if (status === 'playing') requestPlay();
     else player.pauseVideo?.();
   }
   $effect(() => {
@@ -261,6 +306,9 @@
 
 <div class="player">
   <div bind:this={host}></div>
+  {#if mutedForAutoplay && !playerError}<button class="unmute" onclick={unmute}
+      ><SpeakerSimpleSlash size={18} weight="fill" /><span>Muted — tap for sound</span></button
+    >{/if}
   {#if playerError}<div class="player-error" role="alert">
       <span><Warning size={38} weight="fill" /></span>
       <p>{playerError}</p>
@@ -289,6 +337,18 @@
     width: 100%;
     height: 100%;
     border: 0;
+  }
+  .unmute {
+    position: absolute;
+    left: 50%;
+    bottom: 0.9rem;
+    transform: translateX(-50%);
+    z-index: 3;
+    font-size: 0.85rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+  .unmute:hover {
+    transform: translateX(-50%) translateY(-1px);
   }
   .empty {
     position: absolute;

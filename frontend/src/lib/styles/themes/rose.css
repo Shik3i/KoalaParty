@@ -1,0 +1,38 @@
+/* Rose — warm pink / berry. */
+:root[data-design='rose'] {
+  --light-surface-page: #f7eff1;
+  --light-surface-panel: #fdf6f8;
+  --light-surface-elevated: #ffffff;
+  --light-surface-hover: #f0dfe3;
+  --light-text-primary: #33161d;
+  --light-text-secondary: #5a3841;
+  --light-text-muted: #6f565d;
+  --light-border-subtle: #ecd6db;
+  --light-border-strong: #cba3ad;
+  --light-accent-primary: #a83a5b;
+  --light-accent-hover: #8a2c49;
+  --light-accent-muted: #ecccd6;
+  --light-danger: #a63c3c;
+  --light-warning: #875f0f;
+  --light-success: #32764b;
+  --light-player-background: #1a0f12;
+  --light-activity-background: #f3e7ea;
+
+  --dark-surface-page: #1f1216;
+  --dark-surface-panel: #2e1c22;
+  --dark-surface-elevated: #38242b;
+  --dark-surface-hover: #452d35;
+  --dark-text-primary: #f7eaee;
+  --dark-text-secondary: #dcc2c9;
+  --dark-text-muted: #b0909a;
+  --dark-border-subtle: #432c33;
+  --dark-border-strong: #6f4a55;
+  --dark-accent-primary: #e88aa5;
+  --dark-accent-hover: #f0aec1;
+  --dark-accent-muted: #4d2f38;
+  --dark-danger: #ee8888;
+  --dark-warning: #e2ba6e;
+  --dark-success: #8fd2a2;
+  --dark-player-background: #0f070a;
+  --dark-activity-background: #251419;
+}

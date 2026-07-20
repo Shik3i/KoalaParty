@@ -1,0 +1,40 @@
+/* Eucalyptus — the default green design. Declared on the bare :root so it applies
+   both when no design is chosen yet and when it is explicitly selected; the other
+   designs override these namespaced tokens under their own [data-design]. */
+:root {
+  --light-surface-page: #f2f3e9;
+  --light-surface-panel: #fbfcf5;
+  --light-surface-elevated: #ffffff;
+  --light-surface-hover: #e8ecdd;
+  --light-text-primary: #14281f;
+  --light-text-secondary: #3d5449;
+  --light-text-muted: #5f6e65;
+  --light-border-subtle: #dbe1d3;
+  --light-border-strong: #aab9a8;
+  --light-accent-primary: #286846;
+  --light-accent-hover: #1d5337;
+  --light-accent-muted: #c9dfce;
+  --light-danger: #a63c3c;
+  --light-warning: #875f0f;
+  --light-success: #32764b;
+  --light-player-background: #0c1511;
+  --light-activity-background: #edf0e5;
+
+  --dark-surface-page: #0d1b15;
+  --dark-surface-panel: #14271e;
+  --dark-surface-elevated: #1a3025;
+  --dark-surface-hover: #213b2e;
+  --dark-text-primary: #eef5e9;
+  --dark-text-secondary: #c1d0c4;
+  --dark-text-muted: #8fa298;
+  --dark-border-subtle: #294237;
+  --dark-border-strong: #486555;
+  --dark-accent-primary: #8fc59d;
+  --dark-accent-hover: #add8b6;
+  --dark-accent-muted: #294c38;
+  --dark-danger: #ee8888;
+  --dark-warning: #e2ba6e;
+  --dark-success: #8fd2a2;
+  --dark-player-background: #050806;
+  --dark-activity-background: #102118;
+}

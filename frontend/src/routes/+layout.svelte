@@ -1,19 +1,26 @@
 <script lang="ts">
   import '../lib/styles/tokens.css';
-  import '../lib/styles/themes/light.css';
-  import '../lib/styles/themes/dark.css';
+  import '../lib/styles/themes/eucalyptus.css';
+  import '../lib/styles/themes/ocean.css';
+  import '../lib/styles/themes/amber.css';
+  import '../lib/styles/themes/grape.css';
+  import '../lib/styles/themes/rose.css';
+  import '../lib/styles/themes/resolver.css';
   import '../lib/styles/base.css';
   import { onMount } from 'svelte';
-  import { Compass, FilmSlate, UsersThree, UserCircle, ShieldStar, Sun, Moon, Monitor } from 'phosphor-svelte';
-  import { applyTheme, initialTheme, type Theme } from '$lib/theme';
+  import { Compass, FilmSlate, UsersThree, UserCircle, ShieldStar, Sun, Moon, Monitor, Palette } from 'phosphor-svelte';
+  import { applyTheme, initialTheme, applyDesign, initialDesign, designs, type Theme, type Design } from '$lib/theme';
   import { establish, type Principal } from '$lib/api';
   let { children } = $props();
   let theme: Theme = $state('system');
+  let design: Design = $state('eucalyptus');
   let principal: Principal | null = $state(null);
   let version = $state('');
   onMount(async () => {
     theme = initialTheme();
     applyTheme(theme);
+    design = initialDesign();
+    applyDesign(design);
     try {
       principal = await establish();
     } catch {}
@@ -25,6 +32,10 @@
   function setTheme(next: Theme) {
     theme = next;
     applyTheme(next);
+  }
+  function setDesign(next: Design) {
+    design = next;
+    applyDesign(next);
   }
   const themeOptions: { value: Theme; label: string }[] = [
     { value: 'system', label: 'System theme' },
@@ -60,19 +71,28 @@
         ><ShieldStar size={17} weight="bold" />Admin</a
       >{/if}<a href="/account"><UserCircle size={17} weight="bold" />Account</a>
   </nav>
-  <div class="theme" role="group" aria-label="Theme">
-    {#each themeOptions as option}<button
-        type="button"
-        class:active={theme === option.value}
-        aria-pressed={theme === option.value}
-        aria-label={option.label}
-        title={option.label}
-        onclick={() => setTheme(option.value)}
-        >{#if option.value === 'system'}<Monitor size={16} weight="bold" />{:else if option.value === 'light'}<Sun
-            size={16}
-            weight="bold"
-          />{:else}<Moon size={16} weight="bold" />{/if}</button
-      >{/each}
+  <div class="appearance">
+    <label class="design" title="Color design">
+      <Palette size={16} weight="bold" aria-hidden="true" />
+      <span class="sr-only">Color design</span>
+      <select aria-label="Color design" value={design} onchange={(e) => setDesign(e.currentTarget.value as Design)}>
+        {#each designs as option}<option value={option.value}>{option.label}</option>{/each}
+      </select>
+    </label>
+    <div class="theme" role="group" aria-label="Theme">
+      {#each themeOptions as option}<button
+          type="button"
+          class:active={theme === option.value}
+          aria-pressed={theme === option.value}
+          aria-label={option.label}
+          title={option.label}
+          onclick={() => setTheme(option.value)}
+          >{#if option.value === 'system'}<Monitor size={16} weight="bold" />{:else if option.value === 'light'}<Sun
+              size={16}
+              weight="bold"
+            />{:else}<Moon size={16} weight="bold" />{/if}</button
+        >{/each}
+    </div>
   </div>
 </header>
 <div id="main">
@@ -186,6 +206,38 @@
   .site-header nav a:hover {
     color: var(--accent-primary);
   }
+  .appearance {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .design {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    margin: 0;
+    color: var(--text-muted);
+  }
+  .design :global(svg) {
+    position: absolute;
+    left: 0.6rem;
+    pointer-events: none;
+  }
+  .design select {
+    width: auto;
+    padding: 0.4rem 1.9rem 0.4rem 2rem;
+    border-radius: 999px;
+    border-color: var(--border-subtle);
+    background: var(--surface-panel);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    font-weight: 650;
+    cursor: pointer;
+  }
+  .design:hover {
+    color: var(--text-primary);
+  }
   .theme {
     display: inline-flex;
     gap: 2px;
@@ -238,7 +290,7 @@
       scrollbar-width: thin;
       min-width: 0;
     }
-    .theme {
+    .appearance {
       margin-left: auto;
     }
     footer {

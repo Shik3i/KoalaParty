@@ -81,9 +81,10 @@
   <section>
     <h2>6. Local storage and session cookie</h2>
     <p>
-      Your browser stores the random identity UUID and secret, display name, avatar seed and theme in local storage.
-      These values are required for identity continuity and interface preferences, not tracking. You can remove them
-      through your browser settings, but doing so before linking an account permanently loses anonymous room ownership.
+      Your browser stores the random identity UUID and secret, display name, avatar seed, and your theme and color
+      design in local storage. These values are required for identity continuity and interface preferences, not
+      tracking. You can remove them through your browser settings, but doing so before linking an account permanently
+      loses anonymous room ownership.
     </p>
     <p>
       The server sets the technically necessary <code>kp_session</code> cookie after authentication. It is HttpOnly and SameSite=Lax;

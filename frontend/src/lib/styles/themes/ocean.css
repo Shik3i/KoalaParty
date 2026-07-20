@@ -1,0 +1,38 @@
+/* Ocean — cool blue / teal. */
+:root[data-design='ocean'] {
+  --light-surface-page: #eef2f6;
+  --light-surface-panel: #f6fafc;
+  --light-surface-elevated: #ffffff;
+  --light-surface-hover: #dde8ef;
+  --light-text-primary: #10222e;
+  --light-text-secondary: #33505f;
+  --light-text-muted: #5a6b76;
+  --light-border-subtle: #d2dee6;
+  --light-border-strong: #a3b7c3;
+  --light-accent-primary: #1f6f8b;
+  --light-accent-hover: #155873;
+  --light-accent-muted: #c3dae4;
+  --light-danger: #a63c3c;
+  --light-warning: #875f0f;
+  --light-success: #2c7a6b;
+  --light-player-background: #081018;
+  --light-activity-background: #e6eef3;
+
+  --dark-surface-page: #0c1a22;
+  --dark-surface-panel: #12262f;
+  --dark-surface-elevated: #183039;
+  --dark-surface-hover: #1f3d48;
+  --dark-text-primary: #e7f2f6;
+  --dark-text-secondary: #bcd0d8;
+  --dark-text-muted: #87a0aa;
+  --dark-border-subtle: #274049;
+  --dark-border-strong: #456673;
+  --dark-accent-primary: #74c1d6;
+  --dark-accent-hover: #9ad6e6;
+  --dark-accent-muted: #25454f;
+  --dark-danger: #ee8888;
+  --dark-warning: #e2ba6e;
+  --dark-success: #7fd0c0;
+  --dark-player-background: #04090d;
+  --dark-activity-background: #0f1f28;
+}
