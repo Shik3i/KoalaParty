@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -81,7 +82,8 @@ func (a *application) exchangeIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.DisplayName = strings.TrimSpace(in.DisplayName)
-	if !uuidPattern.MatchString(in.ID) || len(in.DisplayName) < 1 || len(in.DisplayName) > 32 {
+	nameLength := utf8.RuneCountInString(in.DisplayName)
+	if !uuidPattern.MatchString(in.ID) || nameLength < 1 || nameLength > 32 {
 		problem(w, 400, "invalid_identity", "Invalid identity fields.")
 		return
 	}
@@ -129,7 +131,7 @@ func (a *application) issueSession(w http.ResponseWriter, r *http.Request, ident
 		problem(w, 500, "session_failed", "Could not create session.")
 		return
 	}
-	expires := time.Now().Add(a.sessionTTL)
+	expires := time.Now().Add(a.getSessionTTL())
 	_, err = a.db.Exec("INSERT INTO sessions(token_hash,identity_id,csrf_token,expires_at) VALUES(?,?,?,?)", tokenHash(token), identityID, csrf, expires.UTC().Format(time.RFC3339))
 	if err != nil {
 		problem(w, 500, "session_failed", "Could not create session.")

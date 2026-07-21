@@ -24,25 +24,28 @@ func (a *application) adminStats(w http.ResponseWriter, r *http.Request, p princ
 	onlineUsers := a.hub.onlineCount()
 
 	a.hub.mu.RLock()
-	activeRoomsList := make([]map[string]any, 0)
+	activeRoomCounts := make(map[string]int, len(a.hub.rooms))
 	for rid, clients := range a.hub.rooms {
 		unique := make(map[string]struct{})
 		for c := range clients {
 			unique[c.identity] = struct{}{}
 		}
+		activeRoomCounts[rid] = len(unique)
+	}
+	a.hub.mu.RUnlock()
 
+	activeRoomsList := make([]map[string]any, 0, len(activeRoomCounts))
+	for rid, viewerCount := range activeRoomCounts {
 		var title sql.NullString
 		_ = a.db.QueryRow("SELECT m.title FROM playback_states p JOIN media_items m ON m.id=p.current_media_id WHERE p.room_id=?", rid).Scan(&title)
 
 		activeRoomsList = append(activeRoomsList, map[string]any{
 			"roomId":       rid,
 			"label":        roomLabel(rid),
-			"viewerCount":  len(unique),
+			"viewerCount":  viewerCount,
 			"currentVideo": title.String,
 		})
 	}
-	a.hub.mu.RUnlock()
-
 	writeJSON(w, 200, map[string]any{
 		"totalAccounts": totalAccounts,
 		"totalRooms":    totalRooms,

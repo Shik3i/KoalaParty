@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 )
 
 func requireAccount(w http.ResponseWriter, p principal) bool {
@@ -177,7 +178,8 @@ func (a *application) accountProfile(w http.ResponseWriter, r *http.Request, p p
 		return
 	}
 	in.DisplayName = strings.TrimSpace(in.DisplayName)
-	if len(in.DisplayName) < 1 || len(in.DisplayName) > 32 {
+	nameLength := utf8.RuneCountInString(in.DisplayName)
+	if nameLength < 1 || nameLength > 32 {
 		problem(w, 400, "invalid_display_name", "Display name must be 1 to 32 characters.")
 		return
 	}

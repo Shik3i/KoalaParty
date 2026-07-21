@@ -73,6 +73,20 @@ func TestIdentityCreationAuthenticationAndRejection(t *testing.T) {
 	}
 }
 
+func TestIdentityDisplayNameCountsUnicodeCharacters(t *testing.T) {
+	a := testApp(t)
+	body, _ := json.Marshal(identityRequest{
+		ID:          "123e4567-e89b-42d3-a456-426614174010",
+		Secret:      strings.Repeat("u", 43),
+		DisplayName: strings.Repeat("ä", 32),
+	})
+	w := httptest.NewRecorder()
+	a.exchangeIdentity(w, httptest.NewRequest("POST", "/api/identity/exchange", bytes.NewReader(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("32-character Unicode display name rejected: %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestIdentityExchangeReusesMatchingSession(t *testing.T) {
 	a := testApp(t)
 	id := "123e4567-e89b-42d3-a456-426614174005"
@@ -140,6 +154,42 @@ func TestRoomPersistenceAndOwnerProtection(t *testing.T) {
 		if candidate.IdentityID == memberP.IdentityID && candidate.Permissions["playback.play_pause"] {
 			t.Fatal("permission override missing from snapshot")
 		}
+	}
+}
+
+func TestQueueTitleCannotOverwriteSharedMediaMetadata(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174011", strings.Repeat("m", 43))
+	w := httptest.NewRecorder()
+	a.requireAuth(a.createRoom)(w, authed("POST", "/api/rooms", nil, cookie, owner.CSRF))
+	var created map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &created)
+
+	s, err := a.snapshot(t.Context(), created["id"], owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	videoID := "abc12345678"
+	add := command{Type: "queue.add", ExpectedRevision: s.Revision, Payload: json.RawMessage(`{"videoId":"` + videoID + `","title":"Untrusted title"}`)}
+	s, err = a.applyCommand(t.Context(), created["id"], owner, add)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var title string
+	if err = a.db.QueryRow("SELECT title FROM media_items WHERE id=?", "YT"+videoID).Scan(&title); err != nil || title != "YouTube video "+videoID {
+		t.Fatalf("stored client-supplied title %q: %v", title, err)
+	}
+
+	if _, err = a.db.Exec("UPDATE media_items SET title='Trusted title' WHERE id=?", "YT"+videoID); err != nil {
+		t.Fatal(err)
+	}
+	add.ExpectedRevision = s.Revision
+	add.Payload = json.RawMessage(`{"videoId":"` + videoID + `","title":"Overwrite attempt"}`)
+	if _, err = a.applyCommand(t.Context(), created["id"], owner, add); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.db.QueryRow("SELECT title FROM media_items WHERE id=?", "YT"+videoID).Scan(&title); err != nil || title != "Trusted title" {
+		t.Fatalf("shared trusted title overwritten with %q: %v", title, err)
 	}
 }
 func TestRegistrationLinksExistingIdentity(t *testing.T) {

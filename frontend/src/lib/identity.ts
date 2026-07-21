@@ -17,7 +17,7 @@ function valid(value: unknown): value is LocalIdentity {
     identity.secret.length <= 128 &&
     typeof identity.displayName === 'string' &&
     identity.displayName.trim().length > 0 &&
-    identity.displayName.length <= 32 &&
+    Array.from(identity.displayName).length <= 32 &&
     typeof identity.avatarSeed === 'string' &&
     identity.avatarSeed.length > 0
   );
@@ -126,7 +126,7 @@ export function getIdentity(): LocalIdentity {
 }
 export function updateDisplayName(displayName: string) {
   const value = getIdentity();
-  const normalized = displayName.trim().slice(0, 32);
+  const normalized = Array.from(displayName.trim()).slice(0, 32).join('');
   if (normalized) value.displayName = normalized;
   persist(value);
   return value;

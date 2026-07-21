@@ -170,3 +170,13 @@ func TestAccountSelfServiceAndSessions(t *testing.T) {
 		t.Fatalf("account cleanup accounts=%d activeRooms=%d", accounts, activeRooms)
 	}
 }
+
+func TestAccountProfileCountsUnicodeCharacters(t *testing.T) {
+	a := testApp(t)
+	cookie, p, _ := accountPrincipal(t, a, "123e4567-e89b-42d3-a456-426614174012", "unicode_user")
+	profile := httptest.NewRecorder()
+	a.requireAuth(a.accountProfile)(profile, authed("PATCH", "/api/account/profile", map[string]string{"displayName": strings.Repeat("界", 32)}, cookie, p.CSRF))
+	if profile.Code != http.StatusOK {
+		t.Fatalf("32-character Unicode profile rejected: %d %s", profile.Code, profile.Body.String())
+	}
+}

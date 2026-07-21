@@ -64,8 +64,32 @@ func (a *application) enrichTitle(room, mediaID, videoID string) {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return
 	}
-	if s, err := a.snapshot(ctx, room, ""); err == nil {
-		a.hub.broadcast(room, s)
+	rows, err := a.db.QueryContext(ctx, `SELECT DISTINCT room_id FROM (
+		SELECT room_id FROM playback_states WHERE current_media_id=?
+		UNION SELECT room_id FROM room_queue_items WHERE media_id=?
+	)`, mediaID, mediaID)
+	if err != nil {
+		return
+	}
+	var affectedRooms []string
+	for rows.Next() {
+		var affectedRoom string
+		if rows.Scan(&affectedRoom) != nil {
+			rows.Close()
+			return
+		}
+		affectedRooms = append(affectedRooms, affectedRoom)
+	}
+	if rows.Close() != nil || rows.Err() != nil {
+		return
+	}
+	for _, affectedRoom := range affectedRooms {
+		if !a.hub.activeRoom(affectedRoom) {
+			continue
+		}
+		if s, snapshotErr := a.snapshot(ctx, affectedRoom, ""); snapshotErr == nil {
+			a.hub.broadcast(affectedRoom, s)
+		}
 	}
 }
 

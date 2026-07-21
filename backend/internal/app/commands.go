@@ -112,7 +112,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		if json.Unmarshal(c.Payload, &in) != nil || !youtubeID.MatchString(in.VideoID) {
 			return snapshot{}, errors.New("invalid YouTube video ID")
 		}
-		mediaTitle = fallbackTitle(in.Title, in.VideoID)
+		mediaTitle = fallbackTitle("", in.VideoID)
 		if a.fetchTitle != nil {
 			enrichVideoID = in.VideoID
 		}
@@ -158,7 +158,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			return snapshot{}, errors.New("invalid YouTube video ID")
 		}
 		mediaID := "YT" + in.VideoID
-		_, e = tx.Exec("INSERT INTO media_items(id,provider,provider_media_id,title,thumbnail_url) VALUES(?,'youtube',?,?,?) ON CONFLICT(provider,provider_media_id) DO UPDATE SET title=excluded.title", mediaID, in.VideoID, mediaTitle, "https://i.ytimg.com/vi/"+in.VideoID+"/mqdefault.jpg")
+		_, e = tx.Exec("INSERT INTO media_items(id,provider,provider_media_id,title,thumbnail_url) VALUES(?,'youtube',?,?,?) ON CONFLICT(provider,provider_media_id) DO NOTHING", mediaID, in.VideoID, mediaTitle, "https://i.ytimg.com/vi/"+in.VideoID+"/mqdefault.jpg")
 		if e == nil && c.Type == "queue.add" {
 			var pos int
 			_ = tx.QueryRow("SELECT coalesce(max(position),-1)+1 FROM room_queue_items WHERE room_id=?", room).Scan(&pos)

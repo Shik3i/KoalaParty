@@ -18,6 +18,11 @@ describe('persistent anonymous identity', () => {
     expect(updated.displayName).toHaveLength(32);
     expect(getIdentity().displayName).toBe(updated.displayName);
   });
+  it('bounds display names by Unicode characters', () => {
+    const updated = updateDisplayName('🐨'.repeat(40));
+    expect(Array.from(updated.displayName)).toHaveLength(32);
+    expect(updated.displayName).toBe('🐨'.repeat(32));
+  });
   it('regenerates structurally invalid stored credentials', () => {
     localStorage.setItem('koalaparty.identity.v1', JSON.stringify({ id: 'broken', secret: 'short' }));
     const identity = getIdentity();
