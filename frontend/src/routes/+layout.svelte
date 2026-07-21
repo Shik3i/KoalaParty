@@ -16,6 +16,7 @@
   let design: Design = $state('eucalyptus');
   let principal: Principal | null = $state(null);
   let version = $state('');
+  let compactHeader = $state(false);
   onMount(async () => {
     theme = initialTheme();
     applyTheme(theme);
@@ -61,8 +62,9 @@
     content="Synchronized YouTube watch parties with a shared queue — no accounts, ads, analytics, or tracking."
   />
 </svelte:head>
+<svelte:window onscroll={() => (compactHeader = window.scrollY > 28)} />
 <a class="skip" href="#main">Skip to content</a>
-<header class="site-header">
+<header class="site-header" class:compact={compactHeader}>
   <a class="brand" href="/"><span aria-hidden="true">🐨</span> KoalaParty</a>
   <nav aria-label="Main navigation">
     <a href="/discover"><Compass size={17} weight="bold" />Discover</a><a href="/rooms"
@@ -166,16 +168,28 @@
     top: 1rem;
   }
   .site-header {
-    height: 68px;
+    height: 76px;
     display: flex;
     align-items: center;
     padding: 0 clamp(1rem, 4vw, 3rem);
     gap: 2rem;
     border-bottom: 1px solid var(--border-subtle);
-    background: color-mix(in srgb, var(--surface-panel) 92%, transparent);
+    background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
     position: sticky;
     top: 0;
     z-index: 10;
+    box-shadow: 0 1px 0 color-mix(in srgb, var(--border-subtle) 70%, transparent);
+    transition:
+      height 0.28s cubic-bezier(0.2, 0.8, 0.2, 1),
+      background 0.28s ease,
+      box-shadow 0.28s ease;
+  }
+  .site-header.compact {
+    height: 56px;
+    background: color-mix(in srgb, var(--surface-panel) 90%, transparent);
+    box-shadow: 0 10px 34px rgba(4, 18, 12, 0.1);
   }
   .brand {
     font-size: 1.08rem;
@@ -183,6 +197,10 @@
     text-decoration: none;
     color: var(--text-primary);
     white-space: nowrap;
+    transition: transform 0.28s ease;
+  }
+  .site-header.compact .brand {
+    transform: scale(0.94);
   }
   .site-header nav {
     display: flex;
@@ -198,13 +216,20 @@
     font-weight: 650;
     font-size: 0.9rem;
     white-space: nowrap;
-    transition: color 0.15s ease;
+    padding: 0.48rem 0.62rem;
+    border-radius: 999px;
+    transition:
+      color 0.18s ease,
+      background 0.18s ease,
+      transform 0.18s ease;
   }
   .site-header nav a :global(svg) {
     flex: 0 0 auto;
   }
   .site-header nav a:hover {
     color: var(--accent-primary);
+    background: var(--accent-muted);
+    transform: translateY(-1px);
   }
   .appearance {
     display: inline-flex;
@@ -280,21 +305,54 @@
       padding-top: 0.65rem;
       padding-bottom: 0.65rem;
     }
+    .site-header.compact {
+      height: auto;
+      min-height: 58px;
+      padding-top: 0.45rem;
+      padding-bottom: 0.45rem;
+    }
     .site-header nav {
-      order: 3;
+      position: fixed;
+      inset: auto 0 0;
+      z-index: 50;
       width: 100%;
-      margin-left: 0;
-      gap: 1rem;
-      overflow-x: auto;
-      padding-bottom: 0.15rem;
-      scrollbar-width: thin;
       min-width: 0;
+      margin: 0;
+      padding: 0.45rem max(0.45rem, env(safe-area-inset-right)) calc(0.45rem + env(safe-area-inset-bottom))
+        max(0.45rem, env(safe-area-inset-left));
+      justify-content: space-around;
+      gap: 0.15rem;
+      background: color-mix(in srgb, var(--surface-panel) 90%, transparent);
+      border-top: 1px solid var(--border-subtle);
+      backdrop-filter: blur(20px) saturate(140%);
+      box-shadow: 0 -10px 35px rgba(4, 18, 12, 0.12);
+    }
+    .site-header nav a {
+      flex: 1;
+      min-width: 0;
+      flex-direction: column;
+      gap: 0.15rem;
+      padding: 0.38rem 0.2rem;
+      font-size: 0.68rem;
+    }
+    .site-header nav a :global(svg) {
+      width: 19px;
+      height: 19px;
     }
     .appearance {
       margin-left: auto;
     }
     footer {
       flex-direction: column;
+      padding-bottom: 6rem;
+    }
+    .design select {
+      max-width: 9rem;
+    }
+  }
+  @media (max-width: 430px) {
+    .design {
+      display: none;
     }
   }
 </style>

@@ -4,11 +4,17 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-21
+
 ### Added
 
 - Added up to five recently visited rooms to the start page for quick return without creating another room. The browser-local list works without an account and supports removing individual entries.
 - Added ephemeral emoji reactions, a floating in-app mini-player, live synchronization diagnostics, and server-backed recent-room previews.
 - Added queue duplicate detection, voting, shuffle, looping, and a 20-item recently played history.
+
+### Changed
+
+- Modernized the responsive interface with a compact-on-scroll glass header, mobile bottom navigation, fluid layouts, richer motion, and more tactile cards and controls.
 
 ### Fixed
 

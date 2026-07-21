@@ -171,6 +171,7 @@
 <style>
   .landing {
     position: relative;
+    overflow: clip;
     max-width: 1180px;
     margin: auto;
     padding: clamp(3rem, 9vw, 8rem) clamp(1rem, 4vw, 3rem);
@@ -178,6 +179,20 @@
     grid-template-columns: 1.15fr 0.75fr;
     gap: clamp(2rem, 7vw, 7rem);
     align-items: center;
+    min-height: min(760px, calc(100svh - 76px));
+  }
+  .hero,
+  .join {
+    animation: revealUp 0.65s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .join {
+    animation-delay: 0.08s;
+  }
+  @keyframes revealUp {
+    from {
+      opacity: 0;
+      transform: translateY(18px);
+    }
   }
   .hero-glow {
     position: absolute;
@@ -242,6 +257,15 @@
     position: relative;
     overflow: hidden;
     min-width: 0;
+    border-radius: var(--radius-lg);
+    box-shadow: 0 28px 80px color-mix(in srgb, var(--accent-primary) 13%, transparent);
+    transition:
+      transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+      box-shadow 0.3s ease;
+  }
+  .join:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 34px 90px color-mix(in srgb, var(--accent-primary) 19%, transparent);
   }
   .room-mark {
     font-size: 4rem;
@@ -311,6 +335,15 @@
     position: relative;
     padding: 0;
     overflow: hidden;
+    transition:
+      transform 0.22s ease,
+      border-color 0.22s ease,
+      box-shadow 0.22s ease;
+  }
+  .recent-room:hover {
+    transform: translateY(-4px);
+    border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--border-subtle));
+    box-shadow: 0 20px 45px color-mix(in srgb, var(--accent-primary) 12%, transparent);
   }
   .recent-room > a {
     display: grid;
@@ -349,10 +382,13 @@
     padding: 1.5rem;
     display: grid;
     gap: 0.5rem;
-    transition: background 0.15s ease;
+    transition:
+      background 0.2s ease,
+      transform 0.2s ease;
   }
   .features article:hover {
     background: var(--surface-hover);
+    transform: translateY(-3px);
   }
   .features article :global(svg) {
     color: var(--accent-primary);
@@ -367,6 +403,7 @@
     .landing {
       grid-template-columns: minmax(0, 1fr);
       padding-top: 3rem;
+      min-height: auto;
     }
     .landing > * {
       min-width: 0;
@@ -379,6 +416,16 @@
     }
   }
   @media (max-width: 480px) {
+    .landing {
+      padding-top: 2rem;
+      gap: 1.5rem;
+    }
+    .hero h1 {
+      font-size: clamp(2.55rem, 15vw, 4rem);
+    }
+    .join {
+      border-radius: var(--radius-md);
+    }
     .features {
       grid-template-columns: minmax(0, 1fr);
     }

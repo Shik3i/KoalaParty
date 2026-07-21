@@ -890,6 +890,13 @@
     max-width: 1500px;
     margin: auto;
     padding: 1.2rem clamp(0.7rem, 2vw, 2rem) 3rem;
+    animation: roomReveal 0.45s ease both;
+  }
+  @keyframes roomReveal {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
   }
   .mini-player {
     position: fixed;
@@ -992,7 +999,7 @@
   .room-grid {
     display: grid;
     grid-template-columns: minmax(0, 2.2fr) minmax(310px, 0.8fr);
-    gap: 1rem;
+    gap: 1.25rem;
   }
   .room-grid.theater {
     grid-template-columns: 1fr;
@@ -1075,6 +1082,7 @@
   }
   .player-wrap {
     position: relative;
+    filter: drop-shadow(0 22px 38px rgba(3, 12, 8, 0.2));
   }
   .start {
     position: absolute;
@@ -1118,7 +1126,7 @@
     font-variant-numeric: tabular-nums;
   }
   .controls {
-    padding: 1rem;
+    padding: clamp(1rem, 2vw, 1.35rem);
   }
   .transport,
   .add {
@@ -1167,6 +1175,9 @@
   }
   .side-column {
     overflow: hidden;
+    align-self: start;
+    position: sticky;
+    top: 72px;
   }
   .side-column section {
     border-bottom: 1px solid var(--border-subtle);
@@ -1204,10 +1215,14 @@
     gap: 0.65rem;
     padding: 0.7rem 1rem;
     border-top: 1px solid var(--border-subtle);
+    transition:
+      background 0.18s ease,
+      transform 0.18s ease;
   }
   .queue li:hover,
   .members li:hover {
     background: var(--surface-hover);
+    transform: translateX(2px);
   }
   .queue img,
   .queue .thumbnail-placeholder {
@@ -1468,6 +1483,7 @@
     }
     .side-column {
       min-height: 330px;
+      position: static;
     }
     .mobile-tabs {
       display: grid;
@@ -1510,9 +1526,32 @@
     }
     .room-actions {
       justify-content: flex-start;
+      width: 100%;
+    }
+    .room-actions button {
+      flex: 1;
+      min-width: 8rem;
     }
     .room-shell {
       padding: 0.7rem;
+    }
+    .room-header h1 {
+      font-size: 1.15rem;
+    }
+    .player-bar {
+      gap: 0.45rem;
+    }
+    .controls,
+    .side-column,
+    .activity-panel {
+      border-radius: 15px;
+    }
+    .reaction-bar {
+      justify-content: space-between;
+      overflow-x: auto;
+    }
+    .reaction-bar button {
+      min-width: 2.6rem;
     }
     .add {
       grid-template-columns: 1fr;
