@@ -10,12 +10,14 @@ Privacy-first shared YouTube rooms. Synchronized playback and a collaborative qu
 ## Features
 
 - Server-authoritative play, pause, seek, queue, reorder, skip, and reconnect behavior.
+- Collaborative queue voting, shuffle, loop, duplicate protection, history, and ephemeral emoji reactions.
 - Persistent anonymous browser identities; optional accounts and friend-only rooms.
 - Cross-device room library, private invitations, account/session self-service, and ownership transfer.
 - Owner/admin/member roles, per-member capabilities, kick, ban, visibility, and activity history.
 - Optional public discovery with controlled provider metadata; disabled by default for early-beta deployments.
 - Responsive SvelteKit UI with accessible loading, empty, error, connection, light, dark, and system-theme states.
 - Browser-local recent-room shortcuts on the start page, including for anonymous users.
+- Floating mini-player, playback drift diagnostics, and live room previews for returning viewers.
 - Go, WebSockets, SQLite WAL, embedded migrations, Docker, health/readiness probes, and Caddy-ready TLS deployment.
 
 ## Quick start

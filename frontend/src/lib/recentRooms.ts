@@ -52,6 +52,18 @@ export function forgetRoom(id: string): RecentRoom[] {
   return rooms;
 }
 
+export function reconcileRecentRooms(previews: Array<{ id: string; label: string; title: string }>): RecentRoom[] {
+  const available = new Map(previews.map((preview) => [preview.id.toUpperCase(), preview]));
+  const rooms = recentRooms()
+    .filter((room) => available.has(room.id))
+    .map((room) => {
+      const preview = available.get(room.id)!;
+      return { ...room, label: preview.label, title: preview.title };
+    });
+  persist(rooms);
+  return rooms;
+}
+
 function persist(rooms: RecentRoom[]) {
   try {
     localStorage.setItem(storageKey, JSON.stringify(rooms));

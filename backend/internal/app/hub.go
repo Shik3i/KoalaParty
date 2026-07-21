@@ -11,9 +11,10 @@ import (
 )
 
 type client struct {
-	conn     *websocket.Conn
-	identity string
-	writeMu  sync.Mutex
+	conn         *websocket.Conn
+	identity     string
+	writeMu      sync.Mutex
+	lastReaction time.Time
 }
 
 func (c *client) write(v any) error {
@@ -129,6 +130,17 @@ func (h *hub) broadcast(room string, s snapshot) {
 		_ = c.write(map[string]any{"type": "snapshot", "payload": personalized})
 	}
 }
+func (h *hub) broadcastReaction(room, identity, emoji string) {
+	h.mu.RLock()
+	clients := make([]*client, 0, len(h.rooms[room]))
+	for c := range h.rooms[room] {
+		clients = append(clients, c)
+	}
+	h.mu.RUnlock()
+	for _, c := range clients {
+		_ = c.write(map[string]any{"type": "reaction", "identityId": identity, "emoji": emoji})
+	}
+}
 func (a *application) websocket(w http.ResponseWriter, r *http.Request, p principal) {
 	room := r.PathValue("roomId")
 	if !a.originAllowed(r.Header.Get("Origin")) {
@@ -182,6 +194,22 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 		var cmd command
 		if json.Unmarshal(raw, &cmd) != nil {
 			_ = c.write(map[string]any{"type": "error", "code": "invalid_json"})
+			continue
+		}
+		if cmd.Type == "reaction.send" {
+			var payload struct {
+				Emoji string `json:"emoji"`
+			}
+			allowed := map[string]bool{"❤️": true, "😂": true, "🔥": true, "👀": true, "😴": true, "👏": true}
+			if json.Unmarshal(cmd.Payload, &payload) != nil || !allowed[payload.Emoji] {
+				_ = c.write(map[string]any{"type": "error", "requestId": cmd.RequestID, "message": "invalid reaction"})
+				continue
+			}
+			if time.Since(c.lastReaction) < 750*time.Millisecond {
+				continue
+			}
+			c.lastReaction = time.Now()
+			a.hub.broadcastReaction(room, p.IdentityID, payload.Emoji)
 			continue
 		}
 		s, e = a.applyCommand(r.Context(), room, p, cmd)

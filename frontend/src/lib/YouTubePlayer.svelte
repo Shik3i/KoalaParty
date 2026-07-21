@@ -16,6 +16,7 @@
     onEnded = () => {},
     onSkip = undefined,
     onDuration = () => {},
+    onDiagnostics = () => {},
   }: {
     enabled?: boolean;
     videoId?: string | null;
@@ -31,6 +32,7 @@
     onEnded?: () => void;
     onSkip?: (() => void) | undefined;
     onDuration?: (duration: number) => void;
+    onDiagnostics?: (diagnostics: { drift: number; state: string; correctedAt: number | null }) => void;
   } = $props();
   let host: HTMLDivElement;
   let player: any = null;
@@ -63,6 +65,7 @@
   // and surface a one-tap unmute — so the video starts for everyone immediately.
   let autoplayTimer: ReturnType<typeof setTimeout> | null = null;
   let mutedForAutoplay = $state(false);
+  let correctedAt: number | null = null;
 
   function currentTime(): number {
     return player?.getCurrentTime?.() ?? 0;
@@ -236,10 +239,18 @@
     }
     if (now < localSeekUntil || (state !== PLAYING && state !== PAUSED)) return;
     const expected = expectedPosition();
-    if (Math.abs(t - expected) > DRIFT_MAX) {
+    const drift = t - expected;
+    onDiagnostics({
+      drift,
+      state:
+        state === BUFFERING ? 'buffering' : state === PLAYING ? 'playing' : state === PAUSED ? 'paused' : 'loading',
+      correctedAt,
+    });
+    if (Math.abs(drift) > DRIFT_MAX) {
       guard();
       player.seekTo(expected, true);
       prevTime = expected;
+      correctedAt = now;
     }
   }
   onMount(() => {

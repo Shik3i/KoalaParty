@@ -12,7 +12,7 @@ func TestMigrationFromEmptyDatabase(t *testing.T) {
 	}
 	defer db.Close()
 	var version int
-	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 3 {
+	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 4 {
 		t.Fatalf("migration version=%d err=%v", version, e)
 	}
 	var fk int
@@ -28,5 +28,12 @@ func TestMigrationFromEmptyDatabase(t *testing.T) {
 	var revisionColumn int
 	if e = db.QueryRow("SELECT count(*) FROM pragma_table_info('rooms') WHERE name='revision'").Scan(&revisionColumn); e != nil || revisionColumn != 1 {
 		t.Fatalf("room revision column unavailable: count=%d err=%v", revisionColumn, e)
+	}
+	var queueLoopColumn, queueTables int
+	if e = db.QueryRow("SELECT count(*) FROM pragma_table_info('rooms') WHERE name='queue_loop'").Scan(&queueLoopColumn); e != nil || queueLoopColumn != 1 {
+		t.Fatalf("queue_loop migration missing: count=%d err=%v", queueLoopColumn, e)
+	}
+	if e = db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('queue_votes','room_history')").Scan(&queueTables); e != nil || queueTables != 2 {
+		t.Fatalf("queue tables missing: count=%d err=%v", queueTables, e)
 	}
 }

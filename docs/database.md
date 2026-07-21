@@ -6,4 +6,6 @@ Core ownership and access are relational: `identities`, `accounts`, `friendships
 
 Queue reordering, room-wide optimistic revisions, playback revisions, permissions, roles, bans, and activity insertion use transactions. Public identifiers are random; internal numeric IDs are not exposed. Repository/service boundaries are intentionally thin for the single-instance release, but SQL is isolated in the backend so a future PostgreSQL repository can replace SQLite without changing the wire protocol.
 
+Queue votes are unique per room item and identity and cascade when the item is removed. Loop state lives on the room. Played media history is capped to the latest 20 entries per room by the command transaction; emoji reactions remain intentionally ephemeral and never enter the database.
+
 The operator `backup` command uses SQLite `VACUUM INTO` to create a consistent standalone snapshot while the application is running. It refuses to overwrite an existing file and runs `PRAGMA integrity_check` afterward. `restore` verifies the source and creates a new destination instead of overwriting the live database.

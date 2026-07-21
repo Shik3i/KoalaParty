@@ -114,6 +114,7 @@ func Run() error {
 	mux.HandleFunc("POST /api/friends/{username}/{action}", a.requireAuth(a.friendAction))
 	mux.HandleFunc("POST /api/rooms", a.requireAuth(a.createRoom))
 	mux.HandleFunc("GET /api/rooms", a.requireAuth(a.myRooms))
+	mux.HandleFunc("POST /api/rooms/previews", a.requireAuth(a.roomPreviews))
 	mux.HandleFunc("GET /api/rooms/{roomId}", a.requireAuth(a.roomSnapshot))
 	mux.HandleFunc("DELETE /api/rooms/{roomId}", a.requireAuth(a.deleteRoom))
 	mux.HandleFunc("DELETE /api/rooms/{roomId}/membership", a.requireAuth(a.leaveRoom))

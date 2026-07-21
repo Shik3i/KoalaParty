@@ -183,6 +183,9 @@ func TestQueueTitleCannotOverwriteSharedMediaMetadata(t *testing.T) {
 	if _, err = a.db.Exec("UPDATE media_items SET title='Trusted title' WHERE id=?", "YT"+videoID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = a.db.Exec("DELETE FROM room_queue_items WHERE room_id=?", created["id"]); err != nil {
+		t.Fatal(err)
+	}
 	add.ExpectedRevision = s.Revision
 	add.Payload = json.RawMessage(`{"videoId":"` + videoID + `","title":"Overwrite attempt"}`)
 	if _, err = a.applyCommand(t.Context(), created["id"], owner, add); err != nil {
@@ -190,6 +193,74 @@ func TestQueueTitleCannotOverwriteSharedMediaMetadata(t *testing.T) {
 	}
 	if err = a.db.QueryRow("SELECT title FROM media_items WHERE id=?", "YT"+videoID).Scan(&title); err != nil || title != "Trusted title" {
 		t.Fatalf("shared trusted title overwritten with %q: %v", title, err)
+	}
+}
+
+func TestQueuePolishCommands(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174014", strings.Repeat("q", 43))
+	w := httptest.NewRecorder()
+	a.requireAuth(a.createRoom)(w, authed("POST", "/api/rooms", nil, cookie, owner.CSRF))
+	var created map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	s, err := a.snapshot(t.Context(), created["id"], owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply := func(kind, payload string) {
+		t.Helper()
+		s, err = a.applyCommand(t.Context(), created["id"], owner, command{Type: kind, ExpectedRevision: s.Revision, Payload: json.RawMessage(payload)})
+		if err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+	}
+	apply("queue.add", `{"videoId":"abc12345678"}`)
+	apply("queue.add", `{"videoId":"def12345678"}`)
+	if _, duplicateErr := a.applyCommand(t.Context(), created["id"], owner, command{Type: "queue.add", ExpectedRevision: s.Revision, Payload: json.RawMessage(`{"videoId":"abc12345678"}`)}); duplicateErr == nil {
+		t.Fatal("duplicate queue item accepted")
+	}
+	apply("queue.shuffle", `{}`)
+	var votedID string
+	for _, item := range s.Queue {
+		if item.Media.ProviderID == "def12345678" {
+			votedID = item.ID
+		}
+	}
+	apply("queue.vote", `{"itemId":"`+votedID+`"}`)
+	if s.Queue[0].ID != votedID || s.Queue[0].Votes != 1 || !s.Queue[0].Voted {
+		t.Fatalf("vote did not prioritize item: %+v", s.Queue)
+	}
+	apply("queue.loop", `{"enabled":true}`)
+	apply("queue.skip", `{}`)
+	if !s.QueueLoop || s.Playback.Media == nil || s.Playback.Media.ProviderID != "def12345678" || len(s.History) == 0 {
+		t.Fatalf("loop, voted skip, or history missing: %+v", s)
+	}
+}
+
+func TestRoomPreviewsDoNotJoinUnassociatedRooms(t *testing.T) {
+	a := testApp(t)
+	ownerCookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174015", strings.Repeat("r", 43))
+	w := httptest.NewRecorder()
+	a.requireAuth(a.createRoom)(w, authed("POST", "/api/rooms", nil, ownerCookie, owner.CSRF))
+	var created map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &created)
+
+	preview := httptest.NewRecorder()
+	a.requireAuth(a.roomPreviews)(preview, authed("POST", "/api/rooms/previews", map[string]any{"ids": []string{created["id"]}}, ownerCookie, owner.CSRF))
+	if preview.Code != http.StatusOK || !strings.Contains(preview.Body.String(), created["id"]) {
+		t.Fatalf("owner preview missing: %d %s", preview.Code, preview.Body.String())
+	}
+
+	outsiderCookie, outsider := exchange(t, a, "123e4567-e89b-42d3-a456-426614174016", strings.Repeat("s", 43))
+	preview = httptest.NewRecorder()
+	a.requireAuth(a.roomPreviews)(preview, authed("POST", "/api/rooms/previews", map[string]any{"ids": []string{created["id"]}}, outsiderCookie, outsider.CSRF))
+	if preview.Code != http.StatusOK || strings.TrimSpace(preview.Body.String()) != "[]" {
+		t.Fatalf("unassociated room leaked: %d %s", preview.Code, preview.Body.String())
+	}
+	var memberships int
+	_ = a.db.QueryRow("SELECT count(*) FROM room_members WHERE room_id=? AND identity_id=?", created["id"], outsider.IdentityID).Scan(&memberships)
+	if memberships != 0 {
+		t.Fatal("preview joined outsider to room")
 	}
 }
 func TestRegistrationLinksExistingIdentity(t *testing.T) {

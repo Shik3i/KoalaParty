@@ -9,6 +9,8 @@ export interface QueueItem {
   id: string;
   position: number;
   media: Media;
+  votes: number;
+  voted: boolean;
 }
 export interface Member {
   identityId: string;
@@ -33,6 +35,8 @@ export interface Snapshot {
   me: string;
   members: Member[];
   queue: QueueItem[];
+  history: Media[];
+  queueLoop: boolean;
   playback: { media: Media | null; status: string; position: number; revision: number; updatedAt: string };
   events: Activity[];
   revision: number;

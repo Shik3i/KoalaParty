@@ -27,6 +27,10 @@
     ArrowsOut,
     ArrowsIn,
     Pulse,
+    Shuffle,
+    Repeat,
+    ThumbsUp,
+    PictureInPicture,
   } from 'phosphor-svelte';
   const roomId = (page.params.roomId ?? '').toUpperCase();
   let room: Snapshot | null = null;
@@ -50,6 +54,9 @@
   // click-to-consent gate.
   let watching = true;
   let theater = false;
+  let miniPlayer = false;
+  let diagnostics = { drift: 0, state: 'loading', correctedAt: null as number | null };
+  let reactions: Array<{ id: string; emoji: string }> = [];
   let videoURL = '';
   let mobileTab: 'queue' | 'people' | 'activity' = 'queue';
   let dragging: string | null = null;
@@ -234,12 +241,20 @@
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'snapshot') updateRoom(data.payload);
-        else if (data.type === 'error') showNotice(data.message || 'The server denied that action.', 0, 'error');
+        else if (data.type === 'reaction') {
+          const reaction = { id: randomUUID(), emoji: String(data.emoji) };
+          reactions = [...reactions, reaction];
+          setTimeout(() => (reactions = reactions.filter((item) => item.id !== reaction.id)), 2600);
+        } else if (data.type === 'error') showNotice(data.message || 'The server denied that action.', 0, 'error');
       } catch {
         showNotice('Received an invalid room update. Reconnecting…', 0, 'error');
         ws.close();
       }
     };
+  }
+  function react(emoji: string) {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ type: 'reaction.send', requestId: randomUUID(), payload: { emoji } }));
   }
   async function command(type: string, payload: Record<string, unknown> = {}) {
     if (!room || commandPending) return;
@@ -495,7 +510,7 @@
       </section>{/if}
     <section class="room-grid" class:theater>
       <div class="main-column">
-        <div class="player-wrap">
+        <div class="player-wrap" class:mini-player={miniPlayer}>
           <YouTubePlayer
             enabled={watching}
             videoId={room.playback.media?.providerId}
@@ -511,6 +526,7 @@
             onEnded={() => can('queue.skip') && command('queue.skip')}
             onSkip={can('queue.skip') ? () => command('queue.skip') : undefined}
             onDuration={(d) => (mediaDuration = d)}
+            onDiagnostics={(value) => (diagnostics = value)}
           />{#if !room.playback.media && room.queue.length && can('queue.skip')}<button
               class="start"
               onclick={() => command('queue.skip')}
@@ -545,7 +561,39 @@
             >{#if theater}<ArrowsIn size={17} weight="bold" />{:else}<ArrowsOut size={17} weight="bold" />{/if}<span
               class="theater-label">{theater ? 'Exit theater' : 'Theater'}</span
             ></button
+          ><button
+            class="secondary theater-toggle"
+            aria-pressed={miniPlayer}
+            aria-label={miniPlayer ? 'Dock player' : 'Float mini-player'}
+            title={miniPlayer ? 'Dock player' : 'Float mini-player'}
+            onclick={() => (miniPlayer = !miniPlayer)}
+            ><PictureInPicture size={17} weight="bold" /><span class="theater-label"
+              >{miniPlayer ? 'Dock player' : 'Mini-player'}</span
+            ></button
           >
+        </div>
+        <div class="sync-diagnostics" title="Estimated difference between this player and the shared room clock">
+          <Pulse size={14} weight="bold" /><span
+            >{!connected
+              ? 'Offline'
+              : diagnostics.state === 'buffering'
+                ? 'Buffering'
+                : Math.abs(diagnostics.drift) < 0.6
+                  ? 'Perfectly synced'
+                  : `${Math.abs(diagnostics.drift).toFixed(1)}s ${diagnostics.drift < 0 ? 'behind' : 'ahead'}`}</span
+          >{#if diagnostics.correctedAt}<small
+              >last corrected {Math.max(0, Math.round((nowTick - diagnostics.correctedAt) / 1000))}s ago</small
+            >{/if}
+        </div>
+        <div class="reaction-bar" aria-label="Send a reaction">
+          {#each ['❤️', '😂', '🔥', '👀', '😴', '👏'] as emoji}<button class="ghost" onclick={() => react(emoji)}
+              >{emoji}</button
+            >{/each}
+        </div>
+        <div class="reaction-overlay" aria-live="polite">
+          {#each reactions as reaction (reaction.id)}<span transition:fly={{ y: 30, duration: 300 }}
+              >{reaction.emoji}</span
+            >{/each}
         </div>
         <p class="player-note">
           Opening a room loads YouTube's privacy-enhanced player from youtube-nocookie.com. <a href="/privacy"
@@ -655,12 +703,29 @@
         <section class:hidden-mobile={mobileTab !== 'queue'}>
           <header>
             <h2>Queue</h2>
-            <button
-              class="ghost"
-              onclick={() => command('queue.skip')}
-              disabled={commandPending || !room.queue.length || !can('queue.skip')}
-              ><SkipForward size={15} weight="fill" />Skip next</button
-            >
+            <div class="queue-tools">
+              <button
+                class="ghost"
+                title="Shuffle queue"
+                aria-label="Shuffle queue"
+                onclick={() => command('queue.shuffle')}
+                disabled={commandPending || room.queue.length < 2 || !can('queue.reorder')}
+                ><Shuffle size={15} weight="bold" /></button
+              ><button
+                class="ghost"
+                class:active={room.queueLoop}
+                title="Loop played videos"
+                aria-label="Loop queue"
+                aria-pressed={room.queueLoop}
+                onclick={() => command('queue.loop', { enabled: !room!.queueLoop })}
+                disabled={commandPending || !can('queue.reorder')}><Repeat size={15} weight="bold" /></button
+              ><button
+                class="ghost"
+                onclick={() => command('queue.skip')}
+                disabled={commandPending || !room.queue.length || !can('queue.skip')}
+                ><SkipForward size={15} weight="fill" />Skip next</button
+              >
+            </div>
           </header>
           {#if !room.queue.length}<div class="empty">
               <span>🎋</span>
@@ -679,6 +744,14 @@
                       aria-hidden="true"><Play size={16} weight="fill" /></span
                     >{/if}
                   <div><small>{i + 1} · YouTube</small><b>{item.media.title}</b></div>
+                  <button
+                    class="ghost vote"
+                    class:active={item.voted}
+                    aria-label={`Vote for ${item.media.title}`}
+                    onclick={() => command('queue.vote', { itemId: item.id })}
+                    disabled={commandPending || !can('queue.vote')}
+                    ><ThumbsUp size={14} weight={item.voted ? 'fill' : 'bold'} />{item.votes}</button
+                  >
                   {#if can('queue.reorder')}<div class="reorder">
                       <button
                         class="ghost"
@@ -700,6 +773,12 @@
                   >
                 </li>{/each}
             </ol>{/if}
+          {#if room.history.length}<details class="history">
+              <summary>Recently played ({room.history.length})</summary>
+              <ul>
+                {#each room.history as item}<li><span>{item.title}</span></li>{/each}
+              </ul>
+            </details>{/if}
         </section>
         <section class:hidden-mobile={mobileTab !== 'people'}>
           <header>
@@ -811,6 +890,64 @@
     max-width: 1500px;
     margin: auto;
     padding: 1.2rem clamp(0.7rem, 2vw, 2rem) 3rem;
+  }
+  .mini-player {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    width: min(420px, calc(100vw - 2rem));
+    z-index: 20;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  .sync-diagnostics,
+  .reaction-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    margin-top: 0.55rem;
+  }
+  .sync-diagnostics small {
+    margin-left: auto;
+  }
+  .reaction-bar button {
+    font-size: 1.1rem;
+    padding: 0.35rem 0.5rem;
+  }
+  .reaction-overlay {
+    position: fixed;
+    right: clamp(1rem, 8vw, 8rem);
+    bottom: 18%;
+    z-index: 30;
+    display: grid;
+    pointer-events: none;
+  }
+  .reaction-overlay span {
+    font-size: 2.3rem;
+    filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.4));
+  }
+  .queue-tools {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+  }
+  .queue-tools .active,
+  .vote.active {
+    color: var(--accent-primary);
+    background: var(--surface-hover);
+  }
+  .vote {
+    display: inline-flex;
+    gap: 0.25rem;
+  }
+  .history {
+    margin-top: 1rem;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+  }
+  .history ul {
+    padding-left: 1.2rem;
   }
   .room-header {
     display: flex;

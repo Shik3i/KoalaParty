@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { forgetRoom, recentRooms, rememberRoom, resetRecentRoomsForTests } from './recentRooms';
+import { forgetRoom, recentRooms, reconcileRecentRooms, rememberRoom, resetRecentRoomsForTests } from './recentRooms';
 
 describe('recent rooms', () => {
   beforeEach(() => {
@@ -32,5 +32,13 @@ describe('recent rooms', () => {
     expect(forgetRoom('aaaaaaaaaaaaaaa2')).toEqual([]);
     localStorage.setItem('koalaparty.recent-rooms.v1', '{broken');
     expect(recentRooms()).toEqual([]);
+  });
+
+  it('refreshes available previews and removes unavailable rooms', () => {
+    rememberRoom({ id: 'AAAAAAAAAAAAAAA2', label: 'Old', title: 'Old title' });
+    rememberRoom({ id: 'AAAAAAAAAAAAAAA3', label: 'Gone', title: '' });
+    expect(reconcileRecentRooms([{ id: 'AAAAAAAAAAAAAAA2', label: 'Fresh', title: 'Now playing' }])).toMatchObject([
+      { id: 'AAAAAAAAAAAAAAA2', label: 'Fresh', title: 'Now playing' },
+    ]);
   });
 });

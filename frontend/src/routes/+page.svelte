@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { api } from '$lib/api';
-  import { forgetRoom, recentRooms as loadRecentRooms, type RecentRoom } from '$lib/recentRooms';
+  import { forgetRoom, recentRooms as loadRecentRooms, reconcileRecentRooms, type RecentRoom } from '$lib/recentRooms';
   import KoalaSyncPromo from '$lib/KoalaSyncPromo.svelte';
   import {
     Compass,
@@ -20,9 +20,22 @@
   let roomCode = '';
   let creating = false;
   let error = '';
+  const fmtRecentTime = (seconds: number) =>
+    `${Math.floor(Math.max(0, seconds) / 60)}:${String(Math.floor(Math.max(0, seconds) % 60)).padStart(2, '0')}`;
   let recentRooms: RecentRoom[] = [];
-  onMount(() => {
+  let roomPreviews = new Map<string, { participants: number; status: string; position: number; thumbnail: string }>();
+  onMount(async () => {
     recentRooms = loadRecentRooms();
+    if (!recentRooms.length) return;
+    try {
+      const previews = await api<
+        Array<RecentRoom & { participants: number; status: string; position: number; thumbnail: string }>
+      >('/api/rooms/previews', { method: 'POST', body: JSON.stringify({ ids: recentRooms.map((room) => room.id) }) });
+      recentRooms = reconcileRecentRooms(previews);
+      roomPreviews = new Map(previews.map((preview) => [preview.id, preview]));
+    } catch {
+      // Local shortcuts remain useful while the server is temporarily unavailable.
+    }
   });
   async function createRoom() {
     creating = true;
@@ -118,6 +131,10 @@
             <span class="room-code">{room.id}</span>
             <strong>{room.label}</strong>
             <span class="recent-title">{room.title || 'Ready to keep watching'}</span>
+            {#if roomPreviews.has(room.id)}{@const preview = roomPreviews.get(room.id)!}<span class="recent-meta"
+                >{preview.participants} online · {preview.status === 'playing' ? 'Playing' : 'Paused'} at
+                {fmtRecentTime(preview.position)}</span
+              >{/if}
           </a>
           <button
             class="icon-button secondary"
@@ -316,6 +333,11 @@
     color: var(--text-muted);
     font-size: 0.85rem;
     line-height: 1.4;
+  }
+  .recent-meta {
+    color: var(--accent-primary);
+    font-size: 0.75rem;
+    font-weight: 700;
   }
   .recent-room .icon-button {
     position: absolute;

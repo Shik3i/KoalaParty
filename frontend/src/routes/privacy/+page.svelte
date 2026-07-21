@@ -63,8 +63,12 @@
       <li>structured room activity and reports submitted for operator review.</li>
     </ul>
     <p>
-      Public rooms and their submitted titles can be visible to visitors. Room state is shared with eligible
+      Public rooms and their server-resolved titles can be visible to visitors. Room state is shared with eligible
       participants in the same room. Private and friends-only rooms require an account.
+    </p>
+    <p>
+      Emoji reactions are broadcast live to connected room participants, rate-limited and discarded immediately. They
+      are not stored in room activity or the database.
     </p>
   </section>
 

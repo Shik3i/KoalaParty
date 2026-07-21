@@ -38,6 +38,7 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   const roomId = owner.url().split('/').at(-1)!;
   await owner.goto('/');
   await expect(owner.getByRole('heading', { name: 'Your recent rooms' })).toBeVisible();
+  await expect(owner.getByText(/online · (Playing|Paused) at/)).toBeVisible();
   const recentRoom = owner.getByRole('link', { name: /^Open / });
   await expect(recentRoom).toHaveAttribute('href', `/room/${roomId}`);
   await recentRoom.click();
@@ -55,6 +56,12 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   await expect(member.locator('.room-header h1')).toBeVisible();
   await expect(owner.locator('.members li')).toHaveCount(2);
   await expect(member.locator('.members li')).toHaveCount(2);
+  await member.getByRole('button', { name: '❤️' }).click();
+  await expect(owner.locator('.reaction-overlay').getByText('❤️')).toBeVisible();
+  await expect(owner.getByText(/Perfectly synced|Buffering|s (behind|ahead)/)).toBeVisible();
+  await owner.getByRole('button', { name: 'Float mini-player' }).click();
+  await expect(owner.locator('.player-wrap')).toHaveClass(/mini-player/);
+  await owner.getByRole('button', { name: 'Dock player' }).click();
   await member.getByRole('button', { name: 'Play', exact: true }).click();
   await expect(member.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
   await member.waitForTimeout(1_100);

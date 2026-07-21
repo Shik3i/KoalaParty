@@ -72,6 +72,10 @@ func capFor(t string) string {
 		return "queue.remove"
 	case "queue.reorder":
 		return "queue.reorder"
+	case "queue.shuffle", "queue.loop":
+		return "queue.reorder"
+	case "queue.vote":
+		return "queue.vote"
 	case "queue.skip":
 		return "queue.skip"
 	case "member.kick":
@@ -158,12 +162,25 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			return snapshot{}, errors.New("invalid YouTube video ID")
 		}
 		mediaID := "YT" + in.VideoID
+		var duplicate int
+		if e = tx.QueryRow(`SELECT count(*) FROM (
+			SELECT media_id FROM room_queue_items WHERE room_id=? AND media_id=?
+			UNION ALL SELECT current_media_id FROM playback_states WHERE room_id=? AND current_media_id=?
+		)`, room, mediaID, room, mediaID).Scan(&duplicate); e != nil {
+			return snapshot{}, e
+		}
+		if duplicate > 0 {
+			return snapshot{}, errors.New("video is already in the queue")
+		}
 		_, e = tx.Exec("INSERT INTO media_items(id,provider,provider_media_id,title,thumbnail_url) VALUES(?,'youtube',?,?,?) ON CONFLICT(provider,provider_media_id) DO NOTHING", mediaID, in.VideoID, mediaTitle, "https://i.ytimg.com/vi/"+in.VideoID+"/mqdefault.jpg")
 		if e == nil && c.Type == "queue.add" {
 			var pos int
 			_ = tx.QueryRow("SELECT coalesce(max(position),-1)+1 FROM room_queue_items WHERE room_id=?", room).Scan(&pos)
 			_, e = tx.Exec("INSERT INTO room_queue_items(id,room_id,media_id,position,added_by_identity_id) VALUES(?,?,?,?,?)", newID(10), room, mediaID, pos, p.IdentityID)
 		} else if e == nil {
+			e = addCurrentToHistory(tx, room)
+		}
+		if e == nil && c.Type == "queue.play_now" {
 			_, e = tx.Exec("UPDATE playback_states SET current_media_id=?,status='playing',position_seconds=0,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", mediaID, p.IdentityID, room)
 			eventType = "media.activated"
 		}
@@ -222,15 +239,77 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 				}
 			}
 		}
+	case "queue.shuffle":
+		rows, queryErr := tx.Query("SELECT id FROM room_queue_items WHERE room_id=? ORDER BY random()", room)
+		if queryErr != nil {
+			return snapshot{}, queryErr
+		}
+		var shuffled []string
+		for rows.Next() {
+			var id string
+			if queryErr = rows.Scan(&id); queryErr != nil {
+				rows.Close()
+				return snapshot{}, queryErr
+			}
+			shuffled = append(shuffled, id)
+		}
+		rows.Close()
+		_, e = tx.Exec("UPDATE room_queue_items SET position=position+1000000 WHERE room_id=?", room)
+		for position, id := range shuffled {
+			if e == nil {
+				_, e = tx.Exec("UPDATE room_queue_items SET position=? WHERE room_id=? AND id=?", position, room, id)
+			}
+		}
+	case "queue.loop":
+		var in struct {
+			Enabled bool `json:"enabled"`
+		}
+		if json.Unmarshal(c.Payload, &in) != nil {
+			return snapshot{}, errors.New("invalid loop setting")
+		}
+		_, e = tx.Exec("UPDATE rooms SET queue_loop=? WHERE id=?", in.Enabled, room)
+		payload["enabled"] = in.Enabled
+	case "queue.vote":
+		var in struct {
+			ItemID string `json:"itemId"`
+		}
+		if json.Unmarshal(c.Payload, &in) != nil || in.ItemID == "" {
+			return snapshot{}, errors.New("invalid queue item")
+		}
+		var exists int
+		if e = tx.QueryRow("SELECT count(*) FROM room_queue_items WHERE room_id=? AND id=?", room, in.ItemID).Scan(&exists); e != nil || exists == 0 {
+			return snapshot{}, errors.New("unknown queue item")
+		}
+		var voted int
+		_ = tx.QueryRow("SELECT count(*) FROM queue_votes WHERE room_id=? AND queue_item_id=? AND identity_id=?", room, in.ItemID, p.IdentityID).Scan(&voted)
+		if voted > 0 {
+			_, e = tx.Exec("DELETE FROM queue_votes WHERE room_id=? AND queue_item_id=? AND identity_id=?", room, in.ItemID, p.IdentityID)
+		} else {
+			_, e = tx.Exec("INSERT INTO queue_votes(room_id,queue_item_id,identity_id) VALUES(?,?,?)", room, in.ItemID, p.IdentityID)
+		}
 	case "queue.skip":
-		var mediaID string
-		e = tx.QueryRow("SELECT media_id FROM room_queue_items WHERE room_id=? ORDER BY position LIMIT 1", room).Scan(&mediaID)
+		var loop bool
+		_ = tx.QueryRow("SELECT queue_loop FROM rooms WHERE id=?", room).Scan(&loop)
+		if e = addCurrentToHistory(tx, room); e != nil {
+			return snapshot{}, e
+		}
+		if loop {
+			var currentMedia sql.NullString
+			_ = tx.QueryRow("SELECT current_media_id FROM playback_states WHERE room_id=?", room).Scan(&currentMedia)
+			if currentMedia.Valid {
+				var pos int
+				_ = tx.QueryRow("SELECT coalesce(max(position),-1)+1 FROM room_queue_items WHERE room_id=?", room).Scan(&pos)
+				_, e = tx.Exec("INSERT INTO room_queue_items(id,room_id,media_id,position,added_by_identity_id) VALUES(?,?,?,?,?)", newID(10), room, currentMedia.String, pos, p.IdentityID)
+			}
+		}
+		var mediaID, queueItemID string
+		e = tx.QueryRow("SELECT q.id,q.media_id FROM room_queue_items q LEFT JOIN queue_votes v ON v.queue_item_id=q.id WHERE q.room_id=? GROUP BY q.id ORDER BY count(v.identity_id) DESC,q.position LIMIT 1", room).Scan(&queueItemID, &mediaID)
 		if errors.Is(e, sql.ErrNoRows) {
 			mediaID = ""
 			e = nil
 		}
 		if mediaID != "" {
-			_, e = tx.Exec("DELETE FROM room_queue_items WHERE room_id=? AND position=(SELECT min(position) FROM room_queue_items WHERE room_id=?)", room, room)
+			_, e = tx.Exec("DELETE FROM room_queue_items WHERE room_id=? AND id=?", room, queueItemID)
 			if e == nil {
 				e = resequence(tx, room)
 			}
@@ -402,6 +481,21 @@ func resequence(tx *sql.Tx, room string) error {
 			_, e = tx.Exec("UPDATE room_queue_items SET position=? WHERE room_id=? AND id=?", i, room, id)
 		}
 	}
+	return e
+}
+
+func addCurrentToHistory(tx *sql.Tx, room string) error {
+	var mediaID sql.NullString
+	if e := tx.QueryRow("SELECT current_media_id FROM playback_states WHERE room_id=?", room).Scan(&mediaID); e != nil {
+		return e
+	}
+	if !mediaID.Valid {
+		return nil
+	}
+	if _, e := tx.Exec("INSERT INTO room_history(id,room_id,media_id) VALUES(?,?,?)", newID(10), room, mediaID.String); e != nil {
+		return e
+	}
+	_, e := tx.Exec(`DELETE FROM room_history WHERE id IN (SELECT id FROM room_history WHERE room_id=? ORDER BY played_at DESC LIMIT -1 OFFSET 20)`, room)
 	return e
 }
 func nullable(s string) any {

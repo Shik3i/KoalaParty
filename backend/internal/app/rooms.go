@@ -17,7 +17,7 @@ import (
 
 var youtubeID = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
 var roomIDPattern = regexp.MustCompile(`^[A-Z2-7]{16}$`)
-var memberCapabilities = []string{"playback.play_pause", "playback.seek", "media.play_now", "queue.add", "queue.remove", "queue.reorder", "queue.skip"}
+var memberCapabilities = []string{"playback.play_pause", "playback.seek", "media.play_now", "queue.add", "queue.remove", "queue.reorder", "queue.skip", "queue.vote"}
 
 type media struct {
 	ID         string `json:"id"`
@@ -29,6 +29,8 @@ type queueItem struct {
 	ID       string `json:"id"`
 	Position int    `json:"position"`
 	Media    media  `json:"media"`
+	Votes    int    `json:"votes"`
+	Voted    bool   `json:"voted"`
 }
 type member struct {
 	IdentityID    string          `json:"identityId"`
@@ -60,6 +62,8 @@ type snapshot struct {
 	Me                 string      `json:"me"`
 	Members            []member    `json:"members"`
 	Queue              []queueItem `json:"queue"`
+	History            []media     `json:"history"`
+	QueueLoop          bool        `json:"queueLoop"`
 	Playback           playback    `json:"playback"`
 	Events             []event     `json:"events"`
 	Revision           int64       `json:"revision"`
@@ -123,6 +127,45 @@ func (a *application) roomSnapshot(w http.ResponseWriter, r *http.Request, p pri
 		return
 	}
 	writeJSON(w, 200, s)
+}
+func (a *application) roomPreviews(w http.ResponseWriter, r *http.Request, p principal) {
+	var in struct {
+		IDs []string `json:"ids"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if len(in.IDs) > 5 {
+		problem(w, 400, "too_many_rooms", "At most five room previews can be requested.")
+		return
+	}
+	out := []map[string]any{}
+	seen := map[string]bool{}
+	for _, rawID := range in.IDs {
+		id := strings.ToUpper(strings.TrimSpace(rawID))
+		if seen[id] || !roomIDPattern.MatchString(id) {
+			continue
+		}
+		seen[id] = true
+		var title, thumbnail, status, updatedAt string
+		var position float64
+		err := a.db.QueryRowContext(r.Context(), `SELECT coalesce(m.title,''),coalesce(m.thumbnail_url,''),p.status,p.position_seconds,p.updated_at
+			FROM rooms r JOIN playback_states p ON p.room_id=r.id LEFT JOIN media_items m ON m.id=p.current_media_id
+			WHERE r.id=? AND r.deleted_at IS NULL AND EXISTS (
+				SELECT 1 FROM room_members rm JOIN identities i ON i.id=rm.identity_id
+				WHERE rm.room_id=r.id AND (i.id=? OR (i.account_id IS NOT NULL AND i.account_id=?))
+			)`, id, p.IdentityID, p.AccountID).Scan(&title, &thumbnail, &status, &position, &updatedAt)
+		if err != nil {
+			continue
+		}
+		if status == "playing" {
+			if updated, parseErr := time.Parse("2006-01-02 15:04:05", updatedAt); parseErr == nil {
+				position += time.Since(updated.UTC()).Seconds()
+			}
+		}
+		out = append(out, map[string]any{"id": id, "label": roomLabel(id), "title": title, "thumbnail": thumbnail, "status": status, "position": position, "participants": a.hub.activeCount(id)})
+	}
+	writeJSON(w, 200, out)
 }
 func roomProblem(w http.ResponseWriter, e error) {
 	switch e.Error() {
@@ -214,8 +257,8 @@ func (a *application) joinAndSnapshot(ctx context.Context, id string, p principa
 	return a.snapshot(ctx, id, p.IdentityID)
 }
 func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, error) {
-	s := snapshot{ID: id, Label: roomLabel(id), Me: me, Members: []member{}, Queue: []queueItem{}, Events: []event{}, PublicRoomsEnabled: a.getPublicRooms()}
-	if e := a.db.QueryRowContext(ctx, "SELECT visibility,revision FROM rooms WHERE id=?", id).Scan(&s.Visibility, &s.Revision); e != nil {
+	s := snapshot{ID: id, Label: roomLabel(id), Me: me, Members: []member{}, Queue: []queueItem{}, History: []media{}, Events: []event{}, PublicRoomsEnabled: a.getPublicRooms()}
+	if e := a.db.QueryRowContext(ctx, "SELECT visibility,revision,queue_loop FROM rooms WHERE id=?", id).Scan(&s.Visibility, &s.Revision, &s.QueueLoop); e != nil {
 		return s, e
 	}
 	rows, e := a.db.QueryContext(ctx, "SELECT i.id,i.display_name,m.role,i.account_id FROM room_members m JOIN identities i ON i.id=m.identity_id WHERE m.room_id=? ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,i.display_name", id)
@@ -269,16 +312,18 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 			}
 		}
 	}
-	q, e := a.db.QueryContext(ctx, `SELECT q.id,q.position,m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,'') FROM room_queue_items q JOIN media_items m ON m.id=q.media_id WHERE q.room_id=? ORDER BY q.position`, id)
+	q, e := a.db.QueryContext(ctx, `SELECT q.id,q.position,m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,''),count(v.identity_id),count(CASE WHEN v.identity_id=? THEN 1 END) FROM room_queue_items q JOIN media_items m ON m.id=q.media_id LEFT JOIN queue_votes v ON v.queue_item_id=q.id WHERE q.room_id=? GROUP BY q.id ORDER BY count(v.identity_id) DESC,q.position`, me, id)
 	if e != nil {
 		return s, e
 	}
 	for q.Next() {
 		var x queueItem
-		if e = q.Scan(&x.ID, &x.Position, &x.Media.ID, &x.Media.ProviderID, &x.Media.Title, &x.Media.Thumbnail); e != nil {
+		var voted int
+		if e = q.Scan(&x.ID, &x.Position, &x.Media.ID, &x.Media.ProviderID, &x.Media.Title, &x.Media.Thumbnail, &x.Votes, &voted); e != nil {
 			q.Close()
 			return s, e
 		}
+		x.Voted = voted > 0
 		s.Queue = append(s.Queue, x)
 	}
 	if e = q.Err(); e != nil {
@@ -286,6 +331,23 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 		return s, e
 	}
 	q.Close()
+	historyRows, e := a.db.QueryContext(ctx, `SELECT m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,'') FROM room_history h JOIN media_items m ON m.id=h.media_id WHERE h.room_id=? ORDER BY h.played_at DESC LIMIT 20`, id)
+	if e != nil {
+		return s, e
+	}
+	for historyRows.Next() {
+		var item media
+		if e = historyRows.Scan(&item.ID, &item.ProviderID, &item.Title, &item.Thumbnail); e != nil {
+			historyRows.Close()
+			return s, e
+		}
+		s.History = append(s.History, item)
+	}
+	if e = historyRows.Err(); e != nil {
+		historyRows.Close()
+		return s, e
+	}
+	historyRows.Close()
 	var mid, title, thumb, provider sql.NullString
 	if e = a.db.QueryRowContext(ctx, `SELECT p.status,p.position_seconds,p.revision,p.updated_at,m.id,m.provider_media_id,m.title,m.thumbnail_url FROM playback_states p LEFT JOIN media_items m ON m.id=p.current_media_id WHERE p.room_id=?`, id).Scan(&s.Playback.Status, &s.Playback.Position, &s.Playback.Revision, &s.Playback.UpdatedAt, &mid, &provider, &title, &thumb); e != nil {
 		return s, e
