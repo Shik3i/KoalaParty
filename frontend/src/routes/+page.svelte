@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { api } from '$lib/api';
+  import { forgetRoom, recentRooms as loadRecentRooms, type RecentRoom } from '$lib/recentRooms';
   import KoalaSyncPromo from '$lib/KoalaSyncPromo.svelte';
   import {
     Compass,
@@ -12,10 +14,16 @@
     ShieldCheck,
     GithubLogo,
     ArrowRight,
+    ClockCounterClockwise,
+    X,
   } from 'phosphor-svelte';
   let roomCode = '';
   let creating = false;
   let error = '';
+  let recentRooms: RecentRoom[] = [];
+  onMount(() => {
+    recentRooms = loadRecentRooms();
+  });
   async function createRoom() {
     creating = true;
     error = '';
@@ -95,6 +103,34 @@
     </div>
   </aside>
 </main>
+{#if recentRooms.length > 0}
+  <section class="recent" aria-labelledby="recent-rooms-title">
+    <div class="section-heading">
+      <div>
+        <span class="eyebrow"><ClockCounterClockwise size={15} weight="bold" />Continue watching</span>
+        <h2 id="recent-rooms-title">Your recent rooms</h2>
+      </div>
+    </div>
+    <div class="recent-grid">
+      {#each recentRooms as room (room.id)}
+        <article class="recent-room panel">
+          <a href={`/room/${room.id}`} aria-label={`Open ${room.label}`}>
+            <span class="room-code">{room.id}</span>
+            <strong>{room.label}</strong>
+            <span class="recent-title">{room.title || 'Ready to keep watching'}</span>
+          </a>
+          <button
+            class="icon-button secondary"
+            type="button"
+            aria-label={`Remove ${room.label} from recent rooms`}
+            title="Remove from recent rooms"
+            onclick={() => (recentRooms = forgetRoom(room.id))}><X size={16} weight="bold" /></button
+          >
+        </article>
+      {/each}
+    </div>
+  </section>
+{/if}
 <section class="features">
   <article>
     <FilmSlate size={24} weight="duotone" /><b>Shared player</b><span>Play, pause, seek, and stay together.</span>
@@ -228,6 +264,64 @@
     border-radius: var(--radius-md);
     overflow: hidden;
   }
+  .recent {
+    max-width: 1180px;
+    margin: 0 auto 3rem;
+    padding: 0 clamp(1rem, 4vw, 3rem);
+  }
+  .section-heading {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .section-heading .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.35rem;
+  }
+  .section-heading h2 {
+    margin: 0;
+  }
+  .recent-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+    gap: 0.75rem;
+  }
+  .recent-room {
+    position: relative;
+    padding: 0;
+    overflow: hidden;
+  }
+  .recent-room > a {
+    display: grid;
+    gap: 0.35rem;
+    min-height: 128px;
+    padding: 1.2rem 3rem 1.2rem 1.2rem;
+    color: inherit;
+    text-decoration: none;
+  }
+  .recent-room > a:hover strong {
+    color: var(--accent-primary);
+  }
+  .room-code {
+    color: var(--text-muted);
+    font-family: monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+  }
+  .recent-title {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+  .recent-room .icon-button {
+    position: absolute;
+    top: 0.7rem;
+    right: 0.7rem;
+  }
   .features article {
     background: var(--surface-panel);
     padding: 1.5rem;
@@ -257,6 +351,9 @@
     }
     .features {
       grid-template-columns: 1fr 1fr;
+    }
+    .section-heading {
+      align-items: start;
     }
   }
   @media (max-width: 480px) {

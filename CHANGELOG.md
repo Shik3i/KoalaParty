@@ -4,6 +4,17 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Added up to five recently visited rooms to the start page for quick return without creating another room. The browser-local list works without an account and supports removing individual entries.
+
+### Fixed
+
+- Removed a data race between live session-TTL updates and concurrent session creation.
+- Prevented client-supplied fallback titles from overwriting shared YouTube metadata across rooms, and broadcast trusted metadata updates to every affected active room.
+- Counted display-name limits by Unicode characters consistently in the browser and server.
+- Released the WebSocket hub lock before the admin statistics endpoint queries SQLite.
+
 ## [0.8.0] - 2026-07-20
 
 ### Added

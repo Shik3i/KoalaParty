@@ -36,6 +36,12 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   await expect(owner.getByText(/loads YouTube's privacy-enhanced player/)).toBeVisible();
   await expect(owner.locator('script[src*="youtube.com/iframe_api"]')).toHaveCount(1);
   const roomId = owner.url().split('/').at(-1)!;
+  await owner.goto('/');
+  await expect(owner.getByRole('heading', { name: 'Your recent rooms' })).toBeVisible();
+  const recentRoom = owner.getByRole('link', { name: /^Open / });
+  await expect(recentRoom).toHaveAttribute('href', `/room/${roomId}`);
+  await recentRoom.click();
+  await expect(owner).toHaveURL(`/room/${roomId}`);
   const sameIdentity = await ownerContext.newPage();
   await sameIdentity.goto(`/room/${roomId}`);
   await expect(sameIdentity.getByText('Live', { exact: true })).toBeVisible();

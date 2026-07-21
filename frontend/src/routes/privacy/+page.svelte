@@ -59,7 +59,7 @@
       <li>hashed session tokens, CSRF tokens and expiry times;</li>
       <li>friend requests, accepted or blocked relationships;</li>
       <li>room ownership, membership, roles, permissions, invitations and bans;</li>
-      <li>YouTube video IDs, supplied titles, queue order and synchronized playback state;</li>
+      <li>YouTube video IDs, server-resolved titles, queue order and synchronized playback state;</li>
       <li>structured room activity and reports submitted for operator review.</li>
     </ul>
     <p>
@@ -81,10 +81,11 @@
   <section>
     <h2>6. Local storage and session cookie</h2>
     <p>
-      Your browser stores the random identity UUID and secret, display name, avatar seed, and your theme and color
-      design in local storage. These values are required for identity continuity and interface preferences, not
-      tracking. You can remove them through your browser settings, but doing so before linking an account permanently
-      loses anonymous room ownership.
+      Your browser stores the random identity UUID and secret, display name, avatar seed, theme and color design, and up
+      to five recently visited room shortcuts in local storage. These values are required for identity continuity,
+      interface preferences and returning to rooms, not tracking. Recent-room shortcuts can be removed individually on
+      the start page. You can remove all values through your browser settings, but doing so before linking an account
+      permanently loses anonymous room ownership.
     </p>
     <p>
       The server sets the technically necessary <code>kp_session</code> cookie after authentication. It is HttpOnly and SameSite=Lax;

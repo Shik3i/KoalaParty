@@ -5,6 +5,7 @@
   import { page } from '$app/state';
   import { api, establish, websocketURL, ApiError } from '$lib/api';
   import { randomUUID } from '$lib/identity';
+  import { rememberRoom } from '$lib/recentRooms';
   import YouTubePlayer from '$lib/YouTubePlayer.svelte';
   import { formatActivity, parseYouTube, type Snapshot, type Member } from '$lib/room';
   import {
@@ -168,7 +169,13 @@
       try {
         await establish();
         if (disposed) return;
-        updateRoom(await api(`/api/rooms/${roomId}`));
+        const joinedRoom = await api<Snapshot>(`/api/rooms/${roomId}`);
+        updateRoom(joinedRoom);
+        rememberRoom({
+          id: joinedRoom.id,
+          label: joinedRoom.label,
+          title: joinedRoom.playback.media?.title ?? '',
+        });
         if (disposed) return;
         error = '';
         joinAttempt = 0;
