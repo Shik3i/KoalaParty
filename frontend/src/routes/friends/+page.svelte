@@ -8,6 +8,7 @@
   let loading = true;
   let pending = '';
   async function load() {
+    loading = true;
     try {
       error = '';
       list = await api('/api/friends');
@@ -61,24 +62,28 @@
     <label>Username<input bind:value={username} minlength="3" maxlength="24" pattern="[A-Za-z0-9_]+" required /></label
     ><button disabled={!!pending}>{pending === 'send' ? 'Sending…' : 'Send request'}</button>
   </form>
-  {#if error}<p class="error" role="alert">{error}</p>{/if}
-  <section class="panel list">
-    {#if loading}<p class="muted" role="status">Loading friends…</p>{:else if !list.length}<p class="muted">
-        No friend relationships yet.
-      </p>{/if}{#each list as friend}<article>
-        <div><b>{friend.username}</b><small>{friend.status} · {friend.direction}</small></div>
-        <div class="row">
-          {#if friend.status === 'pending' && friend.direction === 'incoming'}<button
-              disabled={!!pending}
-              onclick={() => action(friend.username, 'accept')}>Accept</button
-            ><button class="secondary" disabled={!!pending} onclick={() => action(friend.username, 'decline')}
-              >Decline</button
-            >{/if}<button class="ghost" disabled={!!pending} onclick={() => action(friend.username, 'remove')}
-            >Remove</button
-          ><button class="ghost" disabled={!!pending} onclick={() => action(friend.username, 'block')}>Block</button>
-        </div>
-      </article>{/each}
-  </section>
+  {#if error && list.length}<p class="error" role="alert">{error}</p>{/if}
+  {#if error && !list.length}<section class="panel empty error-state" role="alert">
+      <h2>Could not load friends</h2>
+      <p class="error">{error}</p>
+      <button onclick={load}>Try again</button>
+    </section>{:else}<section class="panel list">
+      {#if loading}<p class="muted" role="status">Loading friends…</p>{:else if !list.length}<p class="muted">
+          No friend relationships yet.
+        </p>{/if}{#each list as friend}<article>
+          <div><b>{friend.username}</b><small>{friend.status} · {friend.direction}</small></div>
+          <div class="row">
+            {#if friend.status === 'pending' && friend.direction === 'incoming'}<button
+                disabled={!!pending}
+                onclick={() => action(friend.username, 'accept')}>Accept</button
+              ><button class="secondary" disabled={!!pending} onclick={() => action(friend.username, 'decline')}
+                >Decline</button
+              >{/if}<button class="ghost" disabled={!!pending} onclick={() => action(friend.username, 'remove')}
+              >Remove</button
+            ><button class="ghost" disabled={!!pending} onclick={() => action(friend.username, 'block')}>Block</button>
+          </div>
+        </article>{/each}
+    </section>{/if}
 </main>
 
 <style>
@@ -97,6 +102,10 @@
   .list {
     padding: 1rem;
     margin-top: 1rem;
+  }
+  .empty {
+    padding: 2rem;
+    text-align: center;
   }
   .list article {
     display: flex;

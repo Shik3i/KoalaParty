@@ -401,7 +401,7 @@
 <svelte:head><title>{room?.label || roomId} · KoalaParty</title></svelte:head>
 <svelte:window onkeydown={(e) => confirmDialog && e.key === 'Escape' && resolveConfirm(false)} />
 {#if error}<main class="fatal panel">
-    <span>🌧️</span>
+    <img src="/icons/koalaparty-192.png" alt="" />
     <h1>Couldn’t enter this room</h1>
     <p class="error">{error}</p>
     <a class="button" href="/">Back home</a>
@@ -883,8 +883,10 @@
     padding: 3rem;
     text-align: center;
   }
-  .fatal span {
-    font-size: 3rem;
+  .fatal > img {
+    width: 4.5rem;
+    height: 4.5rem;
+    object-fit: contain;
   }
   .room-shell {
     max-width: 1500px;

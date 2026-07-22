@@ -5,7 +5,10 @@
   let error = '';
   let disabled = false;
   let loading = true;
-  onMount(async () => {
+  async function load() {
+    loading = true;
+    error = '';
+    disabled = false;
     try {
       const r = await fetch('/api/discover');
       if (r.status === 404) {
@@ -19,7 +22,8 @@
     } finally {
       loading = false;
     }
-  });
+  }
+  onMount(load);
 </script>
 
 <svelte:head><title>Discover public rooms · KoalaParty</title></svelte:head>
@@ -29,12 +33,14 @@
     <h1>See what’s playing</h1>
     <p>Controlled metadata only. Rooms have no editable titles, descriptions, or promotional text.</p>
   </header>
-  {#if loading}<div class="empty panel" role="status">Loading active rooms…</div>{:else if error}<p
-      class="error"
+  {#if loading}<div class="empty panel" role="status">Loading active rooms…</div>{:else if error}<div
+      class="empty panel"
       role="alert"
     >
-      {error}
-    </p>{:else if disabled}<div class="empty panel">
+      <h2>Could not load public rooms</h2>
+      <p class="error">{error}</p>
+      <button onclick={load}>Try again</button>
+    </div>{:else if disabled}<div class="empty panel">
       <span>🔗</span>
       <h2>Invite-only early beta</h2>
       <p>Public room discovery is currently disabled. Join a room with its invite link or code.</p>

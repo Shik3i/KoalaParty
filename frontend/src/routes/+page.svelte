@@ -90,7 +90,7 @@
     <p class="warning">Anonymous rooms belong to this browser. Link an account before clearing browser storage.</p>
   </section>
   <aside class="join panel">
-    <div class="room-mark" aria-hidden="true">🐨</div>
+    <img class="room-mark" src="/icons/koalaparty-192.png" alt="" />
     <h2>Jump into a room</h2>
     <p class="muted">Paste an invite link to join friends — or leave it empty to spin up a new room.</p>
     <form
@@ -268,7 +268,10 @@
     box-shadow: 0 34px 90px color-mix(in srgb, var(--accent-primary) 19%, transparent);
   }
   .room-mark {
-    font-size: 4rem;
+    display: block;
+    width: 4rem;
+    height: 4rem;
+    object-fit: contain;
     margin-bottom: 1rem;
   }
   .join form {

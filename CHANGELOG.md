@@ -2,6 +2,18 @@
 
 All notable changes are documented here. KoalaParty follows semantic versioning.
 
+## [0.9.1] - 2026-07-22
+
+### Added
+
+- Added the KoalaParty mascot to the visible brand, legal/error states, social previews and Apple home-screen metadata.
+- Added retry actions and clearer error states for public discovery, friends and account loading failures.
+
+### Fixed
+
+- Fixed the mobile navigation bar positioning on browsers where the desktop header blur caused its fixed child to remain at the top of the page.
+- Avoided advertising the unpadded mascot artwork as a maskable PWA icon.
+
 ## [Unreleased]
 
 ## [0.9.0] - 2026-07-21

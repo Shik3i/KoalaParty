@@ -14,7 +14,9 @@
   let loading = true;
   let pending = '';
 
-  onMount(async () => {
+  async function load() {
+    loading = true;
+    error = '';
     try {
       me = await establish();
       displayName = me.displayName;
@@ -24,7 +26,8 @@
     } finally {
       loading = false;
     }
-  });
+  }
+  onMount(load);
 
   async function run(name: string, action: () => Promise<void>, success: string) {
     if (pending) return;
@@ -118,9 +121,14 @@
 <svelte:head><title>Account · KoalaParty</title></svelte:head>
 <main class="page">
   <h1>Account</h1>
-  {#if loading}<p class="muted" role="status">Loading identity…</p>{:else if error && !me}<p class="error" role="alert">
-      {error}
-    </p>{:else if me}
+  {#if loading}<p class="muted" role="status">Loading identity…</p>{:else if error && !me}<section
+      class="panel error-state"
+      role="alert"
+    >
+      <h2>Could not load account</h2>
+      <p class="error">{error}</p>
+      <button onclick={load}>Try again</button>
+    </section>{:else if me}
     <section class="panel card">
       <div class="avatar">{me.displayName.slice(0, 1).toUpperCase()}</div>
       <div>
@@ -234,7 +242,8 @@
   }
   .card,
   .notice,
-  .section {
+  .section,
+  .error-state {
     padding: 1.5rem;
     margin: 1rem 0;
   }
@@ -310,6 +319,9 @@
   }
   .success {
     color: var(--success);
+  }
+  .error-state {
+    text-align: center;
   }
   @media (max-width: 700px) {
     .grid {

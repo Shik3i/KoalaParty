@@ -137,7 +137,15 @@ test('mobile navigation and room empty states remain usable', async ({ browser }
   const page = await context.newPage();
   await page.goto('/');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
+  const navigation = page.getByRole('navigation', { name: 'Main navigation' });
+  await expect(navigation).toBeVisible();
+  const navigationBox = await navigation.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return { bottom: rect.bottom, top: rect.top, viewportHeight: window.innerHeight };
+  });
+  expect(Math.abs(navigationBox.bottom - navigationBox.viewportHeight)).toBeLessThanOrEqual(1);
+  expect(navigationBox.top).toBeGreaterThan(700);
+  await expect(page.locator('.brand img[src="/icons/koalaparty-192.png"]')).toHaveCount(1);
   await expect(page.getByRole('link', { name: 'Discover' })).toBeVisible();
   await page.getByRole('link', { name: 'Discover' }).click();
   await expect(page.getByRole('heading', { name: 'Invite-only early beta' })).toBeVisible();

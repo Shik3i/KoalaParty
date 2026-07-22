@@ -5,7 +5,7 @@
 
 <main class="legal panel">
   <header>
-    <span aria-hidden="true">🐨</span>
+    <img src="/icons/koalaparty-192.png" alt="" />
     <p>Contact & project information</p>
     <h1>Legal Notice</h1>
   </header>
@@ -94,9 +94,12 @@
     padding-bottom: 2rem;
     border-bottom: 1px solid var(--border-subtle);
   }
-  header span {
+  header img {
     display: block;
-    font-size: 3rem;
+    width: 4rem;
+    height: 4rem;
+    object-fit: contain;
+    margin-inline: auto;
     margin-bottom: 0.5rem;
   }
   header p {

@@ -51,12 +51,16 @@
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="KoalaParty" />
   <meta property="og:title" content="KoalaParty — Watch YouTube together privately" />
+  <meta property="og:image" content="/icons/koalaparty-icon.png" />
+  <meta property="og:image:alt" content="KoalaParty koala mascot holding a shared video player" />
   <meta
     property="og:description"
     content="Synchronized YouTube watch parties with a shared queue — no accounts, ads, analytics, or tracking."
   />
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content="KoalaParty — Watch YouTube together privately" />
+  <meta name="twitter:image" content="/icons/koalaparty-icon.png" />
+  <meta name="twitter:image:alt" content="KoalaParty koala mascot holding a shared video player" />
   <meta
     name="twitter:description"
     content="Synchronized YouTube watch parties with a shared queue — no accounts, ads, analytics, or tracking."
@@ -65,7 +69,7 @@
 <svelte:window onscroll={() => (compactHeader = window.scrollY > 28)} />
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header" class:compact={compactHeader}>
-  <a class="brand" href="/"><span aria-hidden="true">🐨</span> KoalaParty</a>
+  <a class="brand" href="/"><img src="/icons/koalaparty-192.png" alt="" /> KoalaParty</a>
   <nav aria-label="Main navigation">
     <a href="/discover"><Compass size={17} weight="bold" />Discover</a><a href="/rooms"
       ><FilmSlate size={17} weight="bold" />My rooms</a
@@ -102,7 +106,7 @@
     {@render children()}
     {#snippet failed(error, reset)}
       <main class="boundary-error">
-        <span aria-hidden="true">🐨</span>
+        <img class="boundary-mark" src="/icons/koalaparty-192.png" alt="" />
         <h1>Something hiccuped</h1>
         <p>An unexpected error interrupted the page. Your room is safe — try again.</p>
         <div class="boundary-actions">
@@ -141,9 +145,6 @@
     margin: 5rem auto;
     padding: 2.5rem clamp(1rem, 4vw, 2.5rem);
     text-align: center;
-  }
-  .boundary-error span {
-    font-size: 3rem;
   }
   .boundary-error .boundary-actions {
     display: flex;
@@ -192,12 +193,25 @@
     box-shadow: 0 10px 34px rgba(4, 18, 12, 0.1);
   }
   .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.38rem;
     font-size: 1.08rem;
     font-weight: 850;
     text-decoration: none;
     color: var(--text-primary);
     white-space: nowrap;
     transition: transform 0.28s ease;
+  }
+  .brand img {
+    width: 1.7rem;
+    height: 1.7rem;
+    object-fit: contain;
+  }
+  .boundary-mark {
+    width: 3.5rem;
+    height: 3.5rem;
+    object-fit: contain;
   }
   .site-header.compact .brand {
     transform: scale(0.94);
@@ -304,6 +318,9 @@
       gap: 0.8rem;
       padding-top: 0.65rem;
       padding-bottom: 0.65rem;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      background: var(--surface-panel);
     }
     .site-header.compact {
       height: auto;
