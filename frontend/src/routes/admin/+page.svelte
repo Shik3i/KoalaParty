@@ -40,6 +40,12 @@
   let loading = $state(true);
   let error = $state('');
   let successMsg = $state('');
+  let msgTimer: ReturnType<typeof setTimeout> | null = null;
+  function setSuccess(msg: string) {
+    if (msgTimer) clearTimeout(msgTimer);
+    successMsg = msg;
+    msgTimer = setTimeout(() => (successMsg = ''), 4000);
+  }
 
   async function loadData() {
     loading = true;
@@ -62,6 +68,9 @@
 
   onMount(() => {
     loadData();
+    return () => {
+      if (msgTimer) clearTimeout(msgTimer);
+    };
   });
 
   async function saveSettings(e: SubmitEvent) {
@@ -74,8 +83,7 @@
         method: 'POST',
         body: JSON.stringify(settings),
       });
-      successMsg = 'Configuration settings updated successfully.';
-      setTimeout(() => (successMsg = ''), 4000);
+      setSuccess('Configuration settings updated successfully.');
       loadData();
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to save settings';
@@ -87,8 +95,7 @@
     try {
       await api(`/api/admin/reports/${reportId}/${action}`, { method: 'POST' });
       reports = reports.filter((r) => r.id !== reportId);
-      successMsg = `Report successfully ${action === 'delist' ? 'delisted & resolved' : 'resolved'}.`;
-      setTimeout(() => (successMsg = ''), 4000);
+      setSuccess(`Report successfully ${action === 'delist' ? 'delisted & resolved' : 'resolved'}.`);
       loadData();
     } catch (e) {
       error = e instanceof Error ? e.message : `Failed to ${action} report`;

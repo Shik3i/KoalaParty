@@ -62,8 +62,8 @@ function valid(v: string) {
 }
 export function formatActivity(e: Activity) {
   const who = e.actorName || 'Someone';
-  const title = String(e.payload.title || 'a video');
-  const position = Number(e.payload.position || 0);
+  const title = String(e.payload?.title || 'a video');
+  const position = Number(e.payload?.position || 0);
   const time = `${Math.floor(position / 60)}:${String(Math.floor(position % 60)).padStart(2, '0')}`;
   switch (e.type) {
     case 'member.joined':
@@ -97,7 +97,7 @@ export function formatActivity(e: Activity) {
     case 'permission.changed':
       return `${who} changed a permission`;
     case 'room.visibility':
-      return `${who} changed the room to ${String(e.payload.visibility).replace('_', '-')}`;
+      return `${who} changed the room to ${String(e.payload?.visibility ?? '').replace('_', '-')}`;
     case 'room.transfer':
       return `${who} transferred room ownership`;
     case 'room.created':

@@ -67,11 +67,15 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   };
   let r = await request();
   if (r.status === 403) {
-    const problem = (await r.json()) as { code?: string; message?: string };
+    let problem: { code?: string; message?: string } = {};
+    try {
+      problem = (await r.json()) as { code?: string; message?: string };
+    } catch {
+      /* Response body may not be JSON (e.g., WAF/proxy HTML page) */
+    }
     if (problem.code !== 'csrf_failed') throw new ApiError(403, problem.message ?? r.statusText);
-    const current = await currentPrincipal();
-    if (!current) throw new ApiError(401, 'Session expired. Reload and try again.');
-    principal = p = current;
+    principal = null;
+    p = await establish();
     r = await request();
   }
   if (!r.ok) throw new ApiError(r.status, await message(r));

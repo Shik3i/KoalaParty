@@ -132,7 +132,7 @@ func (a *application) issueSession(w http.ResponseWriter, r *http.Request, ident
 		return
 	}
 	expires := time.Now().Add(a.getSessionTTL())
-	_, err = a.db.Exec("INSERT INTO sessions(token_hash,identity_id,csrf_token,expires_at) VALUES(?,?,?,?)", tokenHash(token), identityID, csrf, expires.UTC().Format(time.RFC3339))
+	_, err = a.db.Exec("INSERT INTO sessions(token_hash,identity_id,csrf_token,expires_at) VALUES(?,?,?,?)", tokenHash(token), identityID, csrf, expires.UTC().Format("2006-01-02 15:04:05"))
 	if err != nil {
 		problem(w, 500, "session_failed", "Could not create session.")
 		return

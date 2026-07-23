@@ -28,9 +28,11 @@ func (a *application) runMaintenance(ctx context.Context) {
 		var ids []string
 		for rows.Next() {
 			var id string
-			_ = rows.Scan(&id)
-			ids = append(ids, id)
+			if scanErr := rows.Scan(&id); scanErr == nil && id != "" {
+				ids = append(ids, id)
+			}
 		}
+		_ = rows.Err()
 		rows.Close()
 		for _, id := range ids {
 			if !a.hub.activeRoom(id) {

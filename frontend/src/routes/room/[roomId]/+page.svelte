@@ -201,6 +201,7 @@
       }
     }
   }
+  let reactionTimers: ReturnType<typeof setTimeout>[] = [];
   onMount(() => {
     void joinWithRetry();
     const progressTimer = setInterval(() => (nowTick = Date.now()), 500);
@@ -210,6 +211,8 @@
       if (noticeTimer) clearTimeout(noticeTimer);
       if (seekTimer) clearTimeout(seekTimer);
       clearInterval(progressTimer);
+      reactionTimers.forEach(clearTimeout);
+      reactionTimers = [];
       const activeSocket = socket;
       socket = null;
       activeSocket?.close();
@@ -244,7 +247,11 @@
         else if (data.type === 'reaction') {
           const reaction = { id: randomUUID(), emoji: String(data.emoji) };
           reactions = [...reactions, reaction];
-          setTimeout(() => (reactions = reactions.filter((item) => item.id !== reaction.id)), 2600);
+          const timer = setTimeout(() => {
+            reactions = reactions.filter((item) => item.id !== reaction.id);
+            reactionTimers = reactionTimers.filter((t) => t !== timer);
+          }, 2600);
+          reactionTimers.push(timer);
         } else if (data.type === 'error') showNotice(data.message || 'The server denied that action.', 0, 'error');
       } catch {
         showNotice('Received an invalid room update. Reconnecting…', 0, 'error');

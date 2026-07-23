@@ -83,6 +83,9 @@ func (l *rateLimiter) wrap(next http.HandlerFunc) http.HandlerFunc {
 					delete(l.entries, key)
 				}
 			}
+			if len(l.entries) > 10000 {
+				l.entries = map[string]rateEntry{host: entry}
+			}
 		}
 		l.mu.Unlock()
 		if !allowed {
