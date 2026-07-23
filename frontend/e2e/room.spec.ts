@@ -126,10 +126,7 @@ test('KoalaSync promotion and legal pages are complete and responsive', async ({
   await expect(page.getByText('admin@koalastuff.net')).toBeVisible();
 
   await page.goto('/');
-  await expect(page.getByRole('link', { name: 'Imprint' })).toHaveAttribute(
-    'href',
-    'https://koalastuff.net/legal',
-  );
+  await expect(page.getByRole('link', { name: 'Imprint' })).toHaveAttribute('href', 'https://koalastuff.net/legal');
 });
 
 test('mobile navigation and room empty states remain usable', async ({ browser }) => {
