@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -118,6 +119,17 @@ func newSegmentCache(fetch func(ctx context.Context, videoID string) []sponsorSe
 	}
 }
 
+// peek returns cached segments without ever fetching, so snapshot building stays
+// fast and side-effect free. It returns nil when nothing fresh is cached.
+func (c *segmentCache) peek(videoID string) []sponsorSegment {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if entry, ok := c.entries[videoID]; ok && c.now().Before(entry.expires) {
+		return entry.segments
+	}
+	return nil
+}
+
 func (c *segmentCache) get(ctx context.Context, videoID string) []sponsorSegment {
 	c.mu.Lock()
 	if entry, ok := c.entries[videoID]; ok && c.now().Before(entry.expires) {
@@ -139,4 +151,30 @@ func (c *segmentCache) get(ctx context.Context, videoID string) []sponsorSegment
 	c.entries[videoID] = segmentCacheEntry{segments: segments, expires: c.now().Add(c.ttl)}
 	c.mu.Unlock()
 	return segments
+}
+
+// enrichSegments fetches the SponsorBlock segments for a freshly activated video in
+// the background (populating the cache) and, once resolved, rebroadcasts the room so
+// every client receives them and can skip in sync. Runs in its own goroutine; all
+// failures are silent so a missing or slow SponsorBlock never affects playback.
+func (a *application) enrichSegments(room, videoID string) {
+	// A panic in a bare goroutine would crash the whole process, unlike one inside an
+	// HTTP handler; never let background work take the server down.
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, `{"level":"error","message":"enrichSegments panic","room":%q,"error":"%v"}`+"\n", room, r)
+		}
+	}()
+	if a.segments == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	a.segments.get(ctx, videoID) // populate the cache
+	if !a.hub.activeRoom(room) {
+		return
+	}
+	if s, err := a.snapshot(ctx, room, ""); err == nil {
+		a.hub.broadcast(room, s)
+	}
 }

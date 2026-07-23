@@ -41,12 +41,13 @@ type member struct {
 	AccountLinked bool            `json:"accountLinked"`
 }
 type playback struct {
-	Media     *media  `json:"media"`
-	Status    string  `json:"status"`
-	Position  float64 `json:"position"`
-	Rate      float64 `json:"rate"`
-	Revision  int64   `json:"revision"`
-	UpdatedAt string  `json:"updatedAt"`
+	Media     *media           `json:"media"`
+	Status    string           `json:"status"`
+	Position  float64          `json:"position"`
+	Rate      float64          `json:"rate"`
+	Segments  []sponsorSegment `json:"segments"`
+	Revision  int64            `json:"revision"`
+	UpdatedAt string           `json:"updatedAt"`
 }
 type event struct {
 	ID        string         `json:"id"`
@@ -65,6 +66,7 @@ type snapshot struct {
 	Queue              []queueItem `json:"queue"`
 	History            []media     `json:"history"`
 	QueueLoop          bool        `json:"queueLoop"`
+	SponsorBlock       bool        `json:"sponsorBlock"`
 	Playback           playback    `json:"playback"`
 	Events             []event     `json:"events"`
 	Revision           int64       `json:"revision"`
@@ -259,7 +261,7 @@ func (a *application) joinAndSnapshot(ctx context.Context, id string, p principa
 }
 func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, error) {
 	s := snapshot{ID: id, Label: roomLabel(id), Me: me, Members: []member{}, Queue: []queueItem{}, History: []media{}, Events: []event{}, PublicRoomsEnabled: a.getPublicRooms()}
-	if e := a.db.QueryRowContext(ctx, "SELECT visibility,revision,queue_loop FROM rooms WHERE id=?", id).Scan(&s.Visibility, &s.Revision, &s.QueueLoop); e != nil {
+	if e := a.db.QueryRowContext(ctx, "SELECT visibility,revision,queue_loop,sponsorblock_enabled FROM rooms WHERE id=?", id).Scan(&s.Visibility, &s.Revision, &s.QueueLoop, &s.SponsorBlock); e != nil {
 		return s, e
 	}
 	rows, e := a.db.QueryContext(ctx, "SELECT i.id,i.display_name,m.role,i.account_id FROM room_members m JOIN identities i ON i.id=m.identity_id WHERE m.room_id=? ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,i.display_name", id)
@@ -355,6 +357,12 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 	}
 	if mid.Valid {
 		s.Playback.Media = &media{ID: mid.String, ProviderID: provider.String, Title: title.String, Thumbnail: thumb.String}
+		// Surface any already-cached SponsorBlock segments for the current video when
+		// the room has it enabled. This never fetches (that happens in the background
+		// on media activation) so building a snapshot stays fast and offline-safe.
+		if s.SponsorBlock && a.segments != nil {
+			s.Playback.Segments = a.segments.peek(provider.String)
+		}
 	}
 	if s.Playback.Status == "playing" {
 		if updated, err := time.Parse("2006-01-02 15:04:05", s.Playback.UpdatedAt); err == nil {

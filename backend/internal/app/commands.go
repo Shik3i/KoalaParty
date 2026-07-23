@@ -88,6 +88,8 @@ func capFor(t string) string {
 		return "members.manage_permissions"
 	case "room.visibility":
 		return "room.manage_visibility"
+	case "room.sponsorblock":
+		return "room.manage_visibility"
 	case "room.transfer":
 		return "room.manage_ownership"
 	}
@@ -135,6 +137,9 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	}
 	eventType := c.Type
 	payload := map[string]any{}
+	// The video ID that becomes the current media as a result of this command, if any.
+	// Used after commit to kick off a background SponsorBlock segment fetch.
+	var activatedVideoID string
 	switch c.Type {
 	case "player.play", "player.pause", "player.seek":
 		var in struct {
@@ -201,6 +206,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		if e == nil && c.Type == "queue.play_now" {
 			_, e = tx.Exec("UPDATE playback_states SET current_media_id=?,status='playing',position_seconds=0,playback_rate=1,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", mediaID, p.IdentityID, room)
 			eventType = "media.activated"
+			activatedVideoID = in.VideoID
 		}
 		payload["videoId"] = in.VideoID
 		payload["title"] = mediaTitle
@@ -335,6 +341,9 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		if e == nil {
 			_, e = tx.Exec("UPDATE playback_states SET current_media_id=?,status=?,position_seconds=0,playback_rate=1,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", nullable(mediaID), map[bool]string{true: "playing", false: "paused"}[mediaID != ""], p.IdentityID, room)
 		}
+		if mediaID != "" {
+			activatedVideoID = strings.TrimPrefix(mediaID, "YT")
+		}
 	case "member.role":
 		var in struct{ IdentityID, Role string }
 		if json.Unmarshal(c.Payload, &in) != nil {
@@ -428,6 +437,15 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		}
 		_, e = tx.Exec("UPDATE rooms SET visibility=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", in.Visibility, room)
 		payload["visibility"] = in.Visibility
+	case "room.sponsorblock":
+		var in struct {
+			Enabled bool `json:"enabled"`
+		}
+		if json.Unmarshal(c.Payload, &in) != nil {
+			return snapshot{}, errors.New("invalid sponsorblock setting")
+		}
+		_, e = tx.Exec("UPDATE rooms SET sponsorblock_enabled=? WHERE id=?", in.Enabled, room)
+		payload["enabled"] = in.Enabled
 	case "room.transfer":
 		if role != "owner" {
 			return snapshot{}, errDenied
@@ -471,6 +489,9 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	}
 	if enrichVideoID != "" {
 		go a.enrichTitle(room, "YT"+enrichVideoID, enrichVideoID)
+	}
+	if a.segments != nil && activatedVideoID != "" {
+		go a.enrichSegments(room, activatedVideoID)
 	}
 	return a.snapshot(ctx, room, p.IdentityID)
 }

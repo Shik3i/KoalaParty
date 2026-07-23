@@ -237,6 +237,45 @@ func TestQueuePolishCommands(t *testing.T) {
 	}
 }
 
+func TestSponsorBlockRoomToggle(t *testing.T) {
+	a := testApp(t)
+	ownerCookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174031", strings.Repeat("s", 43))
+	w := httptest.NewRecorder()
+	a.requireAuth(a.createRoom)(w, authed("POST", "/api/rooms", nil, ownerCookie, owner.CSRF))
+	var created map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &created)
+
+	s, err := a.snapshot(t.Context(), created["id"], owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.SponsorBlock {
+		t.Fatal("expected SponsorBlock enabled by default")
+	}
+
+	// A plain member must not be able to change a room-level setting.
+	_, memberP := exchange(t, a, "123e4567-e89b-42d3-a456-426614174032", strings.Repeat("t", 43))
+	if _, e := a.joinAndSnapshot(t.Context(), created["id"], memberP); e != nil {
+		t.Fatal(e)
+	}
+	deny := command{Type: "room.sponsorblock", ExpectedRevision: s.Revision, Payload: json.RawMessage(`{"enabled":false}`)}
+	if _, e := a.applyCommand(t.Context(), created["id"], memberP, deny); e != errDenied {
+		t.Fatalf("member should not toggle SponsorBlock: %v", e)
+	}
+
+	s, err = a.snapshot(t.Context(), created["id"], owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	off := command{Type: "room.sponsorblock", ExpectedRevision: s.Revision, Payload: json.RawMessage(`{"enabled":false}`)}
+	if s, err = a.applyCommand(t.Context(), created["id"], owner, off); err != nil {
+		t.Fatalf("owner toggle off: %v", err)
+	}
+	if s.SponsorBlock {
+		t.Fatal("expected SponsorBlock disabled after toggle")
+	}
+}
+
 func TestRoomPreviewsDoNotJoinUnassociatedRooms(t *testing.T) {
 	a := testApp(t)
 	ownerCookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174015", strings.Repeat("r", 43))

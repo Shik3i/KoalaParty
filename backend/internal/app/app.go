@@ -33,10 +33,10 @@ type application struct {
 	// makes no outbound requests.
 	fetchTitle func(ctx context.Context, videoID string) string
 
-	// fetchSegments resolves the SponsorBlock skip segments for a video ID (cached).
-	// It is nil when SponsorBlock is disabled (and in tests) so no outbound requests
-	// are made. Segment data is CC BY-NC-SA 4.0 and requires attribution when shown.
-	fetchSegments func(ctx context.Context, videoID string) []sponsorSegment
+	// segments caches SponsorBlock skip segments per video. It is nil when
+	// SponsorBlock is disabled (and in tests) so no outbound requests are made.
+	// Segment data is CC BY-NC-SA 4.0 and requires attribution when shown.
+	segments *segmentCache
 
 	mu                sync.RWMutex
 	sessionTTL        time.Duration
@@ -86,7 +86,7 @@ func Run() error {
 		a.fetchTitle = fetchYouTubeTitle
 	}
 	if cfg.sponsorBlock {
-		a.fetchSegments = newSegmentCache(fetchSponsorSegments).get
+		a.segments = newSegmentCache(fetchSponsorSegments)
 	}
 	if err := a.loadSettingsFromDB(); err != nil {
 		return fmt.Errorf("load db settings: %w", err)
