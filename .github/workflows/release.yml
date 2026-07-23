@@ -144,3 +144,22 @@ jobs:
           subject-name: ${{ steps.image.outputs.value }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+  release:
+    needs: [verify, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Extract release notes from CHANGELOG
+        run: node scripts/verify-release.mjs "$GITHUB_REF_NAME" release-notes.md
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --title "KoalaParty $GITHUB_REF_NAME" --notes-file release-notes.md --verify-tag

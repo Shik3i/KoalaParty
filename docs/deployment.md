@@ -60,6 +60,6 @@ Enable `KOALAPARTY_PUBLIC_ROOMS=true` only when Timo actively reviews reports an
 - Take and verify a backup before every upgrade. Test schema compatibility in staging before rollback across a migration.
 - Retain short container logs. Application logs intentionally omit secrets and request payloads.
 
-Published tags produce immutable full-version tags plus moving major, minor, and `latest` tags. Deployments must use the full version. Verify deployment-archive checksums from the GitHub Release and inspect the published image attestation when supply-chain provenance matters.
+Published tags produce immutable full-version tags plus moving major, minor, and `latest` tags. Deployments must use the full version. Inspect the published image's SBOM and build-provenance attestation when supply-chain provenance matters.
 
 Room activity is pruned to 200 events and 30 days by default. Rooms inactive for 12 months are soft-deleted unless currently connected. All limits use validated environment variables.

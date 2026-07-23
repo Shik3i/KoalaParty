@@ -4,6 +4,14 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- The release workflow now creates the GitHub Release for each tag automatically from the matching `CHANGELOG.md` section, so publishing no longer requires a manual step.
+
+### Changed
+
+- Corrected the release and deployment docs to match the actual pipeline: it publishes the multi-architecture container image with an SBOM, provenance, a build attestation, and a GitHub Release — not the deployment bundles or checksum files the docs previously described.
+
 ## [0.10.0] - 2026-07-23
 
 ### Added
