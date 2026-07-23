@@ -183,9 +183,20 @@
     const w = window as YTWindow;
     player = new w.YT.Player(host, {
       host: 'https://www.youtube-nocookie.com',
-      playerVars: { origin: location.origin, rel: 0 },
+      // cc_load_policy: 0 stops us forcing captions on. Whether captions still appear
+      // then depends on the viewer's own YouTube/browser caption preference, which we
+      // cannot override; unloadModule below is a best-effort hide on top of that.
+      playerVars: { origin: location.origin, rel: 0, cc_load_policy: 0 },
       events: {
         onReady: () => {
+          // Best-effort: hide auto-captions that would otherwise show by default. The
+          // viewer can always re-enable them with the player's CC button.
+          try {
+            player.unloadModule?.('captions');
+            player.unloadModule?.('cc');
+          } catch {
+            /* module may not be loaded yet; harmless */
+          }
           ready = true;
           sync();
           startMonitor();
