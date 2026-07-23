@@ -26,10 +26,10 @@ describe('legal and KoalaSync cross-promotion', () => {
     expect(source('static/robots.txt')).toBe('User-agent: *\nAllow: /\n');
   });
 
-  it('states the MIT license and current trademark position', () => {
+  it('points the retired imprint route at the central legal notice', () => {
     const imprint = source('src/routes/imprint/+page.svelte');
-    expect(imprint).toContain('MIT License');
+    expect(imprint).toContain('https://koalastuff.net/legal');
+    expect(imprint).toContain('rel="canonical"');
     expect(source('../LICENSE')).toContain('Permission is hereby granted, free of charge');
-    expect(imprint).toMatch(/All third-party trademarks\s+belong to their respective owners/);
   });
 });

@@ -125,11 +125,11 @@ test('KoalaSync promotion and legal pages are complete and responsive', async ({
   await expect(page.getByRole('heading', { name: 'YouTube' })).toBeVisible();
   await expect(page.getByText('admin@koalastuff.net')).toBeVisible();
 
-  await page.goto('/imprint');
-  await expect(page.getByRole('heading', { name: 'Legal Notice' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Copyright and trademarks' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute('href', '/privacy');
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.goto('/');
+  await expect(page.getByRole('link', { name: 'Imprint' })).toHaveAttribute(
+    'href',
+    'https://koalastuff.net/legal',
+  );
 });
 
 test('mobile navigation and room empty states remain usable', async ({ browser }) => {
