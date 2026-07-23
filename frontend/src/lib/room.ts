@@ -37,14 +37,23 @@ export interface Snapshot {
   queue: QueueItem[];
   history: Media[];
   queueLoop: boolean;
-  playback: { media: Media | null; status: string; position: number; revision: number; updatedAt: string };
+  playback: {
+    media: Media | null;
+    status: string;
+    position: number;
+    rate: number;
+    revision: number;
+    updatedAt: string;
+  };
   events: Activity[];
   revision: number;
   publicRoomsEnabled: boolean;
 }
 export function currentPlaybackPosition(playback: Snapshot['playback'], receivedAt: number, now = Date.now()): number {
   if (playback.status !== 'playing') return playback.position;
-  return playback.position + Math.max(0, now - receivedAt) / 1000;
+  // Media advances `rate` seconds per wall-clock second, so scale the elapsed time by
+  // the playback rate. Rate defaults to 1 for snapshots that predate the field.
+  return playback.position + (Math.max(0, now - receivedAt) / 1000) * (playback.rate || 1);
 }
 export function parseYouTube(input: string): string | null {
   const value = input.trim();
@@ -76,6 +85,10 @@ export function formatActivity(e: Activity) {
       return `${who} paused the video`;
     case 'player.seek':
       return `${who} jumped to ${time}`;
+    case 'player.rate': {
+      const rate = Number(e.payload?.rate || 1);
+      return `${who} set the speed to ${rate}×`;
+    }
     case 'queue.add':
       return `${who} added “${title}” to the queue`;
     case 'media.activated':

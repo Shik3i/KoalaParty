@@ -8,12 +8,14 @@
     status = 'paused',
     position = 0,
     positionAt = 0,
+    rate = 1,
     canControl = true,
     canSeek = true,
     hasQueue = false,
     onPlay = () => {},
     onPause = () => {},
     onSeek = () => {},
+    onRate = () => {},
     onEnded = () => {},
     onSkip = undefined,
     onDuration = () => {},
@@ -24,12 +26,14 @@
     status?: string;
     position?: number;
     positionAt?: number;
+    rate?: number;
     canControl?: boolean;
     canSeek?: boolean;
     hasQueue?: boolean;
     onPlay?: (position: number) => void;
     onPause?: (position: number) => void;
     onSeek?: (position: number) => void;
+    onRate?: (rate: number, position: number) => void;
     onEnded?: () => void;
     onSkip?: (() => void) | undefined;
     onDuration?: (duration: number) => void;
@@ -69,12 +73,15 @@
     return player?.getCurrentTime?.() ?? 0;
   }
   function guard(ms = 1200) {
-    guardUntil = Date.now() + ms;
+    // Never shorten an existing, longer guard: a short guard (e.g. applying the rate
+    // or the muted-autoplay fallback) must not cut the 3s video-load window short.
+    guardUntil = Math.max(guardUntil, Date.now() + ms);
   }
-  // Where the media should be right now according to the server.
+  // Where the media should be right now according to the server. While playing the
+  // media advances `rate` seconds per wall-clock second, so scale elapsed time by it.
   function expectedPosition(): number {
     if (status !== 'playing') return Math.max(0, position);
-    return Math.max(0, position + (Date.now() - positionAt) / 1000);
+    return Math.max(0, position + ((Date.now() - positionAt) / 1000) * (rate || 1));
   }
 
   // Ask the player to start, then verify it actually did. If the browser blocked
@@ -118,6 +125,15 @@
     player?.unMute?.();
     player?.setVolume?.(100);
     mutedForAutoplay = false;
+  }
+  // Bring the player's playback speed in line with the authoritative rate. Guarded so
+  // the resulting onPlaybackRateChange is recognised as our own and not relayed back.
+  function applyRate() {
+    const target = rate || 1;
+    if (Math.abs((player.getPlaybackRate?.() ?? 1) - target) > 0.01) {
+      guard();
+      player.setPlaybackRate?.(target);
+    }
   }
 
   type YTWindow = Window & { YT?: any; onYouTubeIframeAPIReady?: () => void };
@@ -170,6 +186,7 @@
           startMonitor();
         },
         onStateChange: (e: any) => handleStateChange(e.data),
+        onPlaybackRateChange: (e: any) => handleRateChange(e.data),
         onError: () => {
           playerError = 'This video is unavailable or cannot be embedded.';
         },
@@ -206,6 +223,18 @@
         guard();
         player.playVideo?.();
         return;
+    }
+  }
+  // The local viewer changed playback speed through the native player menu. Forward it
+  // if they may control playback, otherwise snap back to the authoritative rate. A
+  // change inside the guard window is our own setPlaybackRate echo and is ignored.
+  function handleRateChange(newRate: number) {
+    if (!ready || !lastVideo || Date.now() < guardUntil) return;
+    if (Math.abs(newRate - (rate || 1)) < 0.01) return;
+    if (canControl) onRate(newRate, currentTime());
+    else {
+      guard();
+      player.setPlaybackRate?.(rate || 1);
     }
   }
   function startMonitor() {
@@ -300,6 +329,7 @@
         player.loadVideoById(request);
         scheduleAutoplayCheck();
       } else player.cueVideoById(request);
+      applyRate();
       lastVideo = videoId;
       prevTime = target;
       prevWall = Date.now();
@@ -308,6 +338,7 @@
     }
     // A confirmed change arrived: stop suppressing correction and realign now.
     localSeekUntil = 0;
+    applyRate();
     if (Math.abs(currentTime() - target) > DRIFT_MAX) {
       guard();
       player.seekTo(target, true);
@@ -326,6 +357,7 @@
     status;
     position;
     positionAt;
+    rate;
     sync();
   });
 </script>

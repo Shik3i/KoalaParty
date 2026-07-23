@@ -37,7 +37,7 @@
   // The playback anchor is only re-baselined when playback actually changes
   // (status, position, or media), so the extrapolated live position stays correct
   // across unrelated snapshots (a member joining, a queue edit, …).
-  let playbackAnchor = { position: 0, status: 'paused', mediaId: '', at: Date.now() };
+  let playbackAnchor = { position: 0, status: 'paused', mediaId: '', rate: 1, at: Date.now() };
   let disposed = false;
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -77,20 +77,22 @@
     if (room && next.revision < room.revision) return;
     const pb = next.playback;
     const mediaId = pb.media?.id ?? '';
+    const rate = pb.rate || 1;
     if (
       !room ||
       pb.position !== playbackAnchor.position ||
       pb.status !== playbackAnchor.status ||
-      mediaId !== playbackAnchor.mediaId
+      mediaId !== playbackAnchor.mediaId ||
+      rate !== playbackAnchor.rate
     ) {
       if (mediaId !== playbackAnchor.mediaId) mediaDuration = 0;
-      playbackAnchor = { position: pb.position, status: pb.status, mediaId, at: Date.now() };
+      playbackAnchor = { position: pb.position, status: pb.status, mediaId, rate, at: Date.now() };
     }
     room = next;
   }
   const livePosition = (now = Date.now()) =>
     playbackAnchor.status === 'playing'
-      ? playbackAnchor.position + (now - playbackAnchor.at) / 1000
+      ? playbackAnchor.position + ((now - playbackAnchor.at) / 1000) * playbackAnchor.rate
       : playbackAnchor.position;
   let mediaDuration = 0;
   let nowTick = Date.now();
@@ -201,8 +203,22 @@
       }
     }
   }
+  // Theater mode is a per-device viewing preference, so persist it across reloads.
+  function setTheater(value: boolean) {
+    theater = value;
+    try {
+      localStorage.setItem('koalaparty.theater', value ? '1' : '0');
+    } catch {
+      /* localStorage unavailable */
+    }
+  }
   let reactionTimers: ReturnType<typeof setTimeout>[] = [];
   onMount(() => {
+    try {
+      theater = localStorage.getItem('koalaparty.theater') === '1';
+    } catch {
+      /* localStorage unavailable */
+    }
     void joinWithRetry();
     const progressTimer = setInterval(() => (nowTick = Date.now()), 500);
     return () => {
@@ -528,12 +544,14 @@
             status={room.playback.status}
             position={playbackAnchor.position}
             positionAt={playbackAnchor.at}
+            rate={playbackAnchor.rate}
             canControl={can('playback.play_pause')}
             canSeek={can('playback.seek')}
             hasQueue={room.queue.length > 0}
             onPlay={(pos) => command('player.play', { position: pos })}
             onPause={(pos) => command('player.pause', { position: pos })}
             onSeek={scheduleSeek}
+            onRate={(newRate, pos) => command('player.rate', { rate: newRate, position: pos })}
             onEnded={() => can('queue.skip') && command('queue.skip', {}, { silentStale: true })}
             onSkip={can('queue.skip') ? () => command('queue.skip') : undefined}
             onDuration={(d) => (mediaDuration = d)}
@@ -563,12 +581,24 @@
                 </div>
               </div>{/if}
           </div>
+          {#if room.playback.media}<select
+              class="speed-control"
+              aria-label="Playback speed"
+              title="Playback speed — synced for everyone"
+              value={playbackAnchor.rate}
+              disabled={commandPending || !can('playback.play_pause')}
+              onchange={(e) =>
+                command('player.rate', { rate: Number(e.currentTarget.value), position: livePosition() })}
+              >{#each [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as r}<option value={r}
+                  >{r === 1 ? '1× (normal)' : `${r}×`}</option
+                >{/each}</select
+            >{/if}
           <button
             class="secondary theater-toggle"
             aria-pressed={theater}
             aria-label={theater ? 'Exit theater mode' : 'Theater mode'}
             title={theater ? 'Exit theater mode' : 'Theater mode'}
-            onclick={() => (theater = !theater)}
+            onclick={() => setTheater(!theater)}
             >{#if theater}<ArrowsIn size={17} weight="bold" />{:else}<ArrowsOut size={17} weight="bold" />{/if}<span
               class="theater-label">{theater ? 'Exit theater' : 'Theater'}</span
             ></button
@@ -1037,6 +1067,21 @@
   .theater-toggle {
     flex: 0 0 auto;
     padding: 0.5rem 0.8rem;
+  }
+  .speed-control {
+    flex: 0 0 auto;
+    padding: 0.5rem 0.6rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    background: var(--surface-elevated);
+    color: inherit;
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .speed-control:disabled {
+    cursor: default;
+    opacity: 0.6;
   }
   @media (max-width: 580px) {
     .theater-label {

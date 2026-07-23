@@ -44,6 +44,7 @@ type playback struct {
 	Media     *media  `json:"media"`
 	Status    string  `json:"status"`
 	Position  float64 `json:"position"`
+	Rate      float64 `json:"rate"`
 	Revision  int64   `json:"revision"`
 	UpdatedAt string  `json:"updatedAt"`
 }
@@ -349,7 +350,7 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 	}
 	historyRows.Close()
 	var mid, title, thumb, provider sql.NullString
-	if e = a.db.QueryRowContext(ctx, `SELECT p.status,p.position_seconds,p.revision,p.updated_at,m.id,m.provider_media_id,m.title,m.thumbnail_url FROM playback_states p LEFT JOIN media_items m ON m.id=p.current_media_id WHERE p.room_id=?`, id).Scan(&s.Playback.Status, &s.Playback.Position, &s.Playback.Revision, &s.Playback.UpdatedAt, &mid, &provider, &title, &thumb); e != nil {
+	if e = a.db.QueryRowContext(ctx, `SELECT p.status,p.position_seconds,p.playback_rate,p.revision,p.updated_at,m.id,m.provider_media_id,m.title,m.thumbnail_url FROM playback_states p LEFT JOIN media_items m ON m.id=p.current_media_id WHERE p.room_id=?`, id).Scan(&s.Playback.Status, &s.Playback.Position, &s.Playback.Rate, &s.Playback.Revision, &s.Playback.UpdatedAt, &mid, &provider, &title, &thumb); e != nil {
 		return s, e
 	}
 	if mid.Valid {
@@ -357,7 +358,9 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 	}
 	if s.Playback.Status == "playing" {
 		if updated, err := time.Parse("2006-01-02 15:04:05", s.Playback.UpdatedAt); err == nil {
-			s.Playback.Position += time.Since(updated.UTC()).Seconds()
+			// Media advances `rate` seconds per wall-clock second while playing, so the
+			// elapsed-time extrapolation must scale by the playback rate.
+			s.Playback.Position += time.Since(updated.UTC()).Seconds() * s.Playback.Rate
 		}
 	}
 	er, e := a.db.QueryContext(ctx, `SELECT e.id,coalesce(e.actor_identity_id,''),coalesce(i.display_name,''),e.event_type,e.payload_json,e.created_at FROM room_events e LEFT JOIN identities i ON i.id=e.actor_identity_id WHERE e.room_id=? ORDER BY e.created_at DESC LIMIT 200`, id)

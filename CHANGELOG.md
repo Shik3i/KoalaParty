@@ -4,9 +4,15 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Synced playback speed: changing the video speed (0.25×–2×) applies to everyone in the room and stays in sync, with the elapsed-time position extrapolation scaled by the rate on both server and client. A new video always resets to 1×.
+- Theater mode is now remembered per device across reloads.
+
 ### Fixed
 
 - Fixed videos not starting for everyone in a room until a manual reload: a viewer whose browser blocked autoplay-with-sound was reported as paused and, if they held playback control, relayed a phantom pause to the whole room. Player state changes caused by our own programmatic control (loading, muted-autoplay fallback, correcting seeks, requested play) are now guarded and never forwarded.
+- The player guard window can no longer be shortened by a later short guard (e.g. the muted-autoplay fallback), so the full video-load window stays protected.
 - Suppressed the spurious "Room state changed" error toast shown to other controllers when a video ends and several clients auto-advance the queue at once.
 
 ## [0.9.2] - 2026-07-23

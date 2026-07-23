@@ -60,7 +60,7 @@ func (a *application) roleAndAllowed(room, identity, cap string) (string, bool) 
 }
 func capFor(t string) string {
 	switch t {
-	case "player.play", "player.pause":
+	case "player.play", "player.pause", "player.rate":
 		return "playback.play_pause"
 	case "player.seek":
 		return "playback.seek"
@@ -153,6 +153,24 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			_, e = tx.Exec("UPDATE playback_states SET status=?,position_seconds=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", status, in.Position, p.IdentityID, room)
 		}
 		payload["position"] = in.Position
+	case "player.rate":
+		// The rate carries the current position so the server can re-baseline it at the
+		// moment of the change — exactly like a seek — otherwise the stored position
+		// (anchored at the previous update) would be extrapolated at the new rate and
+		// jump. Position is validated identically to the playback cases above.
+		var in struct {
+			Rate     float64 `json:"rate"`
+			Position float64 `json:"position"`
+		}
+		if json.Unmarshal(c.Payload, &in) != nil || math.IsNaN(in.Rate) || math.IsInf(in.Rate, 0) || in.Rate <= 0 || in.Rate > 4 {
+			return snapshot{}, errors.New("invalid playback rate")
+		}
+		if math.IsNaN(in.Position) || math.IsInf(in.Position, 0) || in.Position < 0 || in.Position > 604800 {
+			return snapshot{}, errors.New("invalid playback position")
+		}
+		_, e = tx.Exec("UPDATE playback_states SET playback_rate=?,position_seconds=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", in.Rate, in.Position, p.IdentityID, room)
+		payload["rate"] = in.Rate
+		payload["position"] = in.Position
 	case "queue.add", "queue.play_now":
 		var in struct {
 			VideoID string `json:"videoId"`
@@ -181,7 +199,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			e = addCurrentToHistory(tx, room)
 		}
 		if e == nil && c.Type == "queue.play_now" {
-			_, e = tx.Exec("UPDATE playback_states SET current_media_id=?,status='playing',position_seconds=0,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", mediaID, p.IdentityID, room)
+			_, e = tx.Exec("UPDATE playback_states SET current_media_id=?,status='playing',position_seconds=0,playback_rate=1,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", mediaID, p.IdentityID, room)
 			eventType = "media.activated"
 		}
 		payload["videoId"] = in.VideoID
@@ -315,7 +333,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			}
 		}
 		if e == nil {
-			_, e = tx.Exec("UPDATE playback_states SET current_media_id=?,status=?,position_seconds=0,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", nullable(mediaID), map[bool]string{true: "playing", false: "paused"}[mediaID != ""], p.IdentityID, room)
+			_, e = tx.Exec("UPDATE playback_states SET current_media_id=?,status=?,position_seconds=0,playback_rate=1,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", nullable(mediaID), map[bool]string{true: "playing", false: "paused"}[mediaID != ""], p.IdentityID, room)
 		}
 	case "member.role":
 		var in struct{ IdentityID, Role string }
