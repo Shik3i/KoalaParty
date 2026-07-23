@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { Play, Warning, Hourglass, SkipForward, SpeakerSimpleSlash } from 'phosphor-svelte';
   import { PLAYER_STATE, stateChangeAction } from '$lib/playerSync';
+  import type { SponsorSegment } from '$lib/room';
   let {
     enabled = false,
     videoId = null,
@@ -9,6 +10,7 @@
     position = 0,
     positionAt = 0,
     rate = 1,
+    segments = [],
     canControl = true,
     canSeek = true,
     hasQueue = false,
@@ -16,6 +18,7 @@
     onPause = () => {},
     onSeek = () => {},
     onRate = () => {},
+    onSponsorSkip = () => {},
     onEnded = () => {},
     onSkip = undefined,
     onDuration = () => {},
@@ -27,6 +30,7 @@
     position?: number;
     positionAt?: number;
     rate?: number;
+    segments?: SponsorSegment[];
     canControl?: boolean;
     canSeek?: boolean;
     hasQueue?: boolean;
@@ -34,6 +38,7 @@
     onPause?: (position: number) => void;
     onSeek?: (position: number) => void;
     onRate?: (rate: number, position: number) => void;
+    onSponsorSkip?: (segment: SponsorSegment) => void;
     onEnded?: () => void;
     onSkip?: (() => void) | undefined;
     onDuration?: (duration: number) => void;
@@ -267,6 +272,21 @@
       return;
     }
     const playing = state === PLAYING;
+    // SponsorBlock: while playing, jump over any segment the current time falls in.
+    // Only viewers who may seek emit the skip; everyone else follows the broadcast
+    // seek. The local jump keeps it snappy; the guard stops it being read as a scrub,
+    // and also prevents re-firing on the segment we just left.
+    if (playing && canSeek && segments.length) {
+      const seg = segments.find((s) => t >= s.start && t < s.end - 0.4);
+      if (seg) {
+        guard();
+        player.seekTo(seg.end, true);
+        prevTime = seg.end;
+        prevWall = now;
+        onSponsorSkip(seg);
+        return;
+      }
+    }
     const natural = playing ? (now - prevWall) / 1000 : 0;
     const jump = t - prevTime - natural;
     prevTime = t;

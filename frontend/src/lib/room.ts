@@ -28,6 +28,23 @@ export interface Activity {
   payload: Record<string, unknown>;
   createdAt: string;
 }
+export interface SponsorSegment {
+  start: number;
+  end: number;
+  category: string;
+}
+// SponsorBlock categories KoalaParty acts on by default (skips). The server fetches
+// a wider set; the room only skips these unless changed.
+export const SKIPPED_SPONSOR_CATEGORIES = ['sponsor', 'selfpromo', 'intro', 'outro', 'interaction'];
+export const SPONSOR_CATEGORY_LABELS: Record<string, string> = {
+  sponsor: 'Sponsor',
+  selfpromo: 'Self-promotion',
+  intro: 'Intro',
+  outro: 'Outro',
+  interaction: 'Interaction reminder',
+  preview: 'Preview',
+  music_offtopic: 'Non-music',
+};
 export interface Snapshot {
   id: string;
   label: string;
@@ -37,11 +54,13 @@ export interface Snapshot {
   queue: QueueItem[];
   history: Media[];
   queueLoop: boolean;
+  sponsorBlock: boolean;
   playback: {
     media: Media | null;
     status: string;
     position: number;
     rate: number;
+    segments: SponsorSegment[];
     revision: number;
     updatedAt: string;
   };
@@ -111,6 +130,8 @@ export function formatActivity(e: Activity) {
       return `${who} changed a permission`;
     case 'room.visibility':
       return `${who} changed the room to ${String(e.payload?.visibility ?? '').replace('_', '-')}`;
+    case 'room.sponsorblock':
+      return `${who} turned SponsorBlock ${e.payload?.enabled ? 'on' : 'off'}`;
     case 'room.transfer':
       return `${who} transferred room ownership`;
     case 'room.created':

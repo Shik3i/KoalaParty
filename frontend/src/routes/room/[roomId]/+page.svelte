@@ -7,7 +7,15 @@
   import { randomUUID } from '$lib/identity';
   import { rememberRoom } from '$lib/recentRooms';
   import YouTubePlayer from '$lib/YouTubePlayer.svelte';
-  import { formatActivity, parseYouTube, type Snapshot, type Member } from '$lib/room';
+  import {
+    formatActivity,
+    parseYouTube,
+    SKIPPED_SPONSOR_CATEGORIES,
+    SPONSOR_CATEGORY_LABELS,
+    type Snapshot,
+    type Member,
+    type SponsorSegment,
+  } from '$lib/room';
   import {
     LinkSimple,
     Gear,
@@ -150,6 +158,17 @@
   function scheduleSeek(position: number) {
     if (seekTimer) clearTimeout(seekTimer);
     seekTimer = setTimeout(() => command('player.seek', { position }), 300);
+  }
+  // Segments the room actually skips: only the acted-on categories, and only while the
+  // room has SponsorBlock enabled. Passed to the player, which performs the jump.
+  const sponsorSegments = (): SponsorSegment[] =>
+    room?.sponsorBlock ? room.playback.segments.filter((s) => SKIPPED_SPONSOR_CATEGORIES.includes(s.category)) : [];
+  // The player already jumped locally; broadcast the seek so everyone skips in sync
+  // (stale races are harmless — the winner's snapshot syncs the rest) and surface a
+  // brief, attributed notice at the point of use, as the SponsorBlock licence requires.
+  function skipSponsor(segment: SponsorSegment) {
+    command('player.seek', { position: segment.end }, { silentStale: true });
+    showNotice(`${SPONSOR_CATEGORY_LABELS[segment.category] ?? 'Segment'} skipped · SponsorBlock`, 2200, 'info');
   }
   function announceCreation() {
     try {
@@ -478,6 +497,22 @@
               >{/if}
           </div>
           {#if manages()}<div>
+              <h2>SponsorBlock</h2>
+              <p class="muted">
+                Automatically skip sponsor, intro and outro segments for everyone, in sync. Segment data from
+                <a href="https://sponsor.ajay.app" target="_blank" rel="noopener noreferrer">SponsorBlock</a> (CC BY-NC-SA
+                4.0).
+              </p>
+              <label class="toggle">
+                <input
+                  type="checkbox"
+                  checked={room.sponsorBlock}
+                  disabled={commandPending}
+                  onchange={(e) => command('room.sponsorblock', { enabled: e.currentTarget.checked })}
+                /><span>Skip sponsor segments automatically</span>
+              </label>
+            </div>{/if}
+          {#if manages()}<div>
               <h2>Private invitations</h2>
               <form
                 class="invite-form"
@@ -545,6 +580,7 @@
             position={playbackAnchor.position}
             positionAt={playbackAnchor.at}
             rate={playbackAnchor.rate}
+            segments={sponsorSegments()}
             canControl={can('playback.play_pause')}
             canSeek={can('playback.seek')}
             hasQueue={room.queue.length > 0}
@@ -552,6 +588,7 @@
             onPause={(pos) => command('player.pause', { position: pos })}
             onSeek={scheduleSeek}
             onRate={(newRate, pos) => command('player.rate', { rate: newRate, position: pos })}
+            onSponsorSkip={skipSponsor}
             onEnded={() => can('queue.skip') && command('queue.skip', {}, { silentStale: true })}
             onSkip={can('queue.skip') ? () => command('queue.skip') : undefined}
             onDuration={(d) => (mediaDuration = d)}
@@ -1108,6 +1145,18 @@
   .settings h2 {
     margin-top: 0;
     font-size: 1rem;
+  }
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    cursor: pointer;
+  }
+  .toggle input {
+    width: auto;
+    margin: 0;
+    flex: 0 0 auto;
+    cursor: pointer;
   }
   .invite-form {
     display: grid;
