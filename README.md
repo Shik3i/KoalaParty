@@ -11,6 +11,7 @@ Privacy-first shared YouTube rooms. Synchronized playback and a collaborative qu
 
 - Server-authoritative play, pause, seek, queue, reorder, skip, and reconnect behavior.
 - Collaborative queue voting, shuffle, loop, duplicate protection, history, and ephemeral emoji reactions.
+- Room-synchronized playback speed and optional SponsorBlock skipping of sponsor/intro/outro segments for everyone at once.
 - Persistent anonymous browser identities; optional accounts and friend-only rooms.
 - Cross-device room library, private invitations, account/session self-service, and ownership transfer.
 - Owner/admin/member roles, per-member capabilities, kick, ban, visibility, and activity history.
@@ -73,3 +74,7 @@ Pushing a stable tag matching `vX.Y.Z` runs the full verification suite (includi
 ## License
 
 KoalaParty is free and open-source software licensed under the [MIT License](LICENSE).
+
+### Third-party data
+
+Optional segment-skipping uses data from [SponsorBlock](https://sponsor.ajay.app), licensed [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/). KoalaParty is a non-commercial project (no ads, tracking, or fees) and attributes SponsorBlock in-app wherever segments are used. The feature can be disabled entirely with `KOALAPARTY_SPONSORBLOCK=false` or per room.

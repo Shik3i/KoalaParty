@@ -11,7 +11,7 @@
     <span aria-hidden="true">🛡️</span>
     <p>Security & privacy</p>
     <h1>Privacy Policy</h1>
-    <small>Last updated: July 17, 2026</small>
+    <small>Last updated: July 23, 2026</small>
   </header>
 
   <section>
@@ -98,7 +98,7 @@
   </section>
 
   <section>
-    <h2>7. YouTube</h2>
+    <h2>7. YouTube and SponsorBlock</h2>
     <p>
       Interface assets are hosted locally. When you open a room, KoalaParty loads YouTube's privacy-enhanced embedded
       player and thumbnails from <code>i.ytimg.com</code>, <code>youtube.com</code> and
@@ -115,6 +115,17 @@
       video's title. This is a server-to-YouTube request: it reveals the video ID and the server's IP address, never
       your browser or IP. Operators can disable it entirely with <code>KOALAPARTY_YOUTUBE_METADATA=false</code>, in
       which case titles fall back to the video ID.
+    </p>
+    <p>
+      When SponsorBlock is enabled for a room, the server also fetches skip segments for the current video from
+      <a href="https://sponsor.ajay.app" target="_blank" rel="noopener noreferrer">SponsorBlock</a>. It uses
+      SponsorBlock's privacy-preserving hash-prefix endpoint: only the first four characters of the video ID's SHA-256
+      hash are sent — matching many videos at once — never the full video ID or your browser or IP. Segment data is
+      licensed
+      <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener noreferrer"
+        >CC BY-NC-SA 4.0</a
+      >. Owners and admins can turn it off per room, and operators can disable it entirely with
+      <code>KOALAPARTY_SPONSORBLOCK=false</code>.
     </p>
   </section>
 

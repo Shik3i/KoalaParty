@@ -6,6 +6,7 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ### Added
 
+- SponsorBlock support: rooms can automatically skip sponsor, self-promotion, intro, outro, and interaction-reminder segments, synchronized for everyone at once. Owners/admins toggle it per room. Segments are fetched server-side via SponsorBlock's privacy-preserving hash-prefix endpoint (the full video ID and viewer IP are never sent), cached, and gated by `KOALAPARTY_SPONSORBLOCK`. Segment data is CC BY-NC-SA 4.0 and attributed in-app.
 - Synced playback speed: changing the video speed (0.25×–2×) applies to everyone in the room and stays in sync, with the elapsed-time position extrapolation scaled by the rate on both server and client. A new video always resets to 1×.
 - Theater mode is now remembered per device across reloads.
 
