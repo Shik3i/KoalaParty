@@ -12,8 +12,12 @@ func TestMigrationFromEmptyDatabase(t *testing.T) {
 	}
 	defer db.Close()
 	var version int
-	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 4 {
+	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 5 {
 		t.Fatalf("migration version=%d err=%v", version, e)
+	}
+	var rateColumn int
+	if e = db.QueryRow("SELECT count(*) FROM pragma_table_info('playback_states') WHERE name='playback_rate'").Scan(&rateColumn); e != nil || rateColumn != 1 {
+		t.Fatalf("playback_rate column unavailable: count=%d err=%v", rateColumn, e)
 	}
 	var fk int
 	_ = db.QueryRow("PRAGMA foreign_keys").Scan(&fk)

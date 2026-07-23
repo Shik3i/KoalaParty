@@ -24,6 +24,7 @@ type config struct {
 	publicRooms       bool
 	production        bool
 	youtubeMetadata   bool
+	sponsorBlock      bool
 }
 
 func loadConfig() (config, error) {
@@ -43,6 +44,10 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
+	sponsorBlock, err := parseBool("KOALAPARTY_SPONSORBLOCK", true)
+	if err != nil {
+		return config{}, err
+	}
 	c := config{
 		addr:            env("KOALAPARTY_ADDR", ":8080"),
 		dbPath:          env("KOALAPARTY_DB", "koalaparty.db"),
@@ -52,6 +57,7 @@ func loadConfig() (config, error) {
 		publicRooms:     publicRooms,
 		production:      production,
 		youtubeMetadata: youtubeMetadata,
+		sponsorBlock:    sponsorBlock,
 	}
 	if c.sessionTTL, err = parseDuration("KOALAPARTY_SESSION_TTL", "168h"); err != nil {
 		return config{}, err
