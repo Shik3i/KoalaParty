@@ -37,7 +37,7 @@ Do not open a public issue for exploitable vulnerabilities. Use a [private GitHu
 
 ## Known security limitations
 
-- Password recovery, MFA, passkeys, session management, and account deletion are not implemented.
+- Password recovery, MFA, and passkeys are not implemented.
 - Rate limits and active WebSocket presence are process-local and reset on restart.
 - The SQLite/in-memory-hub architecture supports one application instance, not active-active replicas.
 - YouTube embeds are an explicitly consented external dependency and remain subject to YouTube availability and policy.
