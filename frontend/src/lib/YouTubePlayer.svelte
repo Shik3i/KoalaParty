@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Play, Warning, Hourglass, SkipForward, SpeakerSimpleSlash } from 'phosphor-svelte';
+  import { PLAYER_STATE, stateChangeAction } from '$lib/playerSync';
   let {
     enabled = false,
     videoId = null,
@@ -47,10 +48,7 @@
   // confirmed playback change: at `positionAt` (client clock) the media was at
   // `position`, advancing since then only while `status === 'playing'`. We never
   // re-baseline on unrelated snapshots, so the expected position stays correct.
-  const ENDED = 0,
-    PLAYING = 1,
-    PAUSED = 2,
-    BUFFERING = 3;
+  const { PLAYING, PAUSED, BUFFERING } = PLAYER_STATE;
   const POLL_MS = 500;
   const SEEK_JUMP = 1.5; // discontinuity in the player's own timeline => local scrub
   const DRIFT_MAX = 1.8; // divergence from the expected server position => realign
@@ -82,6 +80,11 @@
   // Ask the player to start, then verify it actually did. If the browser blocked
   // autoplay-with-sound, retry muted so playback still begins in sync everywhere.
   function requestPlay() {
+    // Starting playback is our own programmatic action. Guard the resulting state
+    // changes so a blocked autoplay (reported as PAUSED) is not relayed to the room
+    // as a real pause — otherwise pressing play on an already-loaded video would stop
+    // it for everyone whose tab has no user gesture yet.
+    guard();
     player.playVideo?.();
     scheduleAutoplayCheck();
   }
@@ -100,7 +103,10 @@
         return;
       }
       // Blocked (or stuck buffering): muted autoplay is always allowed, so start it
-      // muted and surface a one-tap unmute, then confirm the muted play took.
+      // muted and surface a one-tap unmute, then confirm the muted play took. Re-arm
+      // the guard so the resulting state changes are recognised as our own and never
+      // relayed to the room, even when a slow network resolves them late.
+      guard();
       player.mute?.();
       mutedForAutoplay = true;
       player.playVideo?.();
@@ -174,23 +180,32 @@
   // gesture to the server. If the viewer lacks the capability, snap the player
   // back to the authoritative state instead of emitting.
   function handleStateChange(state: number) {
-    if (state === ENDED) {
-      onEnded();
-      return;
-    }
-    if (!ready || !lastVideo) return;
-    if (state === PLAYING && status !== 'playing') {
-      if (canControl) onPlay(currentTime());
-      else {
+    const action = stateChangeAction({
+      state,
+      serverStatus: status,
+      guarded: Date.now() < guardUntil,
+      ready,
+      hasVideo: !!lastVideo,
+      canControl,
+    });
+    switch (action) {
+      case 'ended':
+        onEnded();
+        return;
+      case 'emit-play':
+        onPlay(currentTime());
+        return;
+      case 'emit-pause':
+        onPause(currentTime());
+        return;
+      case 'snap-pause':
         guard();
         player.pauseVideo?.();
-      }
-    } else if (state === PAUSED && status === 'playing') {
-      if (canControl) onPause(currentTime());
-      else {
+        return;
+      case 'snap-play':
         guard();
         player.playVideo?.();
-      }
+        return;
     }
   }
   function startMonitor() {

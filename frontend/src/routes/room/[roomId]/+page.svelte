@@ -263,7 +263,7 @@
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     socket.send(JSON.stringify({ type: 'reaction.send', requestId: randomUUID(), payload: { emoji } }));
   }
-  async function command(type: string, payload: Record<string, unknown> = {}) {
+  async function command(type: string, payload: Record<string, unknown> = {}, opts: { silentStale?: boolean } = {}) {
     if (!room || commandPending) return;
     commandPending = true;
     showNotice('');
@@ -280,6 +280,10 @@
         }),
       );
     } catch (e) {
+      // A stale-revision race on an automatic action (e.g. every client that can
+      // skip firing at end-of-video) is expected and harmless: the winner's snapshot
+      // reconciles everyone. Suppress that toast so it never surfaces as an error.
+      if (opts.silentStale && e instanceof ApiError && e.status === 409) return;
       showNotice(e instanceof Error ? e.message : 'Action failed.', 0, 'error');
     } finally {
       commandPending = false;
@@ -530,7 +534,7 @@
             onPlay={(pos) => command('player.play', { position: pos })}
             onPause={(pos) => command('player.pause', { position: pos })}
             onSeek={scheduleSeek}
-            onEnded={() => can('queue.skip') && command('queue.skip')}
+            onEnded={() => can('queue.skip') && command('queue.skip', {}, { silentStale: true })}
             onSkip={can('queue.skip') ? () => command('queue.skip') : undefined}
             onDuration={(d) => (mediaDuration = d)}
             onDiagnostics={(value) => (diagnostics = value)}

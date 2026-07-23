@@ -4,6 +4,11 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed videos not starting for everyone in a room until a manual reload: a viewer whose browser blocked autoplay-with-sound was reported as paused and, if they held playback control, relayed a phantom pause to the whole room. Player state changes caused by our own programmatic control (loading, muted-autoplay fallback, correcting seeks, requested play) are now guarded and never forwarded.
+- Suppressed the spurious "Room state changed" error toast shown to other controllers when a video ends and several clients auto-advance the queue at once.
+
 ## [0.9.2] - 2026-07-23
 
 ### Fixed
