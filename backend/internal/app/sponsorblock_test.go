@@ -93,6 +93,20 @@ func TestSegmentCacheMemoizesAndExpires(t *testing.T) {
 	}
 }
 
+func TestSegmentCacheHasDistinguishesEmptyFromMissing(t *testing.T) {
+	cache := newSegmentCache(func(_ context.Context, _ string) []sponsorSegment { return nil })
+	if cache.has("vid") {
+		t.Fatal("expected has=false before any lookup")
+	}
+	cache.get(context.Background(), "vid") // caches an empty result
+	if !cache.has("vid") {
+		t.Fatal("expected has=true for a cached empty result")
+	}
+	if cache.peek("vid") != nil {
+		t.Fatal("expected peek=nil for a cached empty result")
+	}
+}
+
 func TestSegmentCacheEvictsOldest(t *testing.T) {
 	cache := newSegmentCache(func(_ context.Context, _ string) []sponsorSegment { return nil })
 	cache.max = 2

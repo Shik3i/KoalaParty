@@ -252,6 +252,13 @@ func TestSponsorBlockRoomToggle(t *testing.T) {
 	if !s.SponsorBlock {
 		t.Fatal("expected SponsorBlock enabled by default")
 	}
+	// Segments must serialize as an array, never null, or the client's filter crashes.
+	if s.Playback.Segments == nil {
+		t.Fatal("expected playback.segments to be a non-nil array")
+	}
+	if body, _ := json.Marshal(s.Playback); !strings.Contains(string(body), `"segments":[`) {
+		t.Fatalf("segments should marshal as an array: %s", body)
+	}
 
 	// A plain member must not be able to change a room-level setting.
 	_, memberP := exchange(t, a, "123e4567-e89b-42d3-a456-426614174032", strings.Repeat("t", 43))

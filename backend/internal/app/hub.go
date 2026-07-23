@@ -162,6 +162,12 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 	a.hub.add(room, c)
 	s, _ = a.snapshot(r.Context(), room, p.IdentityID)
 	a.hub.broadcast(room, s)
+	// Ensure the current video's SponsorBlock segments are fetched even when it was
+	// cued at room creation (never activated via play_now/skip). enrichSegments is a
+	// no-op once cached, so this is cheap on repeat joins.
+	if a.segments != nil && s.Playback.Media != nil {
+		go a.enrichSegments(room, s.Playback.Media.ProviderID)
+	}
 	defer func() {
 		lastForIdentity := a.hub.remove(room, c)
 		conn.Close()

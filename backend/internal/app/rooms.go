@@ -355,13 +355,18 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 	if e = a.db.QueryRowContext(ctx, `SELECT p.status,p.position_seconds,p.playback_rate,p.revision,p.updated_at,m.id,m.provider_media_id,m.title,m.thumbnail_url FROM playback_states p LEFT JOIN media_items m ON m.id=p.current_media_id WHERE p.room_id=?`, id).Scan(&s.Playback.Status, &s.Playback.Position, &s.Playback.Rate, &s.Playback.Revision, &s.Playback.UpdatedAt, &mid, &provider, &title, &thumb); e != nil {
 		return s, e
 	}
+	// Always emit an array, never null: a nil slice would marshal to JSON null and
+	// crash the client's segment filter when SponsorBlock is on but nothing is cached.
+	s.Playback.Segments = []sponsorSegment{}
 	if mid.Valid {
 		s.Playback.Media = &media{ID: mid.String, ProviderID: provider.String, Title: title.String, Thumbnail: thumb.String}
 		// Surface any already-cached SponsorBlock segments for the current video when
 		// the room has it enabled. This never fetches (that happens in the background
 		// on media activation) so building a snapshot stays fast and offline-safe.
 		if s.SponsorBlock && a.segments != nil {
-			s.Playback.Segments = a.segments.peek(provider.String)
+			if cached := a.segments.peek(provider.String); cached != nil {
+				s.Playback.Segments = cached
+			}
 		}
 	}
 	if s.Playback.Status == "playing" {

@@ -162,12 +162,14 @@
   // Segments the room actually skips: only the acted-on categories, and only while the
   // room has SponsorBlock enabled. Passed to the player, which performs the jump.
   const sponsorSegments = (): SponsorSegment[] =>
-    room?.sponsorBlock ? room.playback.segments.filter((s) => SKIPPED_SPONSOR_CATEGORIES.includes(s.category)) : [];
+    room?.sponsorBlock
+      ? (room.playback.segments ?? []).filter((s) => SKIPPED_SPONSOR_CATEGORIES.includes(s.category))
+      : [];
   // The player already jumped locally; broadcast the seek so everyone skips in sync
   // (stale races are harmless — the winner's snapshot syncs the rest) and surface a
   // brief, attributed notice at the point of use, as the SponsorBlock licence requires.
   function skipSponsor(segment: SponsorSegment) {
-    command('player.seek', { position: segment.end }, { silentStale: true });
+    command('player.seek', { position: segment.end }, { silentStale: true, bypassPending: true });
     showNotice(`${SPONSOR_CATEGORY_LABELS[segment.category] ?? 'Segment'} skipped · SponsorBlock`, 2200, 'info');
   }
   function announceCreation() {
@@ -298,10 +300,21 @@
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     socket.send(JSON.stringify({ type: 'reaction.send', requestId: randomUUID(), payload: { emoji } }));
   }
-  async function command(type: string, payload: Record<string, unknown> = {}, opts: { silentStale?: boolean } = {}) {
-    if (!room || commandPending) return;
-    commandPending = true;
-    showNotice('');
+  async function command(
+    type: string,
+    payload: Record<string, unknown> = {},
+    opts: { silentStale?: boolean; bypassPending?: boolean } = {},
+  ) {
+    if (!room) return;
+    // bypassPending lets an automatic action (a SponsorBlock skip) fire even while a
+    // user command is in flight, so the synchronized seek is never silently dropped.
+    // Such commands leave the shared pending lock untouched to avoid clobbering it.
+    const managePending = !opts.bypassPending;
+    if (managePending) {
+      if (commandPending) return;
+      commandPending = true;
+      showNotice('');
+    }
     try {
       updateRoom(
         await api(`/api/rooms/${roomId}/commands`, {
@@ -316,12 +329,13 @@
       );
     } catch (e) {
       // A stale-revision race on an automatic action (e.g. every client that can
-      // skip firing at end-of-video) is expected and harmless: the winner's snapshot
-      // reconciles everyone. Suppress that toast so it never surfaces as an error.
+      // skip firing at end-of-video, or several skipping the same sponsor) is
+      // expected and harmless: the winner's snapshot reconciles everyone. Suppress
+      // that toast so it never surfaces as an error.
       if (opts.silentStale && e instanceof ApiError && e.status === 409) return;
       showNotice(e instanceof Error ? e.message : 'Action failed.', 0, 'error');
     } finally {
-      commandPending = false;
+      if (managePending) commandPending = false;
     }
   }
   async function add(playNow = false) {

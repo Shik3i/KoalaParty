@@ -130,6 +130,16 @@ func (c *segmentCache) peek(videoID string) []sponsorSegment {
 	return nil
 }
 
+// has reports whether a fresh entry is cached (including a cached empty result), so
+// callers can avoid a redundant fetch and rebroadcast. Unlike peek it distinguishes
+// "cached, no segments" from "not cached".
+func (c *segmentCache) has(videoID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[videoID]
+	return ok && c.now().Before(entry.expires)
+}
+
 func (c *segmentCache) get(ctx context.Context, videoID string) []sponsorSegment {
 	c.mu.Lock()
 	if entry, ok := c.entries[videoID]; ok && c.now().Before(entry.expires) {
@@ -165,8 +175,8 @@ func (a *application) enrichSegments(room, videoID string) {
 			fmt.Fprintf(os.Stderr, `{"level":"error","message":"enrichSegments panic","room":%q,"error":"%v"}`+"\n", room, r)
 		}
 	}()
-	if a.segments == nil {
-		return
+	if a.segments == nil || a.segments.has(videoID) {
+		return // disabled, or already cached — no fetch and no redundant rebroadcast
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()

@@ -445,6 +445,15 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			return snapshot{}, errors.New("invalid sponsorblock setting")
 		}
 		_, e = tx.Exec("UPDATE rooms SET sponsorblock_enabled=? WHERE id=?", in.Enabled, room)
+		if e == nil && in.Enabled {
+			// Turning it on mid-video should skip right away, so fetch the current
+			// video's segments in the background after commit.
+			var mediaID sql.NullString
+			_ = tx.QueryRow("SELECT current_media_id FROM playback_states WHERE room_id=?", room).Scan(&mediaID)
+			if mediaID.Valid {
+				activatedVideoID = strings.TrimPrefix(mediaID.String, "YT")
+			}
+		}
 		payload["enabled"] = in.Enabled
 	case "room.transfer":
 		if role != "owner" {
