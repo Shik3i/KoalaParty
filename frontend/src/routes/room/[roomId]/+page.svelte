@@ -632,7 +632,7 @@
                 </div>
               </div>{/if}
           </div>
-          {#if room.playback.media}<select
+          {#if room.playback.media && !miniPlayer}<select
               class="speed-control"
               aria-label="Playback speed"
               title="Playback speed — synced for everyone"
