@@ -4,6 +4,8 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-23
+
 ### Added
 
 - SponsorBlock support: rooms can automatically skip sponsor, self-promotion, intro, outro, and interaction-reminder segments, synchronized for everyone at once. Owners/admins toggle it per room. Segments are fetched server-side via SponsorBlock's privacy-preserving hash-prefix endpoint (the full video ID and viewer IP are never sent), cached, and gated by `KOALAPARTY_SPONSORBLOCK`. Segment data is CC BY-NC-SA 4.0 and attributed in-app.
