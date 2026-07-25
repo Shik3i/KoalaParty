@@ -2,7 +2,9 @@
 
 Connect to `/api/rooms/{roomId}/ws` with the session cookie. The server sends and broadcasts `snapshot` messages. Commands use `{ "type": "player.play", "requestId": "...", "expectedRevision": 3, "payload": {} }`; failures use `error` messages. Every state-changing command contains the latest room-wide `expectedRevision`; stale commands are rejected. Playback maintains a separate playback revision. Heartbeats and drift corrections are not activity events.
 
-Snapshots are personalized per WebSocket client through the `me` identity field. REST management endpoints provide account room listing, room deletion/leaving, private invitations, profile/password changes, active-session revocation, and account deletion. Ownership transfer is the revision-protected `room.transfer` command and requires an account-linked target member.
+The server sends a ping every 25 seconds and requires pong traffic within 70 seconds. It revalidates the backing session before every command and closes the socket when the session expires, is logged out, is revoked, or is invalidated by a password change. Non-reaction commands are limited to 180 per minute per socket.
+
+Snapshots are personalized per WebSocket client through the `me` identity field. REST management endpoints provide account room listing, room deletion/leaving, private invitations, profile/password changes, active-session revocation, and account deletion. Ownership transfer is the revision-protected `room.transfer` command and requires an account-linked target member. A room accepts at most 100 members and 100 queued videos.
 
 Queue commands also include `queue.vote`, `queue.shuffle`, and `queue.loop`. Votes determine which queued item is selected next, with manual position as the tie-breaker. Snapshots expose vote totals, the current viewer's vote, loop state, and the latest 20 played media items. Duplicate current or queued media is rejected.
 

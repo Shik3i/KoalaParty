@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Play, Warning, Hourglass, SkipForward, SpeakerSimpleSlash } from 'phosphor-svelte';
-  import { PLAYER_STATE, stateChangeAction } from '$lib/playerSync';
+  import { PLAYER_STATE, stateChangeAction, timelineJump } from '$lib/playerSync';
   import type { SponsorSegment } from '$lib/room';
   let {
     enabled = false,
@@ -298,8 +298,7 @@
         return;
       }
     }
-    const natural = playing ? (now - prevWall) / 1000 : 0;
-    const jump = t - prevTime - natural;
+    const jump = timelineJump(t, prevTime, (now - prevWall) / 1000, playing, rate || 1);
     prevTime = t;
     prevWall = now;
     if (Math.abs(jump) > SEEK_JUMP) {

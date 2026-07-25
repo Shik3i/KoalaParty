@@ -19,6 +19,11 @@ var youtubeID = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
 var roomIDPattern = regexp.MustCompile(`^[A-Z2-7]{16}$`)
 var memberCapabilities = []string{"playback.play_pause", "playback.seek", "media.play_now", "queue.add", "queue.remove", "queue.reorder", "queue.skip", "queue.vote"}
 
+const (
+	maxRoomMembers = 100
+	maxQueueItems  = 100
+)
+
 type media struct {
 	ID         string `json:"id"`
 	ProviderID string `json:"providerId"`
@@ -180,6 +185,8 @@ func roomProblem(w http.ResponseWriter, e error) {
 		problem(w, 403, "account_required", "This room requires an account.")
 	case "not_allowed":
 		problem(w, 403, "not_allowed", "You are not allowed to join this room.")
+	case "room_full":
+		problem(w, 409, "room_full", "This room has reached its participant limit.")
 	default:
 		problem(w, 500, "database_error", "Room request failed.")
 	}
@@ -235,6 +242,18 @@ func (a *application) joinAndSnapshot(ctx context.Context, id string, p principa
 			return snapshot{}, errors.New("not_allowed")
 		}
 	}
+	var existingMember, memberCount int
+	if e = tx.QueryRowContext(ctx, "SELECT count(*) FROM room_members WHERE room_id=? AND identity_id=?", id, p.IdentityID).Scan(&existingMember); e != nil {
+		return snapshot{}, e
+	}
+	if existingMember == 0 {
+		if e = tx.QueryRowContext(ctx, "SELECT count(*) FROM room_members WHERE room_id=?", id).Scan(&memberCount); e != nil {
+			return snapshot{}, e
+		}
+		if memberCount >= maxRoomMembers {
+			return snapshot{}, errors.New("room_full")
+		}
+	}
 	res, e := tx.ExecContext(ctx, "INSERT INTO room_members(room_id,identity_id,role) VALUES(?,?,'member') ON CONFLICT(room_id,identity_id) DO NOTHING", id, p.IdentityID)
 	if e != nil {
 		return snapshot{}, e
@@ -287,34 +306,32 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 		return s, e
 	}
 	rows.Close()
+	memberIndex := make(map[string]int, len(s.Members))
+	activeIdentities := a.hub.activeIdentities(id)
 	for i := range s.Members {
-		s.Members[i].Active = a.hub.isActive(id, s.Members[i].IdentityID)
-		if s.Members[i].Role == "member" {
-			pr, queryErr := a.db.QueryContext(ctx, "SELECT permission,allowed FROM room_permissions WHERE room_id=? AND identity_id=?", id, s.Members[i].IdentityID)
-			if queryErr != nil {
-				return s, queryErr
-			}
-			for pr.Next() {
-				var c string
-				var allowed bool
-				if e = pr.Scan(&c, &allowed); e != nil {
-					pr.Close()
-					return s, e
-				}
-				s.Members[i].Permissions[c] = allowed
-			}
-			if e = pr.Err(); e != nil {
-				pr.Close()
-				return s, e
-			}
-			pr.Close()
-			for _, c := range memberCapabilities {
-				if _, ok := s.Members[i].Permissions[c]; !ok {
-					s.Members[i].Permissions[c] = true
-				}
-			}
+		memberIndex[s.Members[i].IdentityID] = i
+		s.Members[i].Active = activeIdentities[s.Members[i].IdentityID]
+	}
+	permissionRows, queryErr := a.db.QueryContext(ctx, "SELECT identity_id,permission,allowed FROM room_permissions WHERE room_id=?", id)
+	if queryErr != nil {
+		return s, queryErr
+	}
+	for permissionRows.Next() {
+		var identityID, capability string
+		var allowed bool
+		if e = permissionRows.Scan(&identityID, &capability, &allowed); e != nil {
+			permissionRows.Close()
+			return s, e
+		}
+		if index, ok := memberIndex[identityID]; ok && s.Members[index].Role == "member" {
+			s.Members[index].Permissions[capability] = allowed
 		}
 	}
+	if e = permissionRows.Err(); e != nil {
+		permissionRows.Close()
+		return s, e
+	}
+	permissionRows.Close()
 	q, e := a.db.QueryContext(ctx, `SELECT q.id,q.position,m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,''),count(v.identity_id),count(CASE WHEN v.identity_id=? THEN 1 END) FROM room_queue_items q JOIN media_items m ON m.id=q.media_id LEFT JOIN queue_votes v ON v.queue_item_id=q.id WHERE q.room_id=? GROUP BY q.id ORDER BY count(v.identity_id) DESC,q.position`, me, id)
 	if e != nil {
 		return s, e

@@ -12,7 +12,7 @@ func TestMigrationFromEmptyDatabase(t *testing.T) {
 	}
 	defer db.Close()
 	var version int
-	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 6 {
+	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 7 {
 		t.Fatalf("migration version=%d err=%v", version, e)
 	}
 	var rateColumn int
@@ -39,5 +39,45 @@ func TestMigrationFromEmptyDatabase(t *testing.T) {
 	}
 	if e = db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('queue_votes','room_history')").Scan(&queueTables); e != nil || queueTables != 2 {
 		t.Fatalf("queue tables missing: count=%d err=%v", queueTables, e)
+	}
+}
+
+func TestReportLimitMigrationResolvesLegacyDuplicates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`
+		DROP INDEX room_reports_pending_reporter_idx;
+		DELETE FROM schema_migrations WHERE version=7;
+		INSERT INTO identities(id,secret_hash,display_name,avatar_seed) VALUES('owner','hash','Owner','owner');
+		INSERT INTO rooms(id,owner_identity_id) VALUES('AAAAAAAAAAAAAAAA','owner');
+		INSERT INTO room_reports(id,room_id,reporter_identity_id,reason) VALUES
+			('old-report','AAAAAAAAAAAAAAAA','owner','spam'),
+			('new-report','AAAAAAAAAAAAAAAA','owner','spam');`); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("upgrade with legacy duplicate reports failed: %v", err)
+	}
+	defer db.Close()
+	var pending, resolved int
+	if err = db.QueryRow("SELECT count(*) FROM room_reports WHERE resolved_at IS NULL").Scan(&pending); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.QueryRow("SELECT count(*) FROM room_reports WHERE resolved_at IS NOT NULL").Scan(&resolved); err != nil {
+		t.Fatal(err)
+	}
+	if pending != 1 || resolved != 1 {
+		t.Fatalf("legacy duplicate cleanup pending=%d resolved=%d", pending, resolved)
+	}
+	if _, err = db.Exec("INSERT INTO room_reports(id,room_id,reporter_identity_id,reason) VALUES('third-report','AAAAAAAAAAAAAAAA','owner','spam')"); err == nil {
+		t.Fatal("pending-report uniqueness index was not created")
 	}
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PLAYER_STATE, stateChangeAction, type StateChangeInput } from './playerSync';
+import { PLAYER_STATE, stateChangeAction, timelineJump, type StateChangeInput } from './playerSync';
 
 const { ENDED, PLAYING, PAUSED, BUFFERING } = PLAYER_STATE;
 
@@ -62,5 +62,15 @@ describe('stateChangeAction', () => {
   it('ignores transient buffering', () => {
     expect(stateChangeAction({ ...base, state: BUFFERING, serverStatus: 'playing' })).toBe('ignore');
     expect(stateChangeAction({ ...base, state: BUFFERING, serverStatus: 'paused' })).toBe('ignore');
+  });
+});
+
+describe('timelineJump', () => {
+  it('does not mistake natural 4x playback for a seek', () => {
+    expect(timelineJump(12, 10, 0.5, true, 4)).toBeCloseTo(0);
+  });
+
+  it('still detects a real seek at accelerated playback', () => {
+    expect(timelineJump(18, 10, 0.5, true, 4)).toBeCloseTo(6);
   });
 });

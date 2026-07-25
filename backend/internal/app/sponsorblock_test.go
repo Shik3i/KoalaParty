@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -118,5 +119,40 @@ func TestSegmentCacheEvictsOldest(t *testing.T) {
 	}
 	if len(cache.entries) != 2 {
 		t.Errorf("expected cache to hold 2 entries, got %d", len(cache.entries))
+	}
+}
+
+func TestSegmentCacheCoalescesConcurrentFetches(t *testing.T) {
+	var calls int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	cache := newSegmentCache(func(_ context.Context, _ string) []sponsorSegment {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			close(started)
+		}
+		<-release
+		return []sponsorSegment{{Start: 1, End: 2, Category: "sponsor"}}
+	})
+
+	var wg sync.WaitGroup
+	results := make([][]sponsorSegment, 12)
+	for i := range results {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			results[index] = cache.get(context.Background(), "same-video")
+		}(i)
+	}
+	<-started
+	close(release)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("concurrent cache miss performed %d fetches, want 1", got)
+	}
+	for i, result := range results {
+		if len(result) != 1 {
+			t.Fatalf("result %d has %d segments, want 1", i, len(result))
+		}
 	}
 }

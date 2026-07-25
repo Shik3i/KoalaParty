@@ -14,6 +14,14 @@ describe('activity formatting', () => {
     expect(
       formatActivity({ id: '1', actorName: 'Moss', type: 'player.seek', payload: { position: 763 }, createdAt: '' }),
     ).toBe('Moss jumped to 12:43'));
+  it.each([
+    ['member.permission', { permission: 'queue.add', allowed: false }, 'Moss changed a permission'],
+    ['queue.shuffle', {}, 'Moss shuffled the queue'],
+    ['queue.loop', { enabled: true }, 'Moss turned queue looping on'],
+    ['member.unbanned', {}, 'Moss removed a room ban'],
+  ])('renders backend event %s', (type, payload, expected) =>
+    expect(formatActivity({ id: type, actorName: 'Moss', type, payload, createdAt: '' })).toBe(expected),
+  );
 });
 describe('playback position', () => {
   const playback = {

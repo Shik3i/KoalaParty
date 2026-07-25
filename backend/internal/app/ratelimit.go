@@ -3,6 +3,7 @@ package app
 import (
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -89,7 +90,8 @@ func (l *rateLimiter) wrap(next http.HandlerFunc) http.HandlerFunc {
 		}
 		l.mu.Unlock()
 		if !allowed {
-			w.Header().Set("Retry-After", "60")
+			retryAfter := max(int(entry.reset.Sub(now).Seconds()+0.999), 1)
+			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 			problem(w, 429, "rate_limited", "Too many requests. Try again shortly.")
 			return
 		}

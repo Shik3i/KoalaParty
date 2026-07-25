@@ -72,6 +72,9 @@
   let settingsLoading = false;
   let invites: { username: string; createdAt: string }[] = [];
   let inviteUsername = '';
+  let reportReason = 'spam';
+  let reportPending = false;
+  let reportSubmitted = false;
   let seekTimer: ReturnType<typeof setTimeout> | null = null;
   let confirmDialog: { title: string; confirmLabel: string; danger: boolean; resolve: (ok: boolean) => void } | null =
     null;
@@ -273,7 +276,7 @@
       showNotice('Connection lost. Reconnecting…', 0, 'error');
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
-        connect();
+        void joinWithRetry();
       }, 1500);
     };
     ws.onmessage = (event) => {
@@ -304,14 +307,14 @@
     type: string,
     payload: Record<string, unknown> = {},
     opts: { silentStale?: boolean; bypassPending?: boolean } = {},
-  ) {
-    if (!room) return;
+  ): Promise<boolean> {
+    if (!room) return false;
     // bypassPending lets an automatic action (a SponsorBlock skip) fire even while a
     // user command is in flight, so the synchronized seek is never silently dropped.
     // Such commands leave the shared pending lock untouched to avoid clobbering it.
     const managePending = !opts.bypassPending;
     if (managePending) {
-      if (commandPending) return;
+      if (commandPending) return false;
       commandPending = true;
       showNotice('');
     }
@@ -327,13 +330,15 @@
           }),
         }),
       );
+      return true;
     } catch (e) {
       // A stale-revision race on an automatic action (e.g. every client that can
       // skip firing at end-of-video, or several skipping the same sponsor) is
       // expected and harmless: the winner's snapshot reconciles everyone. Suppress
       // that toast so it never surfaces as an error.
-      if (opts.silentStale && e instanceof ApiError && e.status === 409) return;
+      if (opts.silentStale && e instanceof ApiError && e.status === 409) return false;
       showNotice(e instanceof Error ? e.message : 'Action failed.', 0, 'error');
+      return false;
     } finally {
       if (managePending) commandPending = false;
     }
@@ -344,8 +349,9 @@
       showNotice('Enter a valid YouTube video URL or video ID.', 3000, 'error');
       return;
     }
-    await command(playNow ? 'queue.play_now' : 'queue.add', { videoId: id, title: `YouTube video ${id}` });
-    videoURL = '';
+    if (await command(playNow ? 'queue.play_now' : 'queue.add', { videoId: id, title: `YouTube video ${id}` })) {
+      videoURL = '';
+    }
   }
   async function pasteFromClipboard() {
     try {
@@ -433,6 +439,22 @@
       showNotice('Invitation revoked.', 2200, 'success');
     } catch (e) {
       showNotice(e instanceof Error ? e.message : 'Could not revoke invitation.', 0, 'error');
+    }
+  }
+  async function reportRoom() {
+    if (reportPending || reportSubmitted) return;
+    reportPending = true;
+    try {
+      await api(`/api/rooms/${roomId}/reports`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: reportReason }),
+      });
+      reportSubmitted = true;
+      showNotice('Report submitted. Thank you.', 3000, 'success');
+    } catch (e) {
+      showNotice(e instanceof Error ? e.message : 'Could not submit the report.', 0, 'error');
+    } finally {
+      reportPending = false;
     }
   }
   async function leaveOrDelete() {
@@ -553,6 +575,28 @@
                       >
                     </li>{/each}
                 </ul>{/if}
+            </div>{/if}
+          {#if room.visibility === 'public'}<div>
+              <h2>Report room</h2>
+              <p class="muted">Send this public room to the instance administrators for review.</p>
+              {#if reportSubmitted}<p role="status">Report submitted. Thank you.</p>{:else}<form
+                  class="report-form"
+                  onsubmit={(event) => {
+                    event.preventDefault();
+                    reportRoom();
+                  }}
+                >
+                  <label
+                    >Reason<select bind:value={reportReason}>
+                      <option value="spam">Spam or misleading</option>
+                      <option value="illegal_content">Illegal content</option>
+                      <option value="sexual_content">Sexual content</option>
+                      <option value="violent_content">Violent content</option>
+                      <option value="harassment">Harassment</option>
+                      <option value="other">Other</option>
+                    </select></label
+                  ><button disabled={reportPending}>{reportPending ? 'Submitting…' : 'Submit report'}</button>
+                </form>{/if}
             </div>{/if}
           {#if me()?.role === 'owner'}<div>
               <h2>Transfer ownership</h2>
@@ -1172,7 +1216,8 @@
     flex: 0 0 auto;
     cursor: pointer;
   }
-  .invite-form {
+  .invite-form,
+  .report-form {
     display: grid;
     grid-template-columns: 1fr auto;
     align-items: end;

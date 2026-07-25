@@ -180,3 +180,67 @@ func TestAccountProfileCountsUnicodeCharacters(t *testing.T) {
 		t.Fatalf("32-character Unicode profile rejected: %d %s", profile.Code, profile.Body.String())
 	}
 }
+
+func TestPublicRoomReportMetadataAndDuplicateGuard(t *testing.T) {
+	a := testApp(t)
+	a.setPublicRooms(true)
+	ownerCookie, owner, _ := accountPrincipal(t, a, "123e4567-e89b-42d3-a456-426614174050", "report_owner")
+	room := createTestRoom(t, a, ownerCookie, owner)
+	s, err := a.snapshot(t.Context(), room, owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:             "room.visibility",
+		ExpectedRevision: s.Revision,
+		Payload:          json.RawMessage(`{"visibility":"public"}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reporterCookie, reporter := exchange(t, a, "123e4567-e89b-42d3-a456-426614174051", strings.Repeat("z", 43))
+	submit := func() *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := authed("POST", "/api/rooms/"+room+"/reports", map[string]string{"reason": "spam"}, reporterCookie, reporter.CSRF)
+		r.SetPathValue("roomId", room)
+		a.requireAuth(a.report)(w, r)
+		return w
+	}
+	if w := submit(); w.Code != http.StatusNoContent {
+		t.Fatalf("report: %d %s", w.Code, w.Body.String())
+	}
+
+	var metadata string
+	if err = a.db.QueryRow("SELECT metadata_json FROM room_reports WHERE room_id=? AND reporter_identity_id=?", room, reporter.IdentityID).Scan(&metadata); err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Playback struct {
+			Media struct {
+				Title     string `json:"title"`
+				Thumbnail string `json:"thumbnail"`
+			} `json:"media"`
+		} `json:"playback"`
+	}
+	if err = json.Unmarshal([]byte(metadata), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Playback.Media.Title == "" || parsed.Playback.Media.Thumbnail == "" {
+		t.Fatalf("report metadata does not match admin contract: %s", metadata)
+	}
+
+	if w := submit(); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "report_exists") {
+		t.Fatalf("duplicate pending report: %d %s", w.Code, w.Body.String())
+	}
+
+	adminList := httptest.NewRecorder()
+	a.adminReports(adminList, httptest.NewRequest("GET", "/api/admin/reports", nil), principal{IsAdmin: true})
+	var page struct {
+		Reports []json.RawMessage `json:"reports"`
+		Total   int               `json:"total"`
+	}
+	if err = json.Unmarshal(adminList.Body.Bytes(), &page); err != nil || adminList.Code != http.StatusOK || page.Total != 1 || len(page.Reports) != 1 {
+		t.Fatalf("admin report page: status=%d body=%s err=%v", adminList.Code, adminList.Body.String(), err)
+	}
+}

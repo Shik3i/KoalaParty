@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
@@ -114,7 +115,9 @@ func (a *application) login(w http.ResponseWriter, r *http.Request) {
 func (a *application) logout(w http.ResponseWriter, r *http.Request, p principal) {
 	c, _ := r.Cookie("kp_session")
 	if c != nil {
-		_, _ = a.db.Exec("DELETE FROM sessions WHERE token_hash=?", tokenHash(c.Value))
+		sessionHash := tokenHash(c.Value)
+		_, _ = a.db.Exec("DELETE FROM sessions WHERE token_hash=?", sessionHash)
+		a.hub.disconnectSession(sessionHash)
 	}
 	http.SetCookie(w, &http.Cookie{Name: "kp_session", Value: "", Path: "/", HttpOnly: true, Secure: a.cookieSecure, MaxAge: -1, SameSite: http.SameSiteLaxMode})
 	w.WriteHeader(204)
@@ -279,8 +282,8 @@ func (a *application) report(w http.ResponseWriter, r *http.Request, p principal
 		return
 	}
 	id := r.PathValue("roomId")
-	var metadata string
-	e := a.db.QueryRow(`SELECT json_object('title',coalesce(m.title,''),'thumbnail',coalesce(m.thumbnail_url,'')) FROM rooms r JOIN playback_states p ON p.room_id=r.id LEFT JOIN media_items m ON m.id=p.current_media_id WHERE r.id=? AND r.visibility='public'`, id).Scan(&metadata)
+	var title, thumbnail string
+	e := a.db.QueryRow(`SELECT coalesce(m.title,''),coalesce(m.thumbnail_url,'') FROM rooms r JOIN playback_states p ON p.room_id=r.id LEFT JOIN media_items m ON m.id=p.current_media_id WHERE r.id=? AND r.visibility='public' AND r.deleted_at IS NULL`, id).Scan(&title, &thumbnail)
 	if errors.Is(e, sql.ErrNoRows) {
 		problem(w, 404, "room_not_found", "Public room was not found.")
 		return
@@ -289,9 +292,22 @@ func (a *application) report(w http.ResponseWriter, r *http.Request, p principal
 		problem(w, 500, "database_error", "Report failed.")
 		return
 	}
-	_, e = a.db.Exec("INSERT INTO room_reports(id,room_id,reporter_identity_id,reason,metadata_json) VALUES(?,?,?,?,?)", newID(10), id, p.IdentityID, in.Reason, metadata)
+	metadata, marshalErr := json.Marshal(map[string]any{
+		"playback": map[string]any{
+			"media": map[string]string{"title": title, "thumbnail": thumbnail},
+		},
+	})
+	if marshalErr != nil {
+		problem(w, 500, "report_failed", "Report failed.")
+		return
+	}
+	_, e = a.db.Exec("INSERT INTO room_reports(id,room_id,reporter_identity_id,reason,metadata_json) VALUES(?,?,?,?,?)", newID(10), id, p.IdentityID, in.Reason, string(metadata))
 	if e != nil {
-		problem(w, 500, "database_error", "Report failed.")
+		if strings.Contains(strings.ToLower(e.Error()), "unique") {
+			problem(w, 409, "report_exists", "You already have a pending report for this room.")
+		} else {
+			problem(w, 500, "database_error", "Report failed.")
+		}
 		return
 	}
 	w.WriteHeader(204)

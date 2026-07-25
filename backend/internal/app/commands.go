@@ -185,6 +185,13 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			return snapshot{}, errors.New("invalid YouTube video ID")
 		}
 		mediaID := "YT" + in.VideoID
+		var queueCount int
+		if e = tx.QueryRow("SELECT count(*) FROM room_queue_items WHERE room_id=?", room).Scan(&queueCount); e != nil {
+			return snapshot{}, e
+		}
+		if c.Type == "queue.add" && queueCount >= maxQueueItems {
+			return snapshot{}, errors.New("queue has reached its 100-item limit")
+		}
 		var duplicate int
 		if e = tx.QueryRow(`SELECT count(*) FROM (
 			SELECT media_id FROM room_queue_items WHERE room_id=? AND media_id=?

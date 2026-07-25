@@ -74,7 +74,9 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   expect(pausedPosition).toBeGreaterThan(0.8);
   await member.getByRole('button', { name: 'Play', exact: true }).click();
   await expect(member.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
-  await member.getByLabel('YouTube URL').fill('https://youtu.be/dQw4w9WgXcQ');
+  // Use a video outside the random initial-preset pool so duplicate rejection
+  // cannot make this synchronization assertion flaky.
+  await member.getByLabel('YouTube URL').fill('https://youtu.be/9bZkp7q19f0');
   await member.getByRole('button', { name: 'Add to queue' }).click();
   await expect(owner.locator('.queue li')).toHaveCount(1);
   const memberId = await identityId(member);

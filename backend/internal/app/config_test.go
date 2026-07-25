@@ -1,7 +1,10 @@
 package app
 
 import (
+	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -69,6 +72,75 @@ func TestPublicRoomsDefaultToDisabled(t *testing.T) {
 	}
 }
 
+func TestEnvironmentSettingsOverridePersistedAdminSettings(t *testing.T) {
+	a := testApp(t)
+	a.sessionTTL = 12 * time.Hour
+	a.publicRooms = false
+	a.settingOverrides = map[string]bool{
+		"session_ttl":  true,
+		"public_rooms": true,
+	}
+	if _, err := a.db.Exec(`
+		INSERT INTO settings(key,value) VALUES
+			('session_ttl','1h'),
+			('public_rooms','true'),
+			('activity_max_events','321')
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.loadSettingsFromDB(); err != nil {
+		t.Fatal(err)
+	}
+	if a.sessionTTL != 12*time.Hour || a.publicRooms {
+		t.Fatalf("environment-managed settings were overwritten: ttl=%s public=%v", a.sessionTTL, a.publicRooms)
+	}
+	if a.activityMaxEvents != 321 {
+		t.Fatalf("database-managed setting was not loaded: %d", a.activityMaxEvents)
+	}
+}
+
+func TestConfiguredEnvironmentOverridesAreExposedToApplication(t *testing.T) {
+	t.Setenv("KOALAPARTY_SESSION_TTL", "12h")
+	t.Setenv("KOALAPARTY_PUBLIC_ROOMS", "true")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.settingOverrides["session_ttl"] || !cfg.settingOverrides["public_rooms"] {
+		t.Fatalf("missing environment override markers: %#v", cfg.settingOverrides)
+	}
+}
+
+func TestAdminSettingsCannotChangeEnvironmentOverrides(t *testing.T) {
+	a := testApp(t)
+	a.sessionTTL = 12 * time.Hour
+	a.activityMaxAge = 30 * 24 * time.Hour
+	a.activityMaxEvents = 200
+	a.roomMaxIdle = 365 * 24 * time.Hour
+	a.publicRooms = false
+	a.settingOverrides = map[string]bool{"session_ttl": true, "public_rooms": true}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/api/admin/settings", strings.NewReader(`{
+		"sessionTTL":"1h",
+		"activityMaxAge":"48h",
+		"activityMaxEvents":50,
+		"roomMaxIdle":"240h",
+		"publicRooms":true
+	}`))
+	a.adminSettings(w, r, principal{IsAdmin: true})
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("update settings: %d %s", w.Code, w.Body.String())
+	}
+	if a.sessionTTL != 12*time.Hour || a.publicRooms {
+		t.Fatalf("admin changed environment-managed settings: ttl=%s public=%v", a.sessionTTL, a.publicRooms)
+	}
+	if a.activityMaxAge != 48*time.Hour || a.activityMaxEvents != 50 || a.roomMaxIdle != 240*time.Hour {
+		t.Fatalf("admin-managed settings were not updated: age=%s events=%d idle=%s", a.activityMaxAge, a.activityMaxEvents, a.roomMaxIdle)
+	}
+}
+
 func TestDiscoveryIsUnavailableUntilExplicitlyEnabled(t *testing.T) {
 	a := testApp(t)
 	w := httptest.NewRecorder()
@@ -113,5 +185,26 @@ func TestRateLimiterDefaultPrivateProxiesSecureAgainstSpoofing(t *testing.T) {
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 198.51.100.4")
 	if got := limiter.clientIP(req); got != "198.51.100.4" {
 		t.Fatalf("spoofed client IP accepted = %q, expected 198.51.100.4", got)
+	}
+}
+
+func TestRateLimiterReportsItsActualWindow(t *testing.T) {
+	limiter := newRateLimiter(1, time.Hour, nil)
+	handler := limiter.wrap(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	request := func() *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/", nil)
+		r.RemoteAddr = "203.0.113.10:4321"
+		handler(w, r)
+		return w
+	}
+	if w := request(); w.Code != http.StatusNoContent {
+		t.Fatalf("first request: %d", w.Code)
+	}
+	w := request()
+	retryAfter, err := strconv.Atoi(w.Header().Get("Retry-After"))
+	if w.Code != http.StatusTooManyRequests || err != nil || retryAfter < 3599 || retryAfter > 3600 {
+		t.Fatalf("rate limit response: status=%d retry-after=%q", w.Code, w.Header().Get("Retry-After"))
 	}
 }

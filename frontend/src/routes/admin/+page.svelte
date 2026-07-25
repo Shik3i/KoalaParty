@@ -22,6 +22,7 @@
     activityMaxEvents: number;
     roomMaxIdle: string;
     publicRooms: boolean;
+    environmentOverrides: string[];
   }
 
   interface Report {
@@ -29,14 +30,23 @@
     roomId: string;
     roomLabel: string;
     reason: string;
-    metadata: any;
+    metadata?: {
+      title?: string;
+      thumbnail?: string;
+      playback?: { media?: { title?: string; thumbnail?: string } };
+    };
     createdAt: string;
+  }
+  interface ReportPage {
+    reports: Report[];
+    total: number;
   }
 
   let activeTab = $state<'stats' | 'settings' | 'reports'>('stats');
   let stats: Stats | null = $state(null);
   let settings: Settings | null = $state(null);
-  let reports: Report[] = $state([]);
+  let reports: Report[] | null = $state(null);
+  let reportsTotal = $state(0);
   let loading = $state(true);
   let error = $state('');
   let successMsg = $state('');
@@ -46,20 +56,34 @@
     successMsg = msg;
     msgTimer = setTimeout(() => (successMsg = ''), 4000);
   }
+  const settingLocked = (key: string) => settings?.environmentOverrides?.includes(key) ?? false;
+  const reportTitle = (report: Report) => report.metadata?.playback?.media?.title || report.metadata?.title || '';
 
   async function loadData() {
     loading = true;
     error = '';
     try {
-      const [s, set, rep] = await Promise.all([
+      const [statsResult, settingsResult, reportsResult] = await Promise.allSettled([
         api<Stats>('/api/admin/stats'),
         api<Settings>('/api/admin/settings'),
-        api<Report[]>('/api/admin/reports'),
+        api<ReportPage>('/api/admin/reports'),
       ]);
-      stats = s;
-      settings = set;
-      reports = rep;
+      stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
+      settings = settingsResult.status === 'fulfilled' ? settingsResult.value : null;
+      reports = reportsResult.status === 'fulfilled' ? reportsResult.value.reports : null;
+      reportsTotal = reportsResult.status === 'fulfilled' ? reportsResult.value.total : 0;
+      const failures = [statsResult, settingsResult, reportsResult].filter(
+        (result): result is PromiseRejectedResult => result.status === 'rejected',
+      );
+      if (failures.length) {
+        const first = failures[0].reason;
+        error = first instanceof Error ? first.message : 'Some administrator data could not be loaded.';
+      }
     } catch (e) {
+      stats = null;
+      settings = null;
+      reports = null;
+      reportsTotal = 0;
       error = e instanceof Error ? e.message : 'Failed to load administrator data';
     } finally {
       loading = false;
@@ -81,7 +105,13 @@
     try {
       await api('/api/admin/settings', {
         method: 'POST',
-        body: JSON.stringify(settings),
+        body: JSON.stringify({
+          sessionTTL: settings.sessionTTL,
+          activityMaxAge: settings.activityMaxAge,
+          activityMaxEvents: settings.activityMaxEvents,
+          roomMaxIdle: settings.roomMaxIdle,
+          publicRooms: settings.publicRooms,
+        }),
       });
       setSuccess('Configuration settings updated successfully.');
       loadData();
@@ -94,7 +124,8 @@
     error = '';
     try {
       await api(`/api/admin/reports/${reportId}/${action}`, { method: 'POST' });
-      reports = reports.filter((r) => r.id !== reportId);
+      reports = (reports ?? []).filter((r) => r.id !== reportId);
+      reportsTotal = Math.max(0, reportsTotal - 1);
       setSuccess(`Report successfully ${action === 'delist' ? 'delisted & resolved' : 'resolved'}.`);
       loadData();
     } catch (e) {
@@ -117,6 +148,7 @@
     <div class="alert error-alert" role="alert">
       <span>⚠️ Error:</span>
       {error}
+      <button class="secondary" type="button" onclick={loadData}>Reload data</button>
     </div>
   {/if}
 
@@ -150,7 +182,7 @@
       class:active={activeTab === 'reports'}
       onclick={() => (activeTab = 'reports')}
     >
-      🚨 Moderation Reports ({reports.length})
+      🚨 Moderation Reports ({reportsTotal})
     </button>
   </div>
 
@@ -208,6 +240,8 @@
             </div>
           {/if}
         </section>
+      {:else if activeTab === 'stats'}
+        <p class="empty-state" role="status">Statistics are unavailable. Use “Reload data” to try again.</p>
       {/if}
 
       {#if activeTab === 'settings' && settings}
@@ -222,7 +256,14 @@
               <strong>Session Token TTL</strong>
               <span class="hint">Expiry time of authenticated cookies (e.g., 168h, 24h).</span>
             </label>
-            <input id="session-ttl" type="text" bind:value={settings.sessionTTL} required />
+            <input
+              id="session-ttl"
+              type="text"
+              bind:value={settings.sessionTTL}
+              disabled={settingLocked('session_ttl')}
+              required
+            />
+            {#if settingLocked('session_ttl')}<small class="hint">Managed by KOALAPARTY_SESSION_TTL.</small>{/if}
           </div>
 
           <div class="form-group">
@@ -232,7 +273,14 @@
                 >How long empty/idle rooms remain active before being cleaned up (e.g., 8760h, 24h).</span
               >
             </label>
-            <input id="room-max-idle" type="text" bind:value={settings.roomMaxIdle} required />
+            <input
+              id="room-max-idle"
+              type="text"
+              bind:value={settings.roomMaxIdle}
+              disabled={settingLocked('room_max_idle')}
+              required
+            />
+            {#if settingLocked('room_max_idle')}<small class="hint">Managed by KOALAPARTY_ROOM_MAX_IDLE.</small>{/if}
           </div>
 
           <div class="form-group">
@@ -240,7 +288,15 @@
               <strong>Room Activity Log History Age</strong>
               <span class="hint">Events older than this duration are automatically pruned (e.g., 720h, 48h).</span>
             </label>
-            <input id="activity-max-age" type="text" bind:value={settings.activityMaxAge} required />
+            <input
+              id="activity-max-age"
+              type="text"
+              bind:value={settings.activityMaxAge}
+              disabled={settingLocked('activity_max_age')}
+              required
+            />
+            {#if settingLocked('activity_max_age')}<small class="hint">Managed by KOALAPARTY_ACTIVITY_MAX_AGE.</small
+              >{/if}
           </div>
 
           <div class="form-group">
@@ -248,27 +304,52 @@
               <strong>Room Activity Log Max Size</strong>
               <span class="hint">Prunes oldest events when exceeding this number of events per room (minimum 10).</span>
             </label>
-            <input id="activity-max-events" type="number" min="10" bind:value={settings.activityMaxEvents} required />
+            <input
+              id="activity-max-events"
+              type="number"
+              min="10"
+              bind:value={settings.activityMaxEvents}
+              disabled={settingLocked('activity_max_events')}
+              required
+            />
+            {#if settingLocked('activity_max_events')}<small class="hint"
+                >Managed by KOALAPARTY_ACTIVITY_MAX_EVENTS.</small
+              >{/if}
           </div>
 
           <div class="form-group checkbox-group">
-            <input id="public-rooms" type="checkbox" bind:checked={settings.publicRooms} />
+            <input
+              id="public-rooms"
+              type="checkbox"
+              bind:checked={settings.publicRooms}
+              disabled={settingLocked('public_rooms')}
+            />
             <label for="public-rooms">
               <strong>Enable Public Room Discovery</strong>
               <span class="hint">Allows room owners to list their room in the public /discover section.</span>
             </label>
+            {#if settingLocked('public_rooms')}<small class="hint">Managed by KOALAPARTY_PUBLIC_ROOMS.</small>{/if}
           </div>
 
           <button type="submit" class="primary">Save Configuration</button>
         </form>
+      {:else if activeTab === 'settings'}
+        <p class="empty-state" role="status">Settings are unavailable. Use “Reload data” to try again.</p>
       {/if}
 
       {#if activeTab === 'reports'}
         <section class="reports-section">
-          <h2>Room Reports Pending Moderation ({reports.length})</h2>
-          {#if reports.length === 0}
+          <h2>Room Reports Pending Moderation ({reportsTotal})</h2>
+          {#if reports === null}
+            <p class="empty-state" role="status">Reports are unavailable. Use “Reload data” to try again.</p>
+          {:else if reports.length === 0}
             <p class="empty-state">All reports resolved! No pending complaints.</p>
           {:else}
+            {#if reportsTotal > reports.length}
+              <p class="muted" role="status">
+                Showing the newest {reports.length} reports. Older reports appear as the current page is resolved.
+              </p>
+            {/if}
             <div class="reports-list">
               {#each reports as report}
                 <div class="report-card">
@@ -279,9 +360,9 @@
                   <h3>
                     Room: <a href="/room/{report.roomId}" class="room-link">{report.roomLabel} ({report.roomId})</a>
                   </h3>
-                  {#if report.metadata && report.metadata.playback}
+                  {#if reportTitle(report)}
                     <div class="report-details">
-                      <p><strong>Current Playback:</strong> {report.metadata.playback.media?.title || 'None'}</p>
+                      <p><strong>Current Playback:</strong> {reportTitle(report)}</p>
                     </div>
                   {/if}
                   <div class="report-actions">

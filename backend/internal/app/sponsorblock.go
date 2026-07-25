@@ -95,27 +95,32 @@ func fetchSponsorSegments(ctx context.Context, videoID string) []sponsorSegment 
 // same video do not each hit SponsorBlock. Entries expire after ttl; an empty result
 // is cached too (as a nil slice) so videos with no segments are not re-fetched.
 type segmentCache struct {
-	mu      sync.Mutex
-	entries map[string]segmentCacheEntry
-	order   []string // insertion order, for simple size-capped eviction
-	ttl     time.Duration
-	max     int
-	now     func() time.Time
-	fetch   func(ctx context.Context, videoID string) []sponsorSegment
+	mu       sync.Mutex
+	entries  map[string]segmentCacheEntry
+	inflight map[string]*segmentFetch
+	order    []string // insertion order, for simple size-capped eviction
+	ttl      time.Duration
+	max      int
+	now      func() time.Time
+	fetch    func(ctx context.Context, videoID string) []sponsorSegment
 }
 
 type segmentCacheEntry struct {
 	segments []sponsorSegment
 	expires  time.Time
 }
+type segmentFetch struct {
+	done chan struct{}
+}
 
 func newSegmentCache(fetch func(ctx context.Context, videoID string) []sponsorSegment) *segmentCache {
 	return &segmentCache{
-		entries: map[string]segmentCacheEntry{},
-		ttl:     time.Hour,
-		max:     2048,
-		now:     time.Now,
-		fetch:   fetch,
+		entries:  map[string]segmentCacheEntry{},
+		inflight: map[string]*segmentFetch{},
+		ttl:      time.Hour,
+		max:      2048,
+		now:      time.Now,
+		fetch:    fetch,
 	}
 }
 
@@ -146,20 +151,39 @@ func (c *segmentCache) get(ctx context.Context, videoID string) []sponsorSegment
 		c.mu.Unlock()
 		return entry.segments
 	}
-	c.mu.Unlock()
-
-	segments := c.fetch(ctx, videoID)
-
-	c.mu.Lock()
-	if _, ok := c.entries[videoID]; !ok {
-		c.order = append(c.order, videoID)
-		for len(c.order) > c.max {
-			delete(c.entries, c.order[0])
-			c.order = c.order[1:]
+	if pending, ok := c.inflight[videoID]; ok {
+		c.mu.Unlock()
+		select {
+		case <-pending.done:
+			return c.peek(videoID)
+		case <-ctx.Done():
+			return nil
 		}
 	}
-	c.entries[videoID] = segmentCacheEntry{segments: segments, expires: c.now().Add(c.ttl)}
+	pending := &segmentFetch{done: make(chan struct{})}
+	c.inflight[videoID] = pending
 	c.mu.Unlock()
+
+	var segments []sponsorSegment
+	fetched := false
+	defer func() {
+		c.mu.Lock()
+		delete(c.inflight, videoID)
+		if fetched {
+			if _, ok := c.entries[videoID]; !ok {
+				c.order = append(c.order, videoID)
+				for len(c.order) > c.max {
+					delete(c.entries, c.order[0])
+					c.order = c.order[1:]
+				}
+			}
+			c.entries[videoID] = segmentCacheEntry{segments: segments, expires: c.now().Add(c.ttl)}
+		}
+		close(pending.done)
+		c.mu.Unlock()
+	}()
+	segments = c.fetch(ctx, videoID)
+	fetched = true
 	return segments
 }
 

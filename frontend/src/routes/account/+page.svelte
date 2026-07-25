@@ -199,18 +199,24 @@
             >Log out other devices</button
           >
         </div>
-        <ul class="sessions">
-          {#each sessions as session}<li>
-              <div>
-                <b>{session.current ? 'This device' : 'Signed-in device'}</b><small
-                  >Created {date(session.createdAt)} · expires {date(session.expiresAt)}</small
-                >
-              </div>
-              {#if !session.current}<button class="ghost" disabled={!!pending} onclick={() => revoke(session.id)}
-                  >Revoke</button
-                >{/if}
-            </li>{/each}
-        </ul>
+        {#if !sessions.length}
+          <p class="muted" role="status">
+            No active sessions were returned. Reload the page to re-establish this device.
+          </p>
+        {:else}
+          <ul class="sessions">
+            {#each sessions as session}<li>
+                <div>
+                  <b>{session.current ? 'This device' : 'Signed-in device'}</b><small
+                    >Created {date(session.createdAt)} · expires {date(session.expiresAt)}</small
+                  >
+                </div>
+                {#if !session.current}<button class="ghost" disabled={!!pending} onclick={() => revoke(session.id)}
+                    >Revoke</button
+                  >{/if}
+              </li>{/each}
+          </ul>
+        {/if}
       </section>
       <section class="panel section danger-zone">
         <h2>Delete account</h2>

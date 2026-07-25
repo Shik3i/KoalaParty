@@ -1,6 +1,6 @@
 # Testing strategy
 
-`make verify` runs backend tests and static analysis plus frontend formatting, lint, type checks, unit tests, and production build. CI also builds the Docker image. Automated browser tests cover application synchronization and consent-gated YouTube API loading; real YouTube playback remains a manual smoke test.
+`make verify` runs backend tests and static analysis plus frontend formatting, lint, type checks, unit tests, and production build. CI also builds the Docker image. Automated browser tests cover application synchronization and automatic privacy-enhanced YouTube API loading on room entry; real YouTube playback remains a manual smoke test.
 
 Exact commands:
 
@@ -19,7 +19,7 @@ The Playwright suite uses isolated browser contexts for owner, member, and banne
 
 ## Manual YouTube smoke test
 
-1. Open one room in two browser tabs or profiles and select **Start watching** in both.
+1. Open one room in two browser tabs or profiles and confirm the privacy-enhanced YouTube player loads in both.
 2. Start `https://www.youtube.com/watch?v=M7lc1UVf-VE` with **Play now**.
 3. Queue `https://www.youtube.com/watch?v=aqz-KE-bpKQ`, then use **Skip next**.
 4. Confirm privacy-enhanced iframe loading, play/pause/seek synchronization, elapsed-position preservation, queue advance, reload recovery, and reconnect after a brief server restart.

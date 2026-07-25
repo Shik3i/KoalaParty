@@ -21,11 +21,13 @@ import (
 )
 
 type principal struct {
-	IdentityID  string `json:"identityId"`
-	AccountID   string `json:"accountId,omitempty"`
-	DisplayName string `json:"displayName"`
-	CSRF        string `json:"csrfToken"`
-	IsAdmin     bool   `json:"isAdmin,omitempty"`
+	IdentityID     string    `json:"identityId"`
+	AccountID      string    `json:"accountId,omitempty"`
+	DisplayName    string    `json:"displayName"`
+	CSRF           string    `json:"csrfToken"`
+	IsAdmin        bool      `json:"isAdmin,omitempty"`
+	SessionHash    string    `json:"-"`
+	SessionExpires time.Time `json:"-"`
 }
 type identityRequest struct {
 	ID          string `json:"id"`
@@ -158,9 +160,22 @@ func (a *application) authenticate(r *http.Request) (principal, error) {
 	if e != nil {
 		return principal{}, e
 	}
+	return a.principalBySessionHash(tokenHash(c.Value))
+}
+func (a *application) principalBySessionHash(sessionHash string) (principal, error) {
 	var p principal
 	var account sql.NullString
-	e = a.db.QueryRow(`SELECT i.id,i.account_id,i.display_name,s.csrf_token FROM sessions s JOIN identities i ON i.id=s.identity_id WHERE s.token_hash=? AND s.expires_at>CURRENT_TIMESTAMP`, tokenHash(c.Value)).Scan(&p.IdentityID, &account, &p.DisplayName, &p.CSRF)
+	var expires string
+	e := a.db.QueryRow(`SELECT i.id,i.account_id,i.display_name,s.csrf_token,s.expires_at FROM sessions s JOIN identities i ON i.id=s.identity_id WHERE s.token_hash=? AND s.expires_at>CURRENT_TIMESTAMP`, sessionHash).Scan(&p.IdentityID, &account, &p.DisplayName, &p.CSRF, &expires)
+	if e != nil {
+		return principal{}, e
+	}
+	p.SessionHash = sessionHash
+	p.SessionExpires, e = time.Parse("2006-01-02 15:04:05", expires)
+	if e != nil {
+		return principal{}, e
+	}
+	p.SessionExpires = p.SessionExpires.UTC()
 	if account.Valid {
 		p.AccountID = account.String
 		var isAdmin int

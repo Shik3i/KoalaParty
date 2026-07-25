@@ -4,13 +4,29 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-07-26
+
 ### Added
 
 - The release workflow now creates the GitHub Release for each tag automatically from the matching `CHANGELOG.md` section, so publishing no longer requires a manual step.
+- Public rooms now expose an in-room report form with reason selection, duplicate-submit protection, confirmation feedback, and metadata that matches the admin moderation view.
 
 ### Changed
 
 - Corrected the release and deployment docs to match the actual pipeline: it publishes the multi-architecture container image with an SBOM, provenance, a build attestation, and a GitHub Release — not the deployment bundles or checksum files the docs previously described.
+- Reduced room snapshot work from per-member permission and presence lookups to one permission query and one in-memory presence pass.
+- Added explicit capacity limits of 100 members and 100 queued videos per room, plus rate limits for room creation, registration, reports, and WebSocket commands.
+
+### Fixed
+
+- Revoked, expired, logged-out, and password-invalidated sessions now close their active WebSockets; sockets also use ping/pong deadlines and revalidate the session before every command.
+- Environment-configured dynamic settings now remain authoritative over persisted admin settings, and the admin UI identifies and locks those fields.
+- Fixed high-speed playback being mistaken for a manual seek by scaling natural timeline movement with the current playback rate.
+- Coalesced concurrent SponsorBlock cache misses so a cold video causes one upstream request instead of a request stampede.
+- Recovered automatically from expired API sessions and WebSocket reconnects instead of retrying with stale credentials.
+- Corrected activity labels for permission, shuffle, queue-loop, and unban events.
+- Kept admin panels usable when one endpoint fails, and added missing empty/error states for admin data and account sessions.
+- Updated the vulnerable transitive `brace-expansion` dependency; `npm audit --audit-level=high` now reports zero vulnerabilities.
 
 ## [0.10.0] - 2026-07-23
 

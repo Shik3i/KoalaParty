@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -58,12 +59,20 @@ func (a *application) adminSettings(w http.ResponseWriter, r *http.Request, p pr
 	if r.Method == "GET" {
 		a.mu.RLock()
 		defer a.mu.RUnlock()
+		environmentOverrides := make([]string, 0, len(a.settingOverrides))
+		for key, enabled := range a.settingOverrides {
+			if enabled {
+				environmentOverrides = append(environmentOverrides, key)
+			}
+		}
+		sort.Strings(environmentOverrides)
 		writeJSON(w, 200, map[string]any{
-			"sessionTTL":        a.sessionTTL.String(),
-			"activityMaxAge":    a.activityMaxAge.String(),
-			"activityMaxEvents": a.activityMaxEvents,
-			"roomMaxIdle":       a.roomMaxIdle.String(),
-			"publicRooms":       a.publicRooms,
+			"sessionTTL":           a.sessionTTL.String(),
+			"activityMaxAge":       a.activityMaxAge.String(),
+			"activityMaxEvents":    a.activityMaxEvents,
+			"roomMaxIdle":          a.roomMaxIdle.String(),
+			"publicRooms":          a.publicRooms,
+			"environmentOverrides": environmentOverrides,
 		})
 		return
 	}
@@ -111,23 +120,38 @@ func (a *application) adminSettings(w http.ResponseWriter, r *http.Request, p pr
 		return err
 	}
 
-	if err := upsert("session_ttl", in.SessionTTL); err != nil {
+	if !a.settingOverrides["session_ttl"] {
+		err = upsert("session_ttl", in.SessionTTL)
+	}
+	if err != nil {
 		problem(w, 500, "database_error", err.Error())
 		return
 	}
-	if err := upsert("activity_max_age", in.ActivityMaxAge); err != nil {
+	if !a.settingOverrides["activity_max_age"] {
+		err = upsert("activity_max_age", in.ActivityMaxAge)
+	}
+	if err != nil {
 		problem(w, 500, "database_error", err.Error())
 		return
 	}
-	if err := upsert("activity_max_events", strconv.Itoa(in.ActivityMaxEvents)); err != nil {
+	if !a.settingOverrides["activity_max_events"] {
+		err = upsert("activity_max_events", strconv.Itoa(in.ActivityMaxEvents))
+	}
+	if err != nil {
 		problem(w, 500, "database_error", err.Error())
 		return
 	}
-	if err := upsert("room_max_idle", in.RoomMaxIdle); err != nil {
+	if !a.settingOverrides["room_max_idle"] {
+		err = upsert("room_max_idle", in.RoomMaxIdle)
+	}
+	if err != nil {
 		problem(w, 500, "database_error", err.Error())
 		return
 	}
-	if err := upsert("public_rooms", strconv.FormatBool(in.PublicRooms)); err != nil {
+	if !a.settingOverrides["public_rooms"] {
+		err = upsert("public_rooms", strconv.FormatBool(in.PublicRooms))
+	}
+	if err != nil {
 		problem(w, 500, "database_error", err.Error())
 		return
 	}
@@ -138,18 +162,33 @@ func (a *application) adminSettings(w http.ResponseWriter, r *http.Request, p pr
 	}
 
 	a.mu.Lock()
-	a.sessionTTL = sessionTTL
-	a.activityMaxAge = activityMaxAge
-	a.activityMaxEvents = in.ActivityMaxEvents
-	a.roomMaxIdle = roomMaxIdle
-	a.publicRooms = in.PublicRooms
+	if !a.settingOverrides["session_ttl"] {
+		a.sessionTTL = sessionTTL
+	}
+	if !a.settingOverrides["activity_max_age"] {
+		a.activityMaxAge = activityMaxAge
+	}
+	if !a.settingOverrides["activity_max_events"] {
+		a.activityMaxEvents = in.ActivityMaxEvents
+	}
+	if !a.settingOverrides["room_max_idle"] {
+		a.roomMaxIdle = roomMaxIdle
+	}
+	if !a.settingOverrides["public_rooms"] {
+		a.publicRooms = in.PublicRooms
+	}
 	a.mu.Unlock()
 
 	w.WriteHeader(204)
 }
 
 func (a *application) adminReports(w http.ResponseWriter, r *http.Request, p principal) {
-	rows, err := a.db.Query("SELECT id, room_id, reason, metadata_json, created_at FROM room_reports WHERE resolved_at IS NULL ORDER BY created_at DESC")
+	var total int
+	if err := a.db.QueryRow("SELECT count(*) FROM room_reports WHERE resolved_at IS NULL").Scan(&total); err != nil {
+		problem(w, 500, "database_error", err.Error())
+		return
+	}
+	rows, err := a.db.Query("SELECT id, room_id, reason, metadata_json, created_at FROM room_reports WHERE resolved_at IS NULL ORDER BY created_at DESC LIMIT 500")
 	if err != nil {
 		problem(w, 500, "database_error", err.Error())
 		return
@@ -179,7 +218,7 @@ func (a *application) adminReports(w http.ResponseWriter, r *http.Request, p pri
 		problem(w, 500, "database_error", err.Error())
 		return
 	}
-	writeJSON(w, 200, reports)
+	writeJSON(w, 200, map[string]any{"reports": reports, "total": total})
 }
 
 func (a *application) resolveReport(w http.ResponseWriter, r *http.Request, p principal) {

@@ -13,8 +13,11 @@ import (
 type client struct {
 	conn         *websocket.Conn
 	identity     string
+	sessionHash  string
 	writeMu      sync.Mutex
 	lastReaction time.Time
+	commandCount int
+	commandReset time.Time
 }
 
 func (c *client) write(v any) error {
@@ -22,6 +25,21 @@ func (c *client) write(v any) error {
 	defer c.writeMu.Unlock()
 	_ = c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	return c.conn.WriteJSON(v)
+}
+func (c *client) ping() error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	deadline := time.Now().Add(5 * time.Second)
+	_ = c.conn.SetWriteDeadline(deadline)
+	return c.conn.WriteControl(websocket.PingMessage, nil, deadline)
+}
+func (c *client) allowCommand(now time.Time) bool {
+	if c.commandReset.IsZero() || now.After(c.commandReset) {
+		c.commandReset = now.Add(time.Minute)
+		c.commandCount = 0
+	}
+	c.commandCount++
+	return c.commandCount <= 180
 }
 
 type hub struct {
@@ -63,6 +81,15 @@ func (h *hub) isActive(room, identity string) bool {
 		}
 	}
 	return false
+}
+func (h *hub) activeIdentities(room string) map[string]bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	active := make(map[string]bool, len(h.rooms[room]))
+	for c := range h.rooms[room] {
+		active[c.identity] = true
+	}
+	return active
 }
 func (h *hub) activeRoom(room string) bool {
 	h.mu.RLock()
@@ -117,6 +144,26 @@ func (h *hub) disconnectIdentity(identity string) {
 		_ = c.conn.Close()
 	}
 }
+func (h *hub) disconnectSession(sessionHash string) {
+	h.mu.RLock()
+	clients := []*client{}
+	for _, roomClients := range h.rooms {
+		for c := range roomClients {
+			if c.sessionHash == sessionHash {
+				clients = append(clients, c)
+			}
+		}
+	}
+	h.mu.RUnlock()
+	for _, c := range clients {
+		_ = c.conn.Close()
+	}
+}
+func (h *hub) disconnectSessions(sessionHashes []string) {
+	for _, sessionHash := range sessionHashes {
+		h.disconnectSession(sessionHash)
+	}
+}
 func (h *hub) broadcast(room string, s snapshot) {
 	h.mu.RLock()
 	clients := make([]*client, 0, len(h.rooms[room]))
@@ -158,10 +205,35 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 		return
 	}
 	conn.SetReadLimit(64 << 10)
-	c := &client{conn: conn, identity: p.IdentityID}
+	_ = conn.SetReadDeadline(time.Now().Add(70 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(70 * time.Second))
+	})
+	c := &client{conn: conn, identity: p.IdentityID, sessionHash: p.SessionHash}
 	a.hub.add(room, c)
-	s, _ = a.snapshot(r.Context(), room, p.IdentityID)
+	if refreshed, snapshotErr := a.snapshot(r.Context(), room, p.IdentityID); snapshotErr == nil {
+		s = refreshed
+	}
 	a.hub.broadcast(room, s)
+	pingDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(25 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pingDone:
+				return
+			case <-ticker.C:
+				if c.ping() != nil {
+					_ = conn.Close()
+					return
+				}
+			}
+		}
+	}()
+	expiryTimer := time.AfterFunc(max(time.Until(p.SessionExpires), 0), func() {
+		_ = conn.Close()
+	})
 	// Ensure the current video's SponsorBlock segments are fetched even when it was
 	// cued at room creation (never activated via play_now/skip). enrichSegments is a
 	// no-op once cached, so this is cheap on repeat joins.
@@ -169,6 +241,8 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 		go a.enrichSegments(room, s.Playback.Media.ProviderID)
 	}
 	defer func() {
+		close(pingDone)
+		expiryTimer.Stop()
 		lastForIdentity := a.hub.remove(room, c)
 		conn.Close()
 		if lastForIdentity {
@@ -202,6 +276,12 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 			_ = c.write(map[string]any{"type": "error", "code": "invalid_json"})
 			continue
 		}
+		current, authErr := a.principalBySessionHash(c.sessionHash)
+		if authErr != nil || current.IdentityID != c.identity {
+			_ = c.write(map[string]any{"type": "error", "requestId": cmd.RequestID, "code": "session_expired", "message": "Session expired or was revoked."})
+			return
+		}
+		p = current
 		if cmd.Type == "reaction.send" {
 			var payload struct {
 				Emoji string `json:"emoji"`
@@ -216,6 +296,10 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 			}
 			c.lastReaction = time.Now()
 			a.hub.broadcastReaction(room, p.IdentityID, payload.Emoji)
+			continue
+		}
+		if !c.allowCommand(time.Now()) {
+			_ = c.write(map[string]any{"type": "error", "requestId": cmd.RequestID, "code": "rate_limited", "message": "Too many room commands. Try again shortly."})
 			continue
 		}
 		s, e = a.applyCommand(r.Context(), room, p, cmd)

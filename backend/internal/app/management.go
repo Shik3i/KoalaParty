@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -216,8 +217,9 @@ func (a *application) accountPassword(w http.ResponseWriter, r *http.Request, p 
 	if err == nil {
 		_, err = tx.ExecContext(r.Context(), "UPDATE accounts SET password_hash=? WHERE id=?", newHash, p.AccountID)
 	}
+	var revokedSessions []string
 	if err == nil {
-		_, err = tx.ExecContext(r.Context(), `DELETE FROM sessions WHERE token_hash<>? AND identity_id IN (SELECT id FROM identities WHERE account_id=?)`, currentSessionHash(r), p.AccountID)
+		revokedSessions, err = deleteOtherSessions(r.Context(), tx, p.AccountID, currentSessionHash(r))
 	}
 	if err == nil {
 		err = tx.Commit()
@@ -228,6 +230,7 @@ func (a *application) accountPassword(w http.ResponseWriter, r *http.Request, p 
 		problem(w, 500, "database_error", "Could not change password.")
 		return
 	}
+	a.hub.disconnectSessions(revokedSessions)
 	w.WriteHeader(204)
 }
 
@@ -259,11 +262,12 @@ func (a *application) accountSessions(w http.ResponseWriter, r *http.Request, p 
 		writeJSON(w, 200, out)
 		return
 	}
-	_, err := a.db.ExecContext(r.Context(), `DELETE FROM sessions WHERE token_hash<>? AND identity_id IN (SELECT id FROM identities WHERE account_id=?)`, currentHash, p.AccountID)
+	revokedSessions, err := deleteOtherSessions(r.Context(), a.db, p.AccountID, currentHash)
 	if err != nil {
 		problem(w, 500, "database_error", "Could not revoke sessions.")
 		return
 	}
+	a.hub.disconnectSessions(revokedSessions)
 	w.WriteHeader(204)
 }
 
@@ -285,6 +289,7 @@ func (a *application) revokeSession(w http.ResponseWriter, r *http.Request, p pr
 		problem(w, 404, "session_not_found", "Session was not found.")
 		return
 	}
+	a.hub.disconnectSession(id)
 	w.WriteHeader(204)
 }
 
@@ -294,6 +299,27 @@ func currentSessionHash(r *http.Request) string {
 		return ""
 	}
 	return tokenHash(cookie.Value)
+}
+
+type contextQueryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func deleteOtherSessions(ctx context.Context, queryer contextQueryer, accountID, except string) ([]string, error) {
+	rows, err := queryer.QueryContext(ctx, `DELETE FROM sessions WHERE token_hash<>? AND identity_id IN (SELECT id FROM identities WHERE account_id=?) RETURNING token_hash`, except, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var hashes []string
+	for rows.Next() {
+		var hash string
+		if err = rows.Scan(&hash); err != nil {
+			return nil, err
+		}
+		hashes = append(hashes, hash)
+	}
+	return hashes, rows.Err()
 }
 
 func (a *application) deleteOwnAccount(w http.ResponseWriter, r *http.Request, p principal) {

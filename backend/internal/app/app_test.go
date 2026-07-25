@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -57,6 +59,10 @@ func TestIdentityCreationAuthenticationAndRejection(t *testing.T) {
 	if p.IdentityID != id || cookie.HttpOnly == false {
 		t.Fatal("identity session properties missing")
 	}
+	authenticated, err := a.authenticate(authed("GET", "/api/me", nil, cookie, ""))
+	if err != nil || authenticated.SessionHash != tokenHash(cookie.Value) || !authenticated.SessionExpires.After(time.Now()) {
+		t.Fatalf("authenticated session metadata missing: hash=%q expires=%s err=%v", authenticated.SessionHash, authenticated.SessionExpires, err)
+	}
 	var stored string
 	_ = a.db.QueryRow("SELECT secret_hash FROM identities WHERE id=?", id).Scan(&stored)
 	if stored == secret || !strings.HasPrefix(stored, "$argon2id$") {
@@ -70,6 +76,18 @@ func TestIdentityCreationAuthenticationAndRejection(t *testing.T) {
 	a.exchangeIdentity(w, httptest.NewRequest("POST", "/api/identity/exchange", bytes.NewReader(body)))
 	if w.Code != 401 {
 		t.Fatalf("invalid secret accepted: %d", w.Code)
+	}
+}
+
+func TestDeletedSessionCannotBeRevalidated(t *testing.T) {
+	a := testApp(t)
+	cookie, _ := exchange(t, a, "123e4567-e89b-42d3-a456-426614174040", strings.Repeat("v", 43))
+	sessionHash := tokenHash(cookie.Value)
+	if _, err := a.db.Exec("DELETE FROM sessions WHERE token_hash=?", sessionHash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.principalBySessionHash(sessionHash); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("deleted session revalidated: %v", err)
 	}
 }
 
@@ -234,6 +252,72 @@ func TestQueuePolishCommands(t *testing.T) {
 	apply("queue.skip", `{}`)
 	if !s.QueueLoop || s.Playback.Media == nil || s.Playback.Media.ProviderID != "def12345678" || len(s.History) == 0 {
 		t.Fatalf("loop, voted skip, or history missing: %+v", s)
+	}
+}
+
+func TestRoomAndQueueCapacityLimits(t *testing.T) {
+	a := testApp(t)
+	ownerCookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174041", strings.Repeat("w", 43))
+	room := createTestRoom(t, a, ownerCookie, owner)
+
+	tx, err := a.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < maxRoomMembers; i++ {
+		identityID := fmt.Sprintf("capacity-member-%03d", i)
+		if _, err = tx.Exec("INSERT INTO identities(id,secret_hash,display_name,avatar_seed) VALUES(?,?,?,?)", identityID, "hash", "Member", identityID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = tx.Exec("INSERT INTO room_members(room_id,identity_id,role) VALUES(?,?,'member')", room, identityID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < maxQueueItems; i++ {
+		mediaID := fmt.Sprintf("capacity-media-%03d", i)
+		if _, err = tx.Exec("INSERT INTO media_items(id,provider,provider_media_id,title) VALUES(?,'youtube',?,'Video')", mediaID, mediaID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = tx.Exec("INSERT INTO room_queue_items(id,room_id,media_id,position,added_by_identity_id) VALUES(?,?,?,?,?)", fmt.Sprintf("queue-%03d", i), room, mediaID, i, owner.IdentityID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, outsider := exchange(t, a, "123e4567-e89b-42d3-a456-426614174042", strings.Repeat("x", 43))
+	if _, err = a.joinAndSnapshot(t.Context(), room, outsider); err == nil || err.Error() != "room_full" {
+		t.Fatalf("full room accepted another member: %v", err)
+	}
+
+	s, err := a.snapshot(t.Context(), room, owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:             "queue.add",
+		ExpectedRevision: s.Revision,
+		Payload:          json.RawMessage(`{"videoId":"cap12345678"}`),
+	})
+	if err == nil || err.Error() != "queue has reached its 100-item limit" {
+		t.Fatalf("full queue accepted another item: %v", err)
+	}
+}
+
+func TestWebSocketCommandRateLimitResets(t *testing.T) {
+	c := &client{}
+	now := time.Now()
+	for i := 0; i < 180; i++ {
+		if !c.allowCommand(now) {
+			t.Fatalf("command %d was limited early", i+1)
+		}
+	}
+	if c.allowCommand(now) {
+		t.Fatal("181st command was not rate limited")
+	}
+	if !c.allowCommand(now.Add(time.Minute + time.Second)) {
+		t.Fatal("command rate limit did not reset")
 	}
 }
 

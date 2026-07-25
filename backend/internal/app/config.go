@@ -25,6 +25,7 @@ type config struct {
 	production        bool
 	youtubeMetadata   bool
 	sponsorBlock      bool
+	settingOverrides  map[string]bool
 }
 
 func loadConfig() (config, error) {
@@ -49,15 +50,16 @@ func loadConfig() (config, error) {
 		return config{}, err
 	}
 	c := config{
-		addr:            env("KOALAPARTY_ADDR", ":8080"),
-		dbPath:          env("KOALAPARTY_DB", "koalaparty.db"),
-		webRoot:         env("KOALAPARTY_WEB_ROOT", "../frontend/build"),
-		cookieSecure:    cookieSecure,
-		trustedOrigins:  map[string]bool{},
-		publicRooms:     publicRooms,
-		production:      production,
-		youtubeMetadata: youtubeMetadata,
-		sponsorBlock:    sponsorBlock,
+		addr:             env("KOALAPARTY_ADDR", ":8080"),
+		dbPath:           env("KOALAPARTY_DB", "koalaparty.db"),
+		webRoot:          env("KOALAPARTY_WEB_ROOT", "../frontend/build"),
+		cookieSecure:     cookieSecure,
+		trustedOrigins:   map[string]bool{},
+		publicRooms:      publicRooms,
+		production:       production,
+		youtubeMetadata:  youtubeMetadata,
+		sponsorBlock:     sponsorBlock,
+		settingOverrides: map[string]bool{},
 	}
 	if c.sessionTTL, err = parseDuration("KOALAPARTY_SESSION_TTL", "168h"); err != nil {
 		return config{}, err
@@ -70,6 +72,17 @@ func loadConfig() (config, error) {
 	}
 	if c.activityMaxEvents, err = strconv.Atoi(env("KOALAPARTY_ACTIVITY_MAX_EVENTS", "200")); err != nil || c.activityMaxEvents < 10 {
 		return config{}, fmt.Errorf("KOALAPARTY_ACTIVITY_MAX_EVENTS must be an integer of at least 10")
+	}
+	for environmentKey, settingKey := range map[string]string{
+		"KOALAPARTY_SESSION_TTL":         "session_ttl",
+		"KOALAPARTY_ACTIVITY_MAX_AGE":    "activity_max_age",
+		"KOALAPARTY_ACTIVITY_MAX_EVENTS": "activity_max_events",
+		"KOALAPARTY_ROOM_MAX_IDLE":       "room_max_idle",
+		"KOALAPARTY_PUBLIC_ROOMS":        "public_rooms",
+	} {
+		if value, present := os.LookupEnv(environmentKey); present && strings.TrimSpace(value) != "" {
+			c.settingOverrides[settingKey] = true
+		}
 	}
 	for _, raw := range strings.Split(env("KOALAPARTY_TRUSTED_ORIGINS", "http://localhost:5173,http://localhost:8080"), ",") {
 		origin := strings.TrimSpace(raw)

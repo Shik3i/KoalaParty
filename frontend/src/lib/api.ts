@@ -66,6 +66,11 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     return fetch(path, { ...init, headers });
   };
   let r = await request();
+  if (r.status === 401) {
+    principal = null;
+    p = await establish();
+    r = await request();
+  }
   if (r.status === 403) {
     let problem: { code?: string; message?: string } = {};
     try {

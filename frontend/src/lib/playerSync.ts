@@ -45,3 +45,14 @@ export function stateChangeAction(i: StateChangeInput): StateChangeAction {
   }
   return 'ignore';
 }
+
+export function timelineJump(
+  currentTime: number,
+  previousTime: number,
+  elapsedSeconds: number,
+  playing: boolean,
+  playbackRate: number,
+): number {
+  const naturalAdvance = playing ? Math.max(0, elapsedSeconds) * Math.max(0, playbackRate || 1) : 0;
+  return currentTime - previousTime - naturalAdvance;
+}

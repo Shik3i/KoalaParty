@@ -126,8 +126,14 @@ export function formatActivity(e: Activity) {
       return `${who} kicked a participant`;
     case 'member.banned':
       return `${who} banned a participant`;
-    case 'permission.changed':
+    case 'member.permission':
       return `${who} changed a permission`;
+    case 'queue.shuffle':
+      return `${who} shuffled the queue`;
+    case 'queue.loop':
+      return `${who} turned queue looping ${e.payload?.enabled ? 'on' : 'off'}`;
+    case 'member.unbanned':
+      return `${who} removed a room ban`;
     case 'room.visibility':
       return `${who} changed the room to ${String(e.payload?.visibility ?? '').replace('_', '-')}`;
     case 'room.sponsorblock':

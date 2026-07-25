@@ -44,6 +44,7 @@ type application struct {
 	activityMaxEvents int
 	roomMaxIdle       time.Duration
 	publicRooms       bool
+	settingOverrides  map[string]bool
 }
 
 func env(key, fallback string) string {
@@ -81,7 +82,7 @@ func Run() error {
 		return e
 	}
 	defer db.Close()
-	a := &application{db: db, hub: newHub(), sessionTTL: cfg.sessionTTL, cookieSecure: cfg.cookieSecure, trustedOrigins: cfg.trustedOrigins, trustedProxies: cfg.trustedProxies, activityMaxAge: cfg.activityMaxAge, activityMaxEvents: cfg.activityMaxEvents, roomMaxIdle: cfg.roomMaxIdle, publicRooms: cfg.publicRooms}
+	a := &application{db: db, hub: newHub(), sessionTTL: cfg.sessionTTL, cookieSecure: cfg.cookieSecure, trustedOrigins: cfg.trustedOrigins, trustedProxies: cfg.trustedProxies, activityMaxAge: cfg.activityMaxAge, activityMaxEvents: cfg.activityMaxEvents, roomMaxIdle: cfg.roomMaxIdle, publicRooms: cfg.publicRooms, settingOverrides: cfg.settingOverrides}
 	if cfg.youtubeMetadata {
 		a.fetchTitle = fetchYouTubeTitle
 	}
@@ -94,6 +95,9 @@ func Run() error {
 	mux := http.NewServeMux()
 	authLimiter := newRateLimiter(20, time.Minute, a.trustedProxies)
 	commandLimiter := newRateLimiter(180, time.Minute, a.trustedProxies)
+	registrationLimiter := newRateLimiter(5, time.Hour, a.trustedProxies)
+	roomCreationLimiter := newRateLimiter(30, time.Hour, a.trustedProxies)
+	reportLimiter := newRateLimiter(20, time.Hour, a.trustedProxies)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		info := CurrentBuildInformation()
 		writeJSON(w, 200, map[string]string{"status": "ok", "version": info.Version})
@@ -108,7 +112,7 @@ func Run() error {
 	})
 	mux.HandleFunc("POST /api/identity/exchange", authLimiter.wrap(a.exchangeIdentity))
 	mux.HandleFunc("GET /api/me", a.me)
-	mux.HandleFunc("POST /api/accounts/register", a.requireAuth(a.register))
+	mux.HandleFunc("POST /api/accounts/register", registrationLimiter.wrap(a.requireAuth(a.register)))
 	mux.HandleFunc("POST /api/accounts/login", authLimiter.wrap(a.login))
 	mux.HandleFunc("POST /api/accounts/logout", a.requireAuth(a.logout))
 	mux.HandleFunc("PATCH /api/account/profile", a.requireAuth(a.accountProfile))
@@ -120,7 +124,7 @@ func Run() error {
 	mux.HandleFunc("GET /api/friends", a.requireAuth(a.friends))
 	mux.HandleFunc("POST /api/friends", a.requireAuth(a.friends))
 	mux.HandleFunc("POST /api/friends/{username}/{action}", a.requireAuth(a.friendAction))
-	mux.HandleFunc("POST /api/rooms", a.requireAuth(a.createRoom))
+	mux.HandleFunc("POST /api/rooms", roomCreationLimiter.wrap(a.requireAuth(a.createRoom)))
 	mux.HandleFunc("GET /api/rooms", a.requireAuth(a.myRooms))
 	mux.HandleFunc("POST /api/rooms/previews", a.requireAuth(a.roomPreviews))
 	mux.HandleFunc("GET /api/rooms/{roomId}", a.requireAuth(a.roomSnapshot))
@@ -131,7 +135,7 @@ func Run() error {
 	mux.HandleFunc("DELETE /api/rooms/{roomId}/invites/{username}", a.requireAuth(a.revokeInvite))
 	mux.HandleFunc("POST /api/rooms/{roomId}/commands", commandLimiter.wrap(a.requireAuth(a.roomCommand)))
 	mux.HandleFunc("GET /api/rooms/{roomId}/ws", a.requireAuth(a.websocket))
-	mux.HandleFunc("POST /api/rooms/{roomId}/reports", a.requireAuth(a.report))
+	mux.HandleFunc("POST /api/rooms/{roomId}/reports", reportLimiter.wrap(a.requireAuth(a.report)))
 	mux.HandleFunc("GET /api/discover", a.discover)
 	mux.HandleFunc("GET /api/admin/stats", a.requireAdmin(a.adminStats))
 	mux.HandleFunc("GET /api/admin/settings", a.requireAdmin(a.adminSettings))
@@ -293,7 +297,7 @@ func (a *application) loadSettingsFromDB() error {
 
 	rows, err := a.db.Query("SELECT key, value FROM settings")
 	if err != nil {
-		return nil
+		return err
 	}
 	defer rows.Close()
 
@@ -301,6 +305,9 @@ func (a *application) loadSettingsFromDB() error {
 		var key, val string
 		if err := rows.Scan(&key, &val); err != nil {
 			return err
+		}
+		if a.settingOverrides[key] {
+			continue
 		}
 		switch key {
 		case "session_ttl":

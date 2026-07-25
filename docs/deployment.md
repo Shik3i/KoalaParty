@@ -62,4 +62,4 @@ Enable `KOALAPARTY_PUBLIC_ROOMS=true` only when Timo actively reviews reports an
 
 Published tags produce immutable full-version tags plus moving major, minor, and `latest` tags. Deployments must use the full version. Inspect the published image's SBOM and build-provenance attestation when supply-chain provenance matters.
 
-Room activity is pruned to 200 events and 30 days by default. Rooms inactive for 12 months are soft-deleted unless currently connected. All limits use validated environment variables.
+Room activity is pruned to 200 events and 30 days by default. Rooms inactive for 12 months are soft-deleted unless currently connected. Dynamic limits and public-room discovery can be changed in the admin UI and are persisted in SQLite. A non-empty `KOALAPARTY_SESSION_TTL`, `KOALAPARTY_ACTIVITY_MAX_AGE`, `KOALAPARTY_ACTIVITY_MAX_EVENTS`, `KOALAPARTY_ROOM_MAX_IDLE`, or `KOALAPARTY_PUBLIC_ROOMS` value is an explicit deployment override: it wins over the persisted value and the corresponding admin control is read-only.
