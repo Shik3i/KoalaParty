@@ -24,8 +24,13 @@ Thumbs.db
 *.sln
 *.swp
 
+# Local AI agent configurations
+.agent/
+.agents/
+.claude/
+.codex/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
