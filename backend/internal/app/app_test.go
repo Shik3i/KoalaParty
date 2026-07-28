@@ -255,7 +255,7 @@ func TestQueuePolishCommands(t *testing.T) {
 	}
 }
 
-func TestRoomAndQueueCapacityLimits(t *testing.T) {
+func TestHistoricalMembersDoNotFillRoomAndQueueCapacityIsBounded(t *testing.T) {
 	a := testApp(t)
 	ownerCookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174041", strings.Repeat("w", 43))
 	room := createTestRoom(t, a, ownerCookie, owner)
@@ -287,8 +287,8 @@ func TestRoomAndQueueCapacityLimits(t *testing.T) {
 	}
 
 	_, outsider := exchange(t, a, "123e4567-e89b-42d3-a456-426614174042", strings.Repeat("x", 43))
-	if _, err = a.joinAndSnapshot(t.Context(), room, outsider); err == nil || err.Error() != "room_full" {
-		t.Fatalf("full room accepted another member: %v", err)
+	if _, err = a.joinAndSnapshot(t.Context(), room, outsider); err != nil {
+		t.Fatalf("historical room members blocked a new active participant: %v", err)
 	}
 
 	s, err := a.snapshot(t.Context(), room, owner.IdentityID)

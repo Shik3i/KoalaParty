@@ -81,7 +81,7 @@ func fetchSponsorSegments(ctx context.Context, videoID string) []sponsorSegment 
 				continue
 			}
 			start, end := s.Segment[0], s.Segment[1]
-			if end <= start || start < 0 || !contains(sponsorCategories, s.Category) {
+			if end <= start || start < 0 || end > 24*60*60 || !contains(sponsorCategories, s.Category) {
 				continue
 			}
 			out = append(out, sponsorSegment{Start: start, End: end, Category: s.Category})

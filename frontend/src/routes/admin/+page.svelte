@@ -51,6 +51,19 @@
   let error = $state('');
   let successMsg = $state('');
   let msgTimer: ReturnType<typeof setTimeout> | null = null;
+  const tabs = ['stats', 'settings', 'reports'] as const;
+  function selectTab(event: KeyboardEvent) {
+    const current = tabs.indexOf(activeTab);
+    let next: number;
+    if (event.key === 'ArrowRight') next = (current + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') next = (current - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    activeTab = tabs[next];
+    requestAnimationFrame(() => document.getElementById(`admin-tab-${activeTab}`)?.focus());
+  }
   function setSuccess(msg: string) {
     if (msgTimer) clearTimeout(msgTimer);
     successMsg = msg;
@@ -159,26 +172,35 @@
     </div>
   {/if}
 
-  <div class="tabs" role="tablist">
+  <div class="tabs" role="tablist" aria-label="Administration sections" tabindex="-1" onkeydown={selectTab}>
     <button
+      id="admin-tab-stats"
       role="tab"
+      aria-controls="admin-panel"
       aria-selected={activeTab === 'stats'}
+      tabindex={activeTab === 'stats' ? 0 : -1}
       class:active={activeTab === 'stats'}
       onclick={() => (activeTab = 'stats')}
     >
       📈 Dashboard
     </button>
     <button
+      id="admin-tab-settings"
       role="tab"
+      aria-controls="admin-panel"
       aria-selected={activeTab === 'settings'}
+      tabindex={activeTab === 'settings' ? 0 : -1}
       class:active={activeTab === 'settings'}
       onclick={() => (activeTab = 'settings')}
     >
       ⚙️ Settings
     </button>
     <button
+      id="admin-tab-reports"
       role="tab"
+      aria-controls="admin-panel"
       aria-selected={activeTab === 'reports'}
+      tabindex={activeTab === 'reports' ? 0 : -1}
       class:active={activeTab === 'reports'}
       onclick={() => (activeTab = 'reports')}
     >
@@ -191,7 +213,7 @@
       <span class="spinner"></span> Loading administrative dashboard...
     </div>
   {:else}
-    <div class="tab-content panel">
+    <div id="admin-panel" class="tab-content panel" role="tabpanel" aria-labelledby={`admin-tab-${activeTab}`}>
       {#if activeTab === 'stats' && stats}
         <section class="dashboard-grid">
           <div class="stat-card">

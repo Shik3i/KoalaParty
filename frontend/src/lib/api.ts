@@ -1,4 +1,4 @@
-import { getIdentity } from './identity';
+import { getIdentity, replaceWithAnonymousIdentity } from './identity';
 export interface Principal {
   identityId: string;
   accountId?: string;
@@ -36,12 +36,19 @@ export async function establish(): Promise<Principal> {
       principal = current;
       return current;
     }
-    const i = getIdentity();
-    const r = await fetch('/api/identity/exchange', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: i.id, secret: i.secret, displayName: i.displayName }),
-    });
+    const exchange = (i: ReturnType<typeof getIdentity>) =>
+      fetch('/api/identity/exchange', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: i.id, secret: i.secret, displayName: i.displayName }),
+      });
+    let r = await exchange(getIdentity());
+    if (r.status === 401) {
+      // Account-linked device secrets identify a browser but cannot recreate an
+      // authenticated account session after logout/revocation. Continue with a
+      // fresh anonymous identity; the account remains available through Log in.
+      r = await exchange(replaceWithAnonymousIdentity());
+    }
     if (!r.ok) throw new ApiError(r.status, await message(r));
     principal = (await r.json()) as Principal;
     return principal;

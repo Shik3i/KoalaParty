@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -14,24 +15,56 @@ type client struct {
 	conn         *websocket.Conn
 	identity     string
 	sessionHash  string
-	writeMu      sync.Mutex
+	remoteIP     string
+	send         chan any
+	done         chan struct{}
+	closeOnce    sync.Once
 	lastReaction time.Time
 	commandCount int
 	commandReset time.Time
 }
 
-func (c *client) write(v any) error {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	_ = c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	return c.conn.WriteJSON(v)
+func (c *client) enqueue(v any) bool {
+	select {
+	case <-c.done:
+		return false
+	case c.send <- v:
+		return true
+	default:
+		c.shutdown()
+		return false
+	}
 }
-func (c *client) ping() error {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	deadline := time.Now().Add(5 * time.Second)
-	_ = c.conn.SetWriteDeadline(deadline)
-	return c.conn.WriteControl(websocket.PingMessage, nil, deadline)
+func (c *client) shutdown() {
+	c.closeOnce.Do(func() {
+		close(c.done)
+		if c.conn != nil {
+			_ = c.conn.Close()
+		}
+	})
+}
+func (c *client) writePump() {
+	ticker := time.NewTicker(25 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.done:
+			return
+		case message := <-c.send:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if c.conn.WriteJSON(message) != nil {
+				c.shutdown()
+				return
+			}
+		case <-ticker.C:
+			deadline := time.Now().Add(5 * time.Second)
+			_ = c.conn.SetWriteDeadline(deadline)
+			if c.conn.WriteControl(websocket.PingMessage, nil, deadline) != nil {
+				c.shutdown()
+				return
+			}
+		}
+	}
 }
 func (c *client) allowCommand(now time.Time) bool {
 	if c.commandReset.IsZero() || now.After(c.commandReset) {
@@ -43,18 +76,65 @@ func (c *client) allowCommand(now time.Time) bool {
 }
 
 type hub struct {
-	mu    sync.RWMutex
-	rooms map[string]map[*client]struct{}
+	mu              sync.RWMutex
+	rooms           map[string]map[*client]struct{}
+	commandBuckets  map[string]rateBucket
+	reactionBuckets map[string]rateBucket
 }
 
-func newHub() *hub { return &hub{rooms: map[string]map[*client]struct{}{}} }
-func (h *hub) add(room string, c *client) {
+type rateBucket struct {
+	count int
+	reset time.Time
+}
+
+const (
+	maxRoomIdentities         = maxRoomMembers
+	maxConnectionsPerIdentity = 3
+	maxConnectionsPerSession  = 3
+	maxConnectionsPerIP       = 12
+	maxTotalConnections       = 5000
+)
+
+func newHub() *hub {
+	return &hub{
+		rooms:           map[string]map[*client]struct{}{},
+		commandBuckets:  map[string]rateBucket{},
+		reactionBuckets: map[string]rateBucket{},
+	}
+}
+func (h *hub) tryAdd(room string, c *client) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	identities := map[string]struct{}{}
+	identityConnections, sessionConnections, ipConnections, totalConnections := 0, 0, 0, 0
+	for _, clients := range h.rooms {
+		for existing := range clients {
+			totalConnections++
+			if existing.remoteIP == c.remoteIP {
+				ipConnections++
+			}
+		}
+	}
+	for existing := range h.rooms[room] {
+		identities[existing.identity] = struct{}{}
+		if existing.identity == c.identity {
+			identityConnections++
+		}
+		if existing.sessionHash == c.sessionHash {
+			sessionConnections++
+		}
+	}
+	if _, active := identities[c.identity]; !active && len(identities) >= maxRoomIdentities {
+		return errors.New("room_full")
+	}
+	if identityConnections >= maxConnectionsPerIdentity || sessionConnections >= maxConnectionsPerSession || ipConnections >= maxConnectionsPerIP || totalConnections >= maxTotalConnections {
+		return errors.New("connection_limit")
+	}
 	if h.rooms[room] == nil {
 		h.rooms[room] = map[*client]struct{}{}
 	}
 	h.rooms[room][c] = struct{}{}
+	return nil
 }
 func (h *hub) remove(room string, c *client) bool {
 	h.mu.Lock()
@@ -115,7 +195,7 @@ func (h *hub) disconnect(room, identity string) {
 	}
 	h.mu.RUnlock()
 	for _, c := range clients {
-		_ = c.conn.Close()
+		c.shutdown()
 	}
 }
 func (h *hub) disconnectRoom(room string) {
@@ -126,7 +206,7 @@ func (h *hub) disconnectRoom(room string) {
 	}
 	h.mu.RUnlock()
 	for _, c := range clients {
-		_ = c.conn.Close()
+		c.shutdown()
 	}
 }
 func (h *hub) disconnectIdentity(identity string) {
@@ -141,7 +221,7 @@ func (h *hub) disconnectIdentity(identity string) {
 	}
 	h.mu.RUnlock()
 	for _, c := range clients {
-		_ = c.conn.Close()
+		c.shutdown()
 	}
 }
 func (h *hub) disconnectSession(sessionHash string) {
@@ -156,7 +236,7 @@ func (h *hub) disconnectSession(sessionHash string) {
 	}
 	h.mu.RUnlock()
 	for _, c := range clients {
-		_ = c.conn.Close()
+		c.shutdown()
 	}
 }
 func (h *hub) disconnectSessions(sessionHashes []string) {
@@ -174,7 +254,7 @@ func (h *hub) broadcast(room string, s snapshot) {
 	for _, c := range clients {
 		personalized := s
 		personalized.Me = c.identity
-		_ = c.write(map[string]any{"type": "snapshot", "payload": personalized})
+		c.enqueue(map[string]any{"type": "snapshot", "payload": personalized})
 	}
 }
 func (h *hub) broadcastReaction(room, identity, emoji string) {
@@ -185,8 +265,40 @@ func (h *hub) broadcastReaction(room, identity, emoji string) {
 	}
 	h.mu.RUnlock()
 	for _, c := range clients {
-		_ = c.write(map[string]any{"type": "reaction", "identityId": identity, "emoji": emoji})
+		c.enqueue(map[string]any{"type": "reaction", "identityId": identity, "emoji": emoji})
 	}
+}
+func (h *hub) allowIdentity(bucketMap map[string]rateBucket, identity string, limit int, window time.Duration, now time.Time) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	bucket := bucketMap[identity]
+	if bucket.reset.IsZero() || now.After(bucket.reset) {
+		bucket = rateBucket{reset: now.Add(window)}
+	}
+	bucket.count++
+	bucketMap[identity] = bucket
+	if len(bucketMap) > 10000 {
+		for key, candidate := range bucketMap {
+			if now.After(candidate.reset) {
+				delete(bucketMap, key)
+			}
+		}
+		for key := range bucketMap {
+			if len(bucketMap) <= 10000 {
+				break
+			}
+			if key != identity {
+				delete(bucketMap, key)
+			}
+		}
+	}
+	return bucket.count <= limit
+}
+func (h *hub) allowCommand(identity string, now time.Time) bool {
+	return h.allowIdentity(h.commandBuckets, identity, 180, time.Minute, now)
+}
+func (h *hub) allowReaction(identity string, now time.Time) bool {
+	return h.allowIdentity(h.reactionBuckets, identity, 80, time.Minute, now)
 }
 func (a *application) websocket(w http.ResponseWriter, r *http.Request, p principal) {
 	room := r.PathValue("roomId")
@@ -209,30 +321,23 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(70 * time.Second))
 	})
-	c := &client{conn: conn, identity: p.IdentityID, sessionHash: p.SessionHash}
-	a.hub.add(room, c)
+	c := &client{conn: conn, identity: p.IdentityID, sessionHash: p.SessionHash, remoteIP: clientIP(r, a.trustedProxies), send: make(chan any, 32), done: make(chan struct{})}
+	if e = a.hub.tryAdd(room, c); e != nil {
+		code, message := websocket.CloseTryAgainLater, "Connection limit reached."
+		if e.Error() == "room_full" {
+			code, message = websocket.ClosePolicyViolation, "Room participant limit reached."
+		}
+		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, message), time.Now().Add(time.Second))
+		_ = conn.Close()
+		return
+	}
+	go c.writePump()
 	if refreshed, snapshotErr := a.snapshot(r.Context(), room, p.IdentityID); snapshotErr == nil {
 		s = refreshed
 	}
 	a.hub.broadcast(room, s)
-	pingDone := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(25 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-pingDone:
-				return
-			case <-ticker.C:
-				if c.ping() != nil {
-					_ = conn.Close()
-					return
-				}
-			}
-		}
-	}()
 	expiryTimer := time.AfterFunc(max(time.Until(p.SessionExpires), 0), func() {
-		_ = conn.Close()
+		c.shutdown()
 	})
 	// Ensure the current video's SponsorBlock segments are fetched even when it was
 	// cued at room creation (never activated via play_now/skip). enrichSegments is a
@@ -241,10 +346,9 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 		go a.enrichSegments(room, s.Playback.Media.ProviderID)
 	}
 	defer func() {
-		close(pingDone)
 		expiryTimer.Stop()
 		lastForIdentity := a.hub.remove(room, c)
-		conn.Close()
+		c.shutdown()
 		if lastForIdentity {
 			var membership int
 			_ = a.db.QueryRow("SELECT count(*) FROM room_members WHERE room_id=? AND identity_id=?", room, p.IdentityID).Scan(&membership)
@@ -273,12 +377,12 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 		}
 		var cmd command
 		if json.Unmarshal(raw, &cmd) != nil {
-			_ = c.write(map[string]any{"type": "error", "code": "invalid_json"})
+			c.enqueue(map[string]any{"type": "error", "code": "invalid_json"})
 			continue
 		}
 		current, authErr := a.principalBySessionHash(c.sessionHash)
 		if authErr != nil || current.IdentityID != c.identity {
-			_ = c.write(map[string]any{"type": "error", "requestId": cmd.RequestID, "code": "session_expired", "message": "Session expired or was revoked."})
+			c.enqueue(map[string]any{"type": "error", "requestId": cmd.RequestID, "code": "session_expired", "message": "Session expired or was revoked."})
 			return
 		}
 		p = current
@@ -288,23 +392,23 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 			}
 			allowed := map[string]bool{"❤️": true, "😂": true, "🔥": true, "👀": true, "😴": true, "👏": true}
 			if json.Unmarshal(cmd.Payload, &payload) != nil || !allowed[payload.Emoji] {
-				_ = c.write(map[string]any{"type": "error", "requestId": cmd.RequestID, "message": "invalid reaction"})
+				c.enqueue(map[string]any{"type": "error", "requestId": cmd.RequestID, "message": "invalid reaction"})
 				continue
 			}
-			if time.Since(c.lastReaction) < 750*time.Millisecond {
+			if time.Since(c.lastReaction) < 750*time.Millisecond || !a.hub.allowReaction(p.IdentityID, time.Now()) {
 				continue
 			}
 			c.lastReaction = time.Now()
 			a.hub.broadcastReaction(room, p.IdentityID, payload.Emoji)
 			continue
 		}
-		if !c.allowCommand(time.Now()) {
-			_ = c.write(map[string]any{"type": "error", "requestId": cmd.RequestID, "code": "rate_limited", "message": "Too many room commands. Try again shortly."})
+		if !c.allowCommand(time.Now()) || !a.hub.allowCommand(p.IdentityID, time.Now()) {
+			c.enqueue(map[string]any{"type": "error", "requestId": cmd.RequestID, "code": "rate_limited", "message": "Too many room commands. Try again shortly."})
 			continue
 		}
 		s, e = a.applyCommand(r.Context(), room, p, cmd)
 		if e != nil {
-			_ = c.write(map[string]any{"type": "error", "requestId": cmd.RequestID, "message": e.Error()})
+			c.enqueue(map[string]any{"type": "error", "requestId": cmd.RequestID, "message": e.Error()})
 			continue
 		}
 		a.hub.broadcast(room, s)

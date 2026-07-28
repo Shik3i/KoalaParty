@@ -8,6 +8,7 @@
   import '../lib/styles/themes/resolver.css';
   import '../lib/styles/base.css';
   import { onMount } from 'svelte';
+  import { page } from '$app/state';
   import { Compass, FilmSlate, UsersThree, UserCircle, ShieldStar, Sun, Moon, Monitor, Palette } from 'phosphor-svelte';
   import { applyTheme, initialTheme, applyDesign, initialDesign, designs, type Theme, type Design } from '$lib/theme';
   import { establish, type Principal } from '$lib/api';
@@ -43,6 +44,7 @@
     { value: 'light', label: 'Light theme' },
     { value: 'dark', label: 'Dark theme' },
   ];
+  const current = (path: string) => (path === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(path));
 </script>
 
 <svelte:head>
@@ -55,7 +57,7 @@
   <meta property="og:image:alt" content="KoalaParty koala mascot holding a shared video player" />
   <meta
     property="og:description"
-    content="Synchronized YouTube watch parties with a shared queue — no accounts, ads, analytics, or tracking."
+    content="Synchronized YouTube watch parties with a shared queue — no accounts, ads, KoalaParty analytics, or fingerprinting."
   />
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content="KoalaParty — Watch YouTube together privately" />
@@ -63,7 +65,7 @@
   <meta name="twitter:image:alt" content="KoalaParty koala mascot holding a shared video player" />
   <meta
     name="twitter:description"
-    content="Synchronized YouTube watch parties with a shared queue — no accounts, ads, analytics, or tracking."
+    content="Synchronized YouTube watch parties with a shared queue — no accounts, ads, KoalaParty analytics, or fingerprinting."
   />
 </svelte:head>
 <svelte:window onscroll={() => (compactHeader = window.scrollY > 28)} />
@@ -71,11 +73,17 @@
 <header class="site-header" class:compact={compactHeader}>
   <a class="brand" href="/"><img src="/icons/koalaparty-192.png" alt="" /> KoalaParty</a>
   <nav aria-label="Main navigation">
-    <a href="/discover"><Compass size={17} weight="bold" />Discover</a><a href="/rooms"
+    <a href="/discover" aria-current={current('/discover') ? 'page' : undefined}
+      ><Compass size={17} weight="bold" />Discover</a
+    ><a href="/rooms" aria-current={current('/rooms') ? 'page' : undefined}
       ><FilmSlate size={17} weight="bold" />My rooms</a
-    ><a href="/friends"><UsersThree size={17} weight="bold" />Friends</a>{#if principal?.isAdmin}<a href="/admin"
+    ><a href="/friends" aria-current={current('/friends') ? 'page' : undefined}
+      ><UsersThree size={17} weight="bold" />Friends</a
+    >{#if principal?.isAdmin}<a href="/admin" aria-current={current('/admin') ? 'page' : undefined}
         ><ShieldStar size={17} weight="bold" />Admin</a
-      >{/if}<a href="/account"><UserCircle size={17} weight="bold" />Account</a>
+      >{/if}<a href="/account" aria-current={current('/account') ? 'page' : undefined}
+      ><UserCircle size={17} weight="bold" />Account</a
+    >
   </nav>
   <div class="appearance">
     <label class="design" title="Color design">
@@ -104,21 +112,20 @@
 <div id="main">
   <svelte:boundary onerror={(error) => console.error('App error boundary:', error)}>
     {@render children()}
-    {#snippet failed(error, reset)}
-      <main class="boundary-error">
+    {#snippet failed(_error, reset)}
+      <main class="boundary-error" data-error-kind={_error instanceof Error ? 'unexpected' : 'unknown'}>
         <img class="boundary-mark" src="/icons/koalaparty-192.png" alt="" />
         <h1>Something hiccuped</h1>
         <p>An unexpected error interrupted the page. Your room is safe — try again.</p>
         <div class="boundary-actions">
           <button onclick={reset}>Try again</button><a class="button secondary" href="/">Back home</a>
         </div>
-        <pre>{error}</pre>
       </main>
     {/snippet}
   </svelte:boundary>
 </div>
 <footer>
-  <span>KoalaParty · MIT licensed · No tracking. No ads.</span><span
+  <span>KoalaParty · MIT licensed · No KoalaParty analytics. No ads.</span><span
     ><a href="/privacy">Privacy</a> · <a href="https://koalastuff.net/legal">Imprint</a> ·
     <a href="https://github.com/Shik3i/KoalaParty" target="_blank" rel="noopener noreferrer">GitHub</a> ·
     <a href="https://sync.koalastuff.net/" target="_blank" rel="noopener noreferrer">KoalaSync</a>{#if version}
@@ -152,18 +159,6 @@
     justify-content: center;
     margin: 1.5rem 0;
     flex-wrap: wrap;
-  }
-  .boundary-error pre {
-    text-align: left;
-    overflow: auto;
-    max-height: 8rem;
-    padding: 0.8rem;
-    background: var(--surface-panel);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    color: var(--text-muted);
-    font-size: 0.75rem;
-    white-space: pre-wrap;
   }
   .skip:focus {
     top: 1rem;

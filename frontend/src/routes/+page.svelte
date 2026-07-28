@@ -83,8 +83,13 @@
   <section class="hero">
     <div class="eyebrow">Your permanent digital living room</div>
     <h1>Watch YouTube together.<br /><span>Keep it private.</span></h1>
-    <p class="lede">Shared playback and a collaborative queue without accounts, advertising, analytics, or tracking.</p>
+    <p class="lede">
+      Shared playback and a collaborative queue without accounts, advertising, KoalaParty analytics, or fingerprinting.
+    </p>
     <div class="actions">
+      <button type="button" onclick={createRoom} disabled={creating}
+        >{creating ? 'Creating…' : 'Create a room'}<ArrowRight size={18} weight="bold" /></button
+      >
       <a class="button secondary" href="/discover"><Compass size={18} weight="bold" />Browse public rooms</a>
     </div>
     <p class="warning">Anonymous rooms belong to this browser. Link an account before clearing browser storage.</p>
@@ -157,7 +162,7 @@
   </article>
   <article>
     <ShieldCheck size={24} weight="duotone" /><b>Real privacy</b><span
-      >No analytics scripts, ads, fingerprinting, or third-party fonts.</span
+      >No KoalaParty analytics, ads, fingerprinting, or third-party fonts.</span
     >
   </article>
   <article>

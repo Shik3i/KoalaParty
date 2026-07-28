@@ -39,6 +39,7 @@ type application struct {
 	segments *segmentCache
 
 	mu                sync.RWMutex
+	settingsUpdateMu  sync.Mutex
 	sessionTTL        time.Duration
 	activityMaxAge    time.Duration
 	activityMaxEvents int
@@ -93,7 +94,8 @@ func Run() error {
 		return fmt.Errorf("load db settings: %w", err)
 	}
 	mux := http.NewServeMux()
-	authLimiter := newRateLimiter(20, time.Minute, a.trustedProxies)
+	identityLimiter := newRateLimiter(60, time.Minute, a.trustedProxies)
+	loginLimiter := newRateLimiter(20, time.Minute, a.trustedProxies)
 	commandLimiter := newRateLimiter(180, time.Minute, a.trustedProxies)
 	registrationLimiter := newRateLimiter(5, time.Hour, a.trustedProxies)
 	roomCreationLimiter := newRateLimiter(30, time.Hour, a.trustedProxies)
@@ -110,10 +112,10 @@ func Run() error {
 		}
 		writeJSON(w, 200, map[string]string{"status": "ready"})
 	})
-	mux.HandleFunc("POST /api/identity/exchange", authLimiter.wrap(a.exchangeIdentity))
+	mux.HandleFunc("POST /api/identity/exchange", identityLimiter.wrap(a.sessionBootstrap(a.exchangeIdentity)))
 	mux.HandleFunc("GET /api/me", a.me)
 	mux.HandleFunc("POST /api/accounts/register", registrationLimiter.wrap(a.requireAuth(a.register)))
-	mux.HandleFunc("POST /api/accounts/login", authLimiter.wrap(a.login))
+	mux.HandleFunc("POST /api/accounts/login", loginLimiter.wrap(a.sessionBootstrap(a.login)))
 	mux.HandleFunc("POST /api/accounts/logout", a.requireAuth(a.logout))
 	mux.HandleFunc("PATCH /api/account/profile", a.requireAuth(a.accountProfile))
 	mux.HandleFunc("POST /api/account/password", a.requireAuth(a.accountPassword))
@@ -166,6 +168,24 @@ func Run() error {
 	return e
 }
 func (a *application) originAllowed(o string) bool { return o != "" && a.trustedOrigins[o] }
+func (a *application) sessionBootstrap(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		contentType := strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0])
+		if contentType != "application/json" {
+			problem(w, http.StatusUnsupportedMediaType, "content_type_required", "Content-Type must be application/json.")
+			return
+		}
+		if site := strings.ToLower(r.Header.Get("Sec-Fetch-Site")); site == "cross-site" {
+			problem(w, http.StatusForbidden, "origin_denied", "Cross-site session requests are not allowed.")
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" && !a.originAllowed(origin) {
+			problem(w, http.StatusForbidden, "origin_denied", "Session request origin is not trusted.")
+			return
+		}
+		next(w, r)
+	}
+}
 func spaHandler(root string) http.Handler {
 	files := http.FileServer(http.Dir(root))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -175,9 +195,18 @@ func spaHandler(root string) http.Handler {
 		}
 		target := filepath.Join(root, filepath.Clean(r.URL.Path))
 		if info, e := os.Stat(target); e == nil && !info.IsDir() {
+			switch {
+			case strings.HasPrefix(r.URL.Path, "/_app/immutable/"):
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			case strings.HasPrefix(r.URL.Path, "/icons/"):
+				w.Header().Set("Cache-Control", "public, max-age=604800")
+			default:
+				w.Header().Set("Cache-Control", "no-cache")
+			}
 			files.ServeHTTP(w, r)
 			return
 		}
+		w.Header().Set("Cache-Control", "no-cache")
 		clone := r.Clone(r.Context())
 		clone.URL.Path = "/"
 		files.ServeHTTP(w, clone)
@@ -194,7 +223,7 @@ func contentSecurityPolicy(root string) string {
 			}
 		}
 	}
-	return "default-src 'self'; script-src " + scriptSrc + "; frame-src https://www.youtube-nocookie.com; img-src 'self' data: https://i.ytimg.com; connect-src 'self' ws: wss: https://www.youtube.com; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+	return "default-src 'self'; script-src " + scriptSrc + "; frame-src https://www.youtube-nocookie.com; img-src 'self' data: https://i.ytimg.com; connect-src 'self' https://www.youtube.com; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
 }
 func securityHeaders(next http.Handler, csp string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

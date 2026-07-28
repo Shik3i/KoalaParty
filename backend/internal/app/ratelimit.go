@@ -34,9 +34,13 @@ func remoteIP(remoteAddr string) net.IP {
 }
 
 func (l *rateLimiter) clientIP(r *http.Request) string {
+	return clientIP(r, l.trustedProxies)
+}
+
+func clientIP(r *http.Request, trustedProxies []*net.IPNet) string {
 	peer := remoteIP(r.RemoteAddr)
 	trusted := false
-	for _, network := range l.trustedProxies {
+	for _, network := range trustedProxies {
 		if peer != nil && network.Contains(peer) {
 			trusted = true
 			break
@@ -50,7 +54,7 @@ func (l *rateLimiter) clientIP(r *http.Request) string {
 				continue
 			}
 			candidateTrusted := false
-			for _, network := range l.trustedProxies {
+			for _, network := range trustedProxies {
 				if network.Contains(candidate) {
 					candidateTrusted = true
 					break

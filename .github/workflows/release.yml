@@ -32,7 +32,7 @@ jobs:
 
       - name: Verify backend
         working-directory: backend
-        run: test -z "$(gofmt -l .)" && go vet ./... && go test ./...
+        run: test -z "$(gofmt -l .)" && go vet ./... && go test -race -count=1 ./...
 
       - name: Scan Go dependencies
         working-directory: backend

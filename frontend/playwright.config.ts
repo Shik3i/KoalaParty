@@ -5,18 +5,18 @@ export default defineConfig({
   timeout: 45_000,
   fullyParallel: false,
   retries: process.env.CI ? 1 : 0,
-  use: { baseURL: 'http://127.0.0.1:4173', trace: 'retain-on-failure' },
+  use: { baseURL: 'http://127.0.0.1:4187', trace: 'retain-on-failure' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
     command: 'npm run build && cd ../backend && go run ./cmd/server',
-    url: 'http://127.0.0.1:4173/api/health',
-    timeout: 120_000,
+    url: 'http://127.0.0.1:4187/api/health',
+    timeout: 240_000,
     reuseExistingServer: false,
     env: {
-      KOALAPARTY_ADDR: ':4173',
+      KOALAPARTY_ADDR: ':4187',
       KOALAPARTY_DB: '../frontend/e2e.db',
       KOALAPARTY_WEB_ROOT: '../frontend/build',
-      KOALAPARTY_TRUSTED_ORIGINS: 'http://127.0.0.1:4173',
+      KOALAPARTY_TRUSTED_ORIGINS: 'http://127.0.0.1:4187',
     },
   },
 });

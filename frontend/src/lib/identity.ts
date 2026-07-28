@@ -100,7 +100,7 @@ function randomDisplayName(): string {
   const i = Math.floor(Math.random() * nameAnimals.length);
   const emoji = nameEmojis[i];
   const name = `${emoji} ${pick(nameAdjectives)} ${nameAnimals[i]}`;
-  // The server caps display names at 32 bytes; drop the adjective if we overrun.
+  // Keep generated names compact even though the server's hard limit is 32 characters.
   return new TextEncoder().encode(name).length <= 32 ? name : `${emoji} ${nameAnimals[i]}`;
 }
 export function getIdentity(): LocalIdentity {
@@ -137,6 +137,16 @@ export function updateDisplayName(displayName: string) {
   if (normalized) value.displayName = normalized;
   persist(value);
   return value;
+}
+
+export function replaceWithAnonymousIdentity(): LocalIdentity {
+  fallback = null;
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Storage may be disabled; getIdentity still creates an in-memory identity.
+  }
+  return getIdentity();
 }
 
 export function resetIdentityCacheForTests() {

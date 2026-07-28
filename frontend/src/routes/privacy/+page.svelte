@@ -29,8 +29,8 @@
       independent host is responsible for its own deployment, logs, retention settings and privacy information.
     </p>
     <p>
-      KoalaParty has no advertising, analytics, tracking pixels, browser fingerprinting, third-party fonts or marketing
-      cookies. The source code is publicly reviewable on
+      KoalaParty has no advertising, KoalaParty analytics, tracking pixels, browser fingerprinting, third-party fonts or
+      marketing cookies. The source code is publicly reviewable on
       <a href="https://github.com/Shik3i/KoalaParty" target="_blank" rel="noopener noreferrer">GitHub</a>.
     </p>
   </section>
@@ -92,8 +92,9 @@
       permanently loses anonymous room ownership.
     </p>
     <p>
-      The server sets the technically necessary <code>kp_session</code> cookie after authentication. It is HttpOnly and SameSite=Lax;
-      production deployments additionally mark it Secure. The default session lifetime is seven days.
+      The server sets the technically necessary <code>kp_session</code> cookie (prefixed <code>__Host-</code> in production)
+      after authentication. It is HttpOnly and SameSite=Lax; production deployments additionally mark it Secure. The default
+      session lifetime is seven days.
     </p>
   </section>
 

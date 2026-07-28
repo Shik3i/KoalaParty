@@ -6,8 +6,8 @@ KoalaParty is an early release. Security fixes target the latest release and `ma
 
 | Version | Supported |
 | --- | --- |
-| 0.1.x | Yes |
-| < 0.1 | No |
+| Latest release | Yes |
+| Older releases | No |
 
 ## Reporting a vulnerability
 
@@ -17,7 +17,8 @@ Do not open a public issue for exploitable vulnerabilities. Use a [private GitHu
 
 - Argon2id secret and password hashing with random salts.
 - Cryptographically random sessions; only token hashes are stored server-side.
-- HttpOnly, SameSite cookies with configurable `Secure` enforcement.
+- HttpOnly, SameSite cookies with configurable `Secure` enforcement and a `__Host-` prefix in production.
+- Trusted-origin, Fetch Metadata, and JSON content-type checks on session-creating requests.
 - CSRF protection on authenticated state-changing HTTP requests.
 - Trusted-origin checks before WebSocket room joins.
 - Deny-by-default server authorization, owner invariants, per-member capabilities, and transactional moderation.
@@ -40,4 +41,4 @@ Do not open a public issue for exploitable vulnerabilities. Use a [private GitHu
 - Password recovery, MFA, and passkeys are not implemented.
 - Rate limits and active WebSocket presence are process-local and reset on restart.
 - The SQLite/in-memory-hub architecture supports one application instance, not active-active replicas.
-- YouTube embeds are an explicitly consented external dependency and remain subject to YouTube availability and policy.
+- YouTube's privacy-enhanced embed loads when a room opens and remains subject to YouTube availability, privacy, and policy.

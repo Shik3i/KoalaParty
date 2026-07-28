@@ -35,7 +35,7 @@ jobs:
 
       - name: Test and vet backend
         working-directory: backend
-        run: go vet ./... && go test ./...
+        run: go vet ./... && go test -race -count=1 ./...
 
       - name: Scan Go dependencies
         working-directory: backend

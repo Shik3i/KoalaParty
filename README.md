@@ -41,7 +41,7 @@ Release images support `linux/amd64` and `linux/arm64`:
 
 ```sh
 cp .env.example .env
-docker pull ghcr.io/shik3i/koalaparty:0.9.0
+docker pull ghcr.io/shik3i/koalaparty:0.11.0
 docker compose -f deploy/docker-compose.ghcr.yml up -d
 ```
 
@@ -77,4 +77,4 @@ KoalaParty is free and open-source software licensed under the [MIT License](LIC
 
 ### Third-party data
 
-Optional segment-skipping uses data from [SponsorBlock](https://sponsor.ajay.app), licensed [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/). KoalaParty is a non-commercial project (no ads, tracking, or fees) and attributes SponsorBlock in-app wherever segments are used. The feature can be disabled entirely with `KOALAPARTY_SPONSORBLOCK=false` or per room.
+Optional segment-skipping uses data from [SponsorBlock](https://sponsor.ajay.app), licensed [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/). KoalaParty is a non-commercial project without KoalaParty analytics, ads, fingerprinting, or fees and attributes SponsorBlock in-app wherever segments are used. The feature can be disabled entirely with `KOALAPARTY_SPONSORBLOCK=false` or per room.

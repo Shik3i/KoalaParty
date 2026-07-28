@@ -133,8 +133,50 @@
     confirmDialog?.resolve(ok);
     confirmDialog = null;
   }
-  function autofocus(node: HTMLElement) {
-    node.focus();
+  function focusTrap(node: HTMLElement) {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const controls = () =>
+      Array.from(node.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input, select'));
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        resolveConfirm(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const items = controls();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    node.addEventListener('keydown', keydown);
+    requestAnimationFrame(() => controls().at(-1)?.focus());
+    return {
+      destroy() {
+        node.removeEventListener('keydown', keydown);
+        previous?.focus();
+      },
+    };
+  }
+  function selectMobileTab(event: KeyboardEvent) {
+    const tabs: Array<typeof mobileTab> = ['queue', 'people', 'activity'];
+    const current = tabs.indexOf(mobileTab);
+    let next: number;
+    if (event.key === 'ArrowRight') next = (current + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') next = (current - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    mobileTab = tabs[next];
+    requestAnimationFrame(() => document.getElementById(`room-tab-${mobileTab}`)?.focus());
   }
   // The member menu lives inside scrollable, clipped panels. Position it as a
   // fixed popover anchored to its trigger so it is never clipped or hidden behind
@@ -666,8 +708,11 @@
                 role="progressbar"
                 aria-label="Playback progress"
                 aria-valuemin="0"
-                aria-valuemax={Math.round(mediaDuration)}
-                aria-valuenow={Math.round(pos)}
+                aria-valuemax={Math.max(1, Math.round(mediaDuration || pos || 1))}
+                aria-valuenow={Math.min(
+                  Math.max(0, Math.round(pos)),
+                  Math.max(1, Math.round(mediaDuration || pos || 1)),
+                )}
                 aria-valuetext={mediaDuration > 0 ? `${fmtTime(pos)} of ${fmtTime(mediaDuration)}` : fmtTime(pos)}
               >
                 <div class="scrubber-track"><div class="scrubber-fill" style="width:{pct}%"></div></div>
@@ -818,25 +863,40 @@
         </div>
       </div>
       <aside class="side-column panel">
-        <div class="mobile-tabs" role="tablist">
+        <div class="mobile-tabs" role="tablist" aria-label="Room details" tabindex="-1" onkeydown={selectMobileTab}>
           <button
+            id="room-tab-queue"
             role="tab"
+            aria-controls="room-panel-queue"
             aria-selected={mobileTab === 'queue'}
+            tabindex={mobileTab === 'queue' ? 0 : -1}
             class:active={mobileTab === 'queue'}
             onclick={() => (mobileTab = 'queue')}>Queue <span>{room.queue.length}</span></button
           ><button
+            id="room-tab-people"
             role="tab"
+            aria-controls="room-panel-people"
             aria-selected={mobileTab === 'people'}
+            tabindex={mobileTab === 'people' ? 0 : -1}
             class:active={mobileTab === 'people'}
             onclick={() => (mobileTab = 'people')}>People <span>{room.members.length}</span></button
           ><button
+            id="room-tab-activity"
             role="tab"
+            aria-controls="room-panel-activity"
             aria-selected={mobileTab === 'activity'}
+            tabindex={mobileTab === 'activity' ? 0 : -1}
             class:active={mobileTab === 'activity'}
             onclick={() => (mobileTab = 'activity')}>Activity</button
           >
         </div>
-        <section class:hidden-mobile={mobileTab !== 'queue'}>
+        <div
+          id="room-panel-queue"
+          class="room-panel"
+          role="tabpanel"
+          aria-labelledby="room-tab-queue"
+          class:hidden-mobile={mobileTab !== 'queue'}
+        >
           <header>
             <h2>Queue</h2>
             <div class="queue-tools">
@@ -915,8 +975,14 @@
                 {#each room.history as item}<li><span>{item.title}</span></li>{/each}
               </ul>
             </details>{/if}
-        </section>
-        <section class:hidden-mobile={mobileTab !== 'people'}>
+        </div>
+        <div
+          id="room-panel-people"
+          class="room-panel"
+          role="tabpanel"
+          aria-labelledby="room-tab-people"
+          class:hidden-mobile={mobileTab !== 'people'}
+        >
           <header>
             <h2>Participants</h2>
             <span class="online-count"
@@ -951,10 +1017,16 @@
                   </details>{/if}
               </li>{/each}
           </ul>
-        </section>
-        <section class="activity hidden-desktop" class:hidden-mobile={mobileTab !== 'activity'}>
+        </div>
+        <div
+          id="room-panel-activity"
+          role="tabpanel"
+          aria-labelledby="room-tab-activity"
+          class="room-panel activity hidden-desktop"
+          class:hidden-mobile={mobileTab !== 'activity'}
+        >
           {@render Activity(room.events)}
-        </section>
+        </div>
       </aside>
     </section>
     <section class="activity-panel panel">
@@ -987,14 +1059,14 @@
           role="alertdialog"
           aria-modal="true"
           aria-label={confirmDialog.title}
+          use:focusTrap
           transition:scale={{ start: 0.94, duration: 180 }}
         >
           <p>{confirmDialog.title}</p>
           <div class="modal-actions">
             <button class="secondary" onclick={() => resolveConfirm(false)}>Cancel</button><button
               class={confirmDialog.danger ? 'danger' : ''}
-              onclick={() => resolveConfirm(true)}
-              use:autofocus>{confirmDialog.confirmLabel}</button
+              onclick={() => resolveConfirm(true)}>{confirmDialog.confirmLabel}</button
             >
           </div>
         </div>
@@ -1345,10 +1417,10 @@
     position: sticky;
     top: 72px;
   }
-  .side-column section {
+  .side-column .room-panel {
     border-bottom: 1px solid var(--border-subtle);
   }
-  .side-column section > header {
+  .side-column .room-panel > header {
     padding: 0.9rem 1rem;
     display: flex;
     justify-content: space-between;

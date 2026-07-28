@@ -30,7 +30,7 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   const thirdContext = await browser.newContext();
   const owner = await ownerContext.newPage();
   await owner.goto('/');
-  await owner.getByRole('button', { name: 'Create a room' }).click();
+  await owner.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
   await expect(owner).toHaveURL(/\/room\/([A-Z2-7]{16})$/);
   // A new room starts with a preset cued and loads YouTube's player on entry.
   await expect(owner.getByText(/loads YouTube's privacy-enhanced player/)).toBeVisible();
@@ -149,7 +149,7 @@ test('mobile navigation and room empty states remain usable', async ({ browser }
   await page.getByRole('link', { name: 'Discover' }).click();
   await expect(page.getByRole('heading', { name: 'Invite-only early beta' })).toBeVisible();
   await page.goto('/');
-  await page.getByRole('button', { name: 'Create a room' }).click();
+  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
   await expect(page).toHaveURL(/\/room\/[A-Z2-7]{16}$/);
   await expect(page.getByText('The queue is empty.')).toBeVisible();
   await expect(page.getByRole('option', { name: 'Public' })).toHaveCount(0);
@@ -182,7 +182,7 @@ test('account room library, private invitations, transfer, sessions and deletion
 
   await register(owner, ownerName);
   await owner.goto('/');
-  await owner.getByRole('button', { name: 'Create a room' }).click();
+  await owner.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
   await expect(owner).toHaveURL(/\/room\/([A-Z2-7]{16})$/);
   const roomURL = owner.url();
   const roomLabel = await owner.locator('.room-header h1').textContent();

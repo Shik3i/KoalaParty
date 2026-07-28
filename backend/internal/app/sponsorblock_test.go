@@ -36,6 +36,7 @@ func TestFetchSponsorSegmentsPrivacyAndFiltering(t *testing.T) {
 				{"category":"highlight","actionType":"poi","segment":[30,30]},
 				{"category":"sponsor","actionType":"mute","segment":[40,50]},
 				{"category":"unknown","actionType":"skip","segment":[60,70]},
+				{"category":"sponsor","actionType":"skip","segment":[80,90000]},
 				{"category":"sponsor","actionType":"skip","segment":[90,80]}
 			]},
 			{"videoID":"someOther1","segments":[{"category":"sponsor","actionType":"skip","segment":[1,2]}]}

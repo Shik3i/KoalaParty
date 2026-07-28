@@ -80,7 +80,9 @@ type snapshot struct {
 
 func newID(bytes int) string {
 	b := make([]byte, bytes)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("secure random ID generation failed: %v", err))
+	}
 	return strings.TrimRight(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b), "=")
 }
 func roomLabel(id string) string {
@@ -156,19 +158,19 @@ func (a *application) roomPreviews(w http.ResponseWriter, r *http.Request, p pri
 		}
 		seen[id] = true
 		var title, thumbnail, status, updatedAt string
-		var position float64
-		err := a.db.QueryRowContext(r.Context(), `SELECT coalesce(m.title,''),coalesce(m.thumbnail_url,''),p.status,p.position_seconds,p.updated_at
+		var position, playbackRate float64
+		err := a.db.QueryRowContext(r.Context(), `SELECT coalesce(m.title,''),coalesce(m.thumbnail_url,''),p.status,p.position_seconds,p.playback_rate,p.updated_at
 			FROM rooms r JOIN playback_states p ON p.room_id=r.id LEFT JOIN media_items m ON m.id=p.current_media_id
 			WHERE r.id=? AND r.deleted_at IS NULL AND EXISTS (
 				SELECT 1 FROM room_members rm JOIN identities i ON i.id=rm.identity_id
 				WHERE rm.room_id=r.id AND (i.id=? OR (i.account_id IS NOT NULL AND i.account_id=?))
-			)`, id, p.IdentityID, p.AccountID).Scan(&title, &thumbnail, &status, &position, &updatedAt)
+			)`, id, p.IdentityID, p.AccountID).Scan(&title, &thumbnail, &status, &position, &playbackRate, &updatedAt)
 		if err != nil {
 			continue
 		}
 		if status == "playing" {
 			if updated, parseErr := time.Parse("2006-01-02 15:04:05", updatedAt); parseErr == nil {
-				position += time.Since(updated.UTC()).Seconds()
+				position += time.Since(updated.UTC()).Seconds() * playbackRate
 			}
 		}
 		out = append(out, map[string]any{"id": id, "label": roomLabel(id), "title": title, "thumbnail": thumbnail, "status": status, "position": position, "participants": a.hub.activeCount(id)})
@@ -242,17 +244,9 @@ func (a *application) joinAndSnapshot(ctx context.Context, id string, p principa
 			return snapshot{}, errors.New("not_allowed")
 		}
 	}
-	var existingMember, memberCount int
+	var existingMember int
 	if e = tx.QueryRowContext(ctx, "SELECT count(*) FROM room_members WHERE room_id=? AND identity_id=?", id, p.IdentityID).Scan(&existingMember); e != nil {
 		return snapshot{}, e
-	}
-	if existingMember == 0 {
-		if e = tx.QueryRowContext(ctx, "SELECT count(*) FROM room_members WHERE room_id=?", id).Scan(&memberCount); e != nil {
-			return snapshot{}, e
-		}
-		if memberCount >= maxRoomMembers {
-			return snapshot{}, errors.New("room_full")
-		}
 	}
 	res, e := tx.ExecContext(ctx, "INSERT INTO room_members(room_id,identity_id,role) VALUES(?,?,'member') ON CONFLICT(room_id,identity_id) DO NOTHING", id, p.IdentityID)
 	if e != nil {

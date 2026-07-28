@@ -139,7 +139,13 @@ func TestAccountSelfServiceAndSessions(t *testing.T) {
 	if profile.Code != 200 || !strings.Contains(profile.Body.String(), "New Koala") {
 		t.Fatalf("profile: %d %s", profile.Code, profile.Body.String())
 	}
-	_, restored := exchange(t, a, p.IdentityID, strings.Repeat("3", 43))
+	exchangeBody, _ := json.Marshal(identityRequest{ID: p.IdentityID, Secret: strings.Repeat("3", 43), DisplayName: "Calm Koala"})
+	exchangeRequest := httptest.NewRequest("POST", "/api/identity/exchange", bytes.NewReader(exchangeBody))
+	exchangeRequest.AddCookie(cookie)
+	exchangeResponse := httptest.NewRecorder()
+	a.exchangeIdentity(exchangeResponse, exchangeRequest)
+	var restored principal
+	_ = json.Unmarshal(exchangeResponse.Body.Bytes(), &restored)
 	if restored.DisplayName != "New Koala" {
 		t.Fatalf("identity exchange replaced account profile with stale browser name: %q", restored.DisplayName)
 	}

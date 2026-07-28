@@ -4,6 +4,32 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-28
+
+### Security
+
+- Bound session creation to trusted origins, same-site Fetch Metadata, and JSON requests; production sessions now use a `__Host-` cookie.
+- Prevented permanent browser identity secrets from recreating account sessions after logout, revocation, or expiry. Restoring a linked account now requires its password.
+- Equalized failed-login password hashing to remove the username timing oracle and made logout report database failures instead of silently retaining sessions.
+- Restricted WebSocket connections per identity, session, and client IP; added aggregate command/reaction limits and bounded per-client write queues that disconnect slow consumers.
+- Tightened the Content Security Policy to same-origin WebSocket connections and bounded SponsorBlock segment timestamps.
+
+### Changed
+
+- Room capacity now counts 100 active identities instead of historical membership rows, preventing permanent room lockout after a popular event.
+- Split login and anonymous identity rate limits, serialized admin setting commits with runtime updates, and added race tests to CI and release gates.
+- Added immutable caching for fingerprinted assets, no-cache HTML delivery, and an optimized 64px favicon.
+- Made room creation the primary landing-page action while keeping public discovery secondary.
+- Clarified YouTube data processing and the absence of KoalaParty analytics rather than making an absolute no-tracking claim.
+
+### Fixed
+
+- Room previews now advance playing positions at the synchronized playback rate.
+- Confirmation dialogs now trap and restore focus; room/admin tabs support ARIA relationships and keyboard navigation.
+- Playback progress no longer exposes an invalid zero ARIA maximum, active navigation uses `aria-current`, and the global error boundary no longer displays raw exceptions.
+- Increased the Playwright server startup allowance for clean builds and added regression coverage for session bootstrap, linked-device reauthentication, room/connection limits, slow clients, concurrent settings, cache headers, SponsorBlock bounds, and playback-rate previews.
+- Updated release image examples, supported-version documentation, automatic YouTube-loading test documentation, and privacy wording.
+
 ## [0.10.1] - 2026-07-26
 
 ### Added

@@ -114,6 +114,10 @@ func (a *application) exchangeIdentity(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, current)
 		return
 	}
+	if linkedAccount.Valid {
+		problem(w, http.StatusUnauthorized, "account_login_required", "Log in to restore this account on this device.")
+		return
+	}
 	a.issueSession(w, r, in.ID)
 }
 
@@ -139,7 +143,7 @@ func (a *application) issueSession(w http.ResponseWriter, r *http.Request, ident
 		problem(w, 500, "session_failed", "Could not create session.")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "kp_session", Value: token, Path: "/", HttpOnly: true, Secure: a.cookieSecure, SameSite: http.SameSiteLaxMode, Expires: expires})
+	http.SetCookie(w, &http.Cookie{Name: a.sessionCookieName(), Value: token, Path: "/", HttpOnly: true, Secure: a.cookieSecure, SameSite: http.SameSiteLaxMode, Expires: expires})
 	p.CSRF = csrf
 	writeJSON(w, 200, p)
 }
@@ -156,11 +160,17 @@ func (a *application) principalByIdentity(id string) (principal, error) {
 	return p, err
 }
 func (a *application) authenticate(r *http.Request) (principal, error) {
-	c, e := r.Cookie("kp_session")
+	c, e := r.Cookie(a.sessionCookieName())
 	if e != nil {
 		return principal{}, e
 	}
 	return a.principalBySessionHash(tokenHash(c.Value))
+}
+func (a *application) sessionCookieName() string {
+	if a.cookieSecure {
+		return "__Host-kp_session"
+	}
+	return "kp_session"
 }
 func (a *application) principalBySessionHash(sessionHash string) (principal, error) {
 	var p principal

@@ -219,7 +219,7 @@ func (a *application) accountPassword(w http.ResponseWriter, r *http.Request, p 
 	}
 	var revokedSessions []string
 	if err == nil {
-		revokedSessions, err = deleteOtherSessions(r.Context(), tx, p.AccountID, currentSessionHash(r))
+		revokedSessions, err = deleteOtherSessions(r.Context(), tx, p.AccountID, a.currentSessionHash(r))
 	}
 	if err == nil {
 		err = tx.Commit()
@@ -238,7 +238,7 @@ func (a *application) accountSessions(w http.ResponseWriter, r *http.Request, p 
 	if !requireAccount(w, p) {
 		return
 	}
-	currentHash := currentSessionHash(r)
+	currentHash := a.currentSessionHash(r)
 	if r.Method == http.MethodGet {
 		rows, err := a.db.QueryContext(r.Context(), `SELECT s.token_hash,s.created_at,s.expires_at FROM sessions s JOIN identities i ON i.id=s.identity_id WHERE i.account_id=? AND s.expires_at>CURRENT_TIMESTAMP ORDER BY s.created_at DESC`, p.AccountID)
 		if err != nil {
@@ -276,7 +276,7 @@ func (a *application) revokeSession(w http.ResponseWriter, r *http.Request, p pr
 		return
 	}
 	id := r.PathValue("sessionId")
-	if id == currentSessionHash(r) {
+	if id == a.currentSessionHash(r) {
 		problem(w, 409, "current_session", "Use log out to end the current session.")
 		return
 	}
@@ -293,8 +293,8 @@ func (a *application) revokeSession(w http.ResponseWriter, r *http.Request, p pr
 	w.WriteHeader(204)
 }
 
-func currentSessionHash(r *http.Request) string {
-	cookie, err := r.Cookie("kp_session")
+func (a *application) currentSessionHash(r *http.Request) string {
+	cookie, err := r.Cookie(a.sessionCookieName())
 	if err != nil {
 		return ""
 	}
@@ -389,6 +389,6 @@ func (a *application) deleteOwnAccount(w http.ResponseWriter, r *http.Request, p
 	for _, room := range rooms {
 		a.hub.disconnectRoom(room)
 	}
-	http.SetCookie(w, &http.Cookie{Name: "kp_session", Value: "", Path: "/", HttpOnly: true, Secure: a.cookieSecure, MaxAge: -1, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: a.sessionCookieName(), Value: "", Path: "/", HttpOnly: true, Secure: a.cookieSecure, MaxAge: -1, SameSite: http.SameSiteLaxMode})
 	w.WriteHeader(204)
 }

@@ -76,6 +76,8 @@ func (a *application) adminSettings(w http.ResponseWriter, r *http.Request, p pr
 		})
 		return
 	}
+	a.settingsUpdateMu.Lock()
+	defer a.settingsUpdateMu.Unlock()
 
 	var in struct {
 		SessionTTL        string `json:"sessionTTL"`

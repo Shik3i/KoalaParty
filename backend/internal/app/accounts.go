@@ -16,6 +16,13 @@ import (
 )
 
 var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9_]{3,24}$`)
+var dummyPasswordHash = func() string {
+	hash, err := hashPassword("invalid-login-dummy-password")
+	if err != nil {
+		panic(err)
+	}
+	return hash
+}()
 
 func hashPassword(password string) (string, error) {
 	if len(password) < 10 || len(password) > 128 {
@@ -106,20 +113,28 @@ func (a *application) login(w http.ResponseWriter, r *http.Request) {
 	}
 	var accountID, hash, identityID string
 	e := a.db.QueryRow(`SELECT a.id,a.password_hash,i.id FROM accounts a JOIN identities i ON i.account_id=a.id WHERE a.username=? ORDER BY i.created_at LIMIT 1`, strings.TrimSpace(in.Username)).Scan(&accountID, &hash, &identityID)
-	if e != nil || !verifyPassword(hash, in.Password) {
+	candidateHash := dummyPasswordHash
+	if e == nil {
+		candidateHash = hash
+	}
+	valid := verifyPassword(candidateHash, in.Password)
+	if e != nil || !valid {
 		problem(w, 401, "invalid_credentials", "Username or password is invalid.")
 		return
 	}
 	a.issueSession(w, r, identityID)
 }
 func (a *application) logout(w http.ResponseWriter, r *http.Request, p principal) {
-	c, _ := r.Cookie("kp_session")
+	c, _ := r.Cookie(a.sessionCookieName())
 	if c != nil {
 		sessionHash := tokenHash(c.Value)
-		_, _ = a.db.Exec("DELETE FROM sessions WHERE token_hash=?", sessionHash)
+		if _, err := a.db.Exec("DELETE FROM sessions WHERE token_hash=?", sessionHash); err != nil {
+			problem(w, 500, "database_error", "Could not end session.")
+			return
+		}
 		a.hub.disconnectSession(sessionHash)
 	}
-	http.SetCookie(w, &http.Cookie{Name: "kp_session", Value: "", Path: "/", HttpOnly: true, Secure: a.cookieSecure, MaxAge: -1, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: a.sessionCookieName(), Value: "", Path: "/", HttpOnly: true, Secure: a.cookieSecure, MaxAge: -1, SameSite: http.SameSiteLaxMode})
 	w.WriteHeader(204)
 }
 
