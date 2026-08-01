@@ -4,6 +4,8 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-08-01
+
 ### Fixed
 
 - Prevented failed, initializing, or replaced YouTube embeds from emitting a false end-of-video event and automatically consuming the shared queue.
