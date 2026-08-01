@@ -20,6 +20,9 @@ export interface StateChangeInput {
   guarded: boolean; // true while a recent programmatic action still echoes back
   ready: boolean; // the player has fired onReady
   hasVideo: boolean; // a video is currently loaded (lastVideo set)
+  videoMatches: boolean; // the iframe still reports the media we believe is loaded
+  currentTime: number; // the iframe's current media position
+  duration: number; // the iframe's duration; unavailable/failed embeds report 0
   canControl: boolean; // this viewer may drive playback for the room
 }
 
@@ -31,11 +34,16 @@ export interface StateChangeInput {
 // fallback, a correcting seek, or a requested play — and must never be relayed to
 // the server. In particular a browser that blocks autoplay reports the video as
 // PAUSED; without the guard a passive-but-controlling viewer would forward that as a
-// real pause and stop the video for everyone in the room. A true end-of-video is the
-// one exception: it must always advance the queue, even inside the guard window.
+// real pause and stop the video for everyone in the room. ENDED is handled more
+// strictly: YouTube can emit it while replacing a video or failing an embed, so it
+// only advances when the current iframe media is verifiably at its natural end.
 export function stateChangeAction(i: StateChangeInput): StateChangeAction {
-  if (i.state === PLAYER_STATE.ENDED) return 'ended';
   if (!i.ready || !i.hasVideo) return 'ignore';
+  if (i.state === PLAYER_STATE.ENDED) {
+    const finiteTimeline = Number.isFinite(i.currentTime) && Number.isFinite(i.duration) && i.duration > 0;
+    const endTolerance = Math.max(2, Math.min(5, i.duration * 0.01));
+    return i.videoMatches && finiteTimeline && i.currentTime >= i.duration - endTolerance ? 'ended' : 'ignore';
+  }
   if (i.guarded) return 'ignore';
   if (i.state === PLAYER_STATE.PLAYING && i.serverStatus !== 'playing') {
     return i.canControl ? 'emit-play' : 'snap-pause';
@@ -44,6 +52,25 @@ export function stateChangeAction(i: StateChangeInput): StateChangeAction {
     return i.canControl ? 'emit-pause' : 'snap-play';
   }
   return 'ignore';
+}
+
+export interface PlaybackAnchorKey {
+  mediaId: string;
+  revision: number;
+}
+
+// Room snapshots continuously extrapolate `playback.position` while playing. The
+// playback revision is the stable signal that an actual player command happened;
+// queue, title, participant, and activity snapshots must not restart the player.
+export function shouldReanchorPlayback(current: PlaybackAnchorKey, next: PlaybackAnchorKey): boolean {
+  return current.mediaId !== next.mediaId || current.revision !== next.revision;
+}
+
+// The iframe API reports epoch-like pseudo durations for some continuous live
+// streams. KoalaParty positions are bounded to seven days server-side, so anything
+// beyond that is not a useful seekable duration and must not drive progress/end UI.
+export function normalizedDuration(duration: number): number {
+  return Number.isFinite(duration) && duration > 0 && duration <= 604_800 ? duration : 0;
 }
 
 export function timelineJump(

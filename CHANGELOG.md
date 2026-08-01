@@ -4,6 +4,18 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Prevented failed, initializing, or replaced YouTube embeds from emitting a false end-of-video event and automatically consuming the shared queue.
+- Kept player anchors stable across unrelated queue, title, participant, SponsorBlock, and activity snapshots instead of repeatedly restarting playback and suppressing real controls.
+- Isolated play, pause, seek, and playback-rate concurrency with the playback revision; automatic queue advances are now bound to the media that actually ended.
+- Cleared transient YouTube error overlays after playback recovers, reset per-video autoplay and duration state, and normalized continuous-live-stream pseudo durations.
+- Made the broken-video skip discard unavailable media even when queue looping is enabled.
+
+### Changed
+
+- Accepted YouTube Music, Shorts, and privacy-enhanced embed URLs while rejecting lookalike non-YouTube domains.
+
 ## [0.11.0] - 2026-07-28
 
 ### Security

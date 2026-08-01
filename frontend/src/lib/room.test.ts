@@ -6,8 +6,14 @@ describe('YouTube input', () => {
     ['dQw4w9WgXcQ', 'dQw4w9WgXcQ'],
     ['https://youtu.be/dQw4w9WgXcQ', 'dQw4w9WgXcQ'],
     ['https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'dQw4w9WgXcQ'],
+    ['https://music.youtube.com/watch?v=dQw4w9WgXcQ', 'dQw4w9WgXcQ'],
+    ['https://www.youtube.com/shorts/dQw4w9WgXcQ', 'dQw4w9WgXcQ'],
+    ['https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ', 'dQw4w9WgXcQ'],
   ])('parses %s', (input, expected) => expect(parseYouTube(input)).toBe(expected));
-  it('rejects unrelated URLs', () => expect(parseYouTube('https://example.com/video')).toBeNull());
+  it.each(['https://example.com/video', 'https://notyoutube.com/watch?v=dQw4w9WgXcQ'])(
+    'rejects unrelated URL %s',
+    (input) => expect(parseYouTube(input)).toBeNull(),
+  );
 });
 describe('activity formatting', () => {
   it('renders structured seek events', () =>

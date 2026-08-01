@@ -12,10 +12,11 @@ import (
 )
 
 type command struct {
-	Type             string          `json:"type"`
-	RequestID        string          `json:"requestId"`
-	ExpectedRevision int64           `json:"expectedRevision"`
-	Payload          json.RawMessage `json:"payload"`
+	Type                     string          `json:"type"`
+	RequestID                string          `json:"requestId"`
+	ExpectedRevision         int64           `json:"expectedRevision"`
+	ExpectedPlaybackRevision *int64          `json:"expectedPlaybackRevision,omitempty"`
+	Payload                  json.RawMessage `json:"payload"`
 }
 
 func (a *application) roomCommand(w http.ResponseWriter, r *http.Request, p principal) {
@@ -110,6 +111,8 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	// keeps adding a video fast even when the server's outbound network to YouTube
 	// is slow or unavailable.
 	var mediaTitle, enrichVideoID string
+	var conditionalSkipMediaID string
+	var discardSkippedMedia bool
 	if c.Type == "queue.add" || c.Type == "queue.play_now" {
 		var in struct {
 			VideoID string `json:"videoId"`
@@ -122,6 +125,16 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		if a.fetchTitle != nil {
 			enrichVideoID = in.VideoID
 		}
+	} else if c.Type == "queue.skip" {
+		var in struct {
+			MediaID        string `json:"mediaId"`
+			DiscardCurrent bool   `json:"discardCurrent"`
+		}
+		if len(c.Payload) > 0 && json.Unmarshal(c.Payload, &in) != nil {
+			return snapshot{}, errors.New("invalid queue skip")
+		}
+		conditionalSkipMediaID = in.MediaID
+		discardSkippedMedia = in.DiscardCurrent
 	}
 	tx, e := a.db.BeginTx(ctx, nil)
 	if e != nil {
@@ -132,7 +145,24 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	if e = tx.QueryRow("SELECT revision FROM rooms WHERE id=? AND deleted_at IS NULL", room).Scan(&current); e != nil {
 		return snapshot{}, errDenied
 	}
-	if c.ExpectedRevision != current {
+	playbackCommand := strings.HasPrefix(c.Type, "player.")
+	if playbackCommand && c.ExpectedPlaybackRevision != nil {
+		var playbackRevision int64
+		if e = tx.QueryRow("SELECT revision FROM playback_states WHERE room_id=?", room).Scan(&playbackRevision); e != nil {
+			return snapshot{}, e
+		}
+		if *c.ExpectedPlaybackRevision != playbackRevision {
+			return snapshot{}, errStale
+		}
+	} else if conditionalSkipMediaID != "" {
+		var currentMediaID sql.NullString
+		if e = tx.QueryRow("SELECT current_media_id FROM playback_states WHERE room_id=?", room).Scan(&currentMediaID); e != nil {
+			return snapshot{}, e
+		}
+		if !currentMediaID.Valid || currentMediaID.String != conditionalSkipMediaID {
+			return snapshot{}, errStale
+		}
+	} else if c.ExpectedRevision != current {
 		return snapshot{}, errStale
 	}
 	eventType := c.Type
@@ -324,7 +354,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		if e = addCurrentToHistory(tx, room); e != nil {
 			return snapshot{}, e
 		}
-		if loop {
+		if loop && !discardSkippedMedia {
 			var currentMedia sql.NullString
 			_ = tx.QueryRow("SELECT current_media_id FROM playback_states WHERE room_id=?", room).Scan(&currentMedia)
 			if currentMedia.Valid {

@@ -1,6 +1,10 @@
 # WebSocket protocol
 
-Connect to `/api/rooms/{roomId}/ws` with the session cookie. The server sends and broadcasts `snapshot` messages. Commands use `{ "type": "player.play", "requestId": "...", "expectedRevision": 3, "payload": {} }`; failures use `error` messages. Every state-changing command contains the latest room-wide `expectedRevision`; stale commands are rejected. Playback maintains a separate playback revision. Heartbeats and drift corrections are not activity events.
+Connect to `/api/rooms/{roomId}/ws` with the session cookie. The server sends and broadcasts `snapshot` messages. Commands use `{ "type": "player.play", "requestId": "...", "expectedRevision": 3, "expectedPlaybackRevision": 2, "payload": {} }`; failures use `error` messages. Every state-changing command contains the latest room-wide `expectedRevision`; stale commands are rejected. Player commands additionally carry the separate playback revision, so unrelated queue, participant, title, or activity updates cannot invalidate a simultaneous play, pause, seek, or rate change. Older clients without `expectedPlaybackRevision` retain room-wide revision behavior.
+
+Automatic end-of-video `queue.skip` commands carry the current internal `mediaId`. The server accepts such a skip across unrelated room revisions only while that exact media item remains current. Delayed or duplicate clients therefore cannot skip the replacement video.
+
+The explicit broken-player action sends `discardCurrent: true`; this prevents an unavailable or non-embeddable video from being inserted into the queue again when queue looping is enabled.
 
 The server sends a ping every 25 seconds and requires pong traffic within 70 seconds. It revalidates the backing session before every command and closes the socket when the session expires, is logged out, is revoked, or is invalidated by a password change. Non-reaction commands are limited to 180 per minute per socket and per identity. Reactions have an aggregate per-identity limit. Each room accepts at most three connections per identity/session, and each client IP accepts at most twelve connections across rooms. Outbound messages use bounded per-client queues; a slow client is disconnected instead of blocking room-wide fan-out.
 

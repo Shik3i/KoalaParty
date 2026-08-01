@@ -79,8 +79,13 @@ export function parseYouTube(input: string): string | null {
   if (/^[A-Za-z0-9_-]{11}$/.test(value)) return value;
   try {
     const u = new URL(value);
-    if (u.hostname === 'youtu.be') return valid(u.pathname.slice(1));
-    if (u.hostname.endsWith('youtube.com'))
+    if (u.hostname === 'youtu.be' || u.hostname === 'www.youtu.be') return valid(u.pathname.slice(1));
+    if (
+      u.hostname === 'youtube.com' ||
+      u.hostname.endsWith('.youtube.com') ||
+      u.hostname === 'youtube-nocookie.com' ||
+      u.hostname.endsWith('.youtube-nocookie.com')
+    )
       return valid(u.searchParams.get('v') ?? u.pathname.split('/').filter(Boolean).at(-1) ?? '');
   } catch {}
   return null;

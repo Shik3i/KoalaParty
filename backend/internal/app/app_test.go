@@ -255,6 +255,110 @@ func TestQueuePolishCommands(t *testing.T) {
 	}
 }
 
+func TestPlayerCommandsUsePlaybackRevisionAcrossUnrelatedRoomUpdates(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174061", strings.Repeat("r", 43))
+	room := createTestRoom(t, a, cookie, owner)
+	s, err := a.snapshot(t.Context(), room, owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleRoomRevision := s.Revision
+	playbackRevision := s.Playback.Revision
+	s, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:             "queue.add",
+		ExpectedRevision: s.Revision,
+		Payload:          json.RawMessage(`{"videoId":"race1234567"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Playback.Revision != playbackRevision {
+		t.Fatalf("queue update changed playback revision: got %d want %d", s.Playback.Revision, playbackRevision)
+	}
+	s, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:                     "player.play",
+		ExpectedRevision:         staleRoomRevision,
+		ExpectedPlaybackRevision: &playbackRevision,
+		Payload:                  json.RawMessage(`{"position":12}`),
+	})
+	if err != nil || s.Playback.Status != "playing" {
+		t.Fatalf("player command lost to unrelated room revision: snapshot=%+v err=%v", s.Playback, err)
+	}
+	if _, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:                     "player.pause",
+		ExpectedRevision:         s.Revision,
+		ExpectedPlaybackRevision: &playbackRevision,
+		Payload:                  json.RawMessage(`{"position":13}`),
+	}); !errors.Is(err, errStale) {
+		t.Fatalf("stale playback revision accepted: %v", err)
+	}
+}
+
+func TestAutomaticSkipIsBoundToCurrentMedia(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174062", strings.Repeat("s", 43))
+	room := createTestRoom(t, a, cookie, owner)
+	s, err := a.snapshot(t.Context(), room, owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentMediaID := s.Playback.Media.ID
+	staleRoomRevision := s.Revision
+	s, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:             "queue.add",
+		ExpectedRevision: s.Revision,
+		Payload:          json.RawMessage(`{"videoId":"next1234567"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:             "queue.skip",
+		ExpectedRevision: staleRoomRevision,
+		Payload:          json.RawMessage(`{"mediaId":"` + currentMediaID + `"}`),
+	})
+	if err != nil || s.Playback.Media == nil || s.Playback.Media.ProviderID != "next1234567" {
+		t.Fatalf("conditional automatic skip lost to unrelated update: playback=%+v err=%v", s.Playback, err)
+	}
+	if _, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:             "queue.skip",
+		ExpectedRevision: staleRoomRevision,
+		Payload:          json.RawMessage(`{"mediaId":"` + currentMediaID + `"}`),
+	}); !errors.Is(err, errStale) {
+		t.Fatalf("delayed automatic skip advanced the replacement media: %v", err)
+	}
+}
+
+func TestBrokenMediaSkipDoesNotLoopTheSameVideo(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174063", strings.Repeat("t", 43))
+	room := createTestRoom(t, a, cookie, owner)
+	s, err := a.snapshot(t.Context(), room, owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:             "queue.loop",
+		ExpectedRevision: s.Revision,
+		Payload:          json.RawMessage(`{"enabled":true}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:             "queue.skip",
+		ExpectedRevision: s.Revision,
+		Payload:          json.RawMessage(`{"discardCurrent":true}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Playback.Media != nil || len(s.Queue) != 0 {
+		t.Fatalf("discarded broken media was looped again: playback=%+v queue=%+v", s.Playback, s.Queue)
+	}
+}
+
 func TestHistoricalMembersDoNotFillRoomAndQueueCapacityIsBounded(t *testing.T) {
 	a := testApp(t)
 	ownerCookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174041", strings.Repeat("w", 43))

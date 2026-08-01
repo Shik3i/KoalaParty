@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Play, Warning, Hourglass, SkipForward, SpeakerSimpleSlash } from 'phosphor-svelte';
-  import { PLAYER_STATE, stateChangeAction, timelineJump } from '$lib/playerSync';
+  import { normalizedDuration, PLAYER_STATE, stateChangeAction, timelineJump } from '$lib/playerSync';
   import type { SponsorSegment } from '$lib/room';
   let {
     enabled = false,
@@ -51,6 +51,7 @@
   let failed = false;
   let ready = false;
   let lastVideo: string | null = null;
+  let confirmedVideo: string | null = null;
   let playerError = $state('');
 
   // The server is authoritative. `status`/`position`/`positionAt` describe the last
@@ -149,9 +150,13 @@
       const timeout = window.setTimeout(() => reject(new Error('YouTube player loading timed out.')), 12_000);
       const previous = w.onYouTubeIframeAPIReady;
       w.onYouTubeIframeAPIReady = () => {
-        previous?.();
         clearTimeout(timeout);
         resolve();
+        try {
+          previous?.();
+        } catch {
+          /* another consumer's callback must not break this player */
+        }
       };
       let script = document.querySelector<HTMLScriptElement>('script[src*="youtube.com/iframe_api"]');
       if (!script) {
@@ -213,12 +218,20 @@
   // gesture to the server. If the viewer lacks the capability, snap the player
   // back to the authoritative state instead of emitting.
   function handleStateChange(state: number) {
+    const iframeVideo = player?.getVideoData?.().video_id;
+    if (iframeVideo === lastVideo && (state === PLAYING || state === PAUSED || state === BUFFERING)) {
+      confirmedVideo = lastVideo;
+    }
+    if (state === PLAYING) playerError = '';
     const action = stateChangeAction({
       state,
       serverStatus: status,
       guarded: Date.now() < guardUntil,
       ready,
       hasVideo: !!lastVideo,
+      videoMatches: iframeVideo === lastVideo && confirmedVideo === lastVideo,
+      currentTime: currentTime(),
+      duration: normalizedDuration(player?.getDuration?.() ?? 0),
       canControl,
     });
     switch (action) {
@@ -272,7 +285,7 @@
     const now = Date.now();
     const t = currentTime();
     const state = player.getPlayerState?.();
-    const duration = player.getDuration?.() ?? 0;
+    const duration = normalizedDuration(player.getDuration?.() ?? 0);
     if (duration > 0 && Math.abs(duration - reportedDuration) > 0.5) {
       reportedDuration = duration;
       onDuration(duration);
@@ -345,6 +358,12 @@
     if (!ready) return;
     if (!videoId) {
       if (lastVideo) {
+        if (autoplayTimer) clearTimeout(autoplayTimer);
+        autoplayTimer = null;
+        mutedForAutoplay = false;
+        reportedDuration = 0;
+        onDuration(0);
+        confirmedVideo = null;
         player.stopVideo?.();
         player.clearVideo?.();
         lastVideo = null;
@@ -353,6 +372,12 @@
     }
     const target = Math.max(0, expectedPosition());
     if (lastVideo !== videoId) {
+      if (autoplayTimer) clearTimeout(autoplayTimer);
+      autoplayTimer = null;
+      mutedForAutoplay = false;
+      reportedDuration = 0;
+      onDuration(0);
+      confirmedVideo = null;
       guard(3000);
       const request = { videoId, startSeconds: target };
       if (status === 'playing') {

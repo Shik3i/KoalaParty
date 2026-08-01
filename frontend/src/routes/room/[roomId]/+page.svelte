@@ -16,6 +16,7 @@
     type Member,
     type SponsorSegment,
   } from '$lib/room';
+  import { shouldReanchorPlayback } from '$lib/playerSync';
   import {
     LinkSimple,
     Gear,
@@ -45,7 +46,7 @@
   // The playback anchor is only re-baselined when playback actually changes
   // (status, position, or media), so the extrapolated live position stays correct
   // across unrelated snapshots (a member joining, a queue edit, …).
-  let playbackAnchor = { position: 0, status: 'paused', mediaId: '', rate: 1, at: Date.now() };
+  let playbackAnchor = { position: 0, status: 'paused', mediaId: '', rate: 1, revision: -1, at: Date.now() };
   let disposed = false;
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -89,15 +90,16 @@
     const pb = next.playback;
     const mediaId = pb.media?.id ?? '';
     const rate = pb.rate || 1;
-    if (
-      !room ||
-      pb.position !== playbackAnchor.position ||
-      pb.status !== playbackAnchor.status ||
-      mediaId !== playbackAnchor.mediaId ||
-      rate !== playbackAnchor.rate
-    ) {
+    if (!room || shouldReanchorPlayback(playbackAnchor, { mediaId, revision: pb.revision })) {
       if (mediaId !== playbackAnchor.mediaId) mediaDuration = 0;
-      playbackAnchor = { position: pb.position, status: pb.status, mediaId, rate, at: Date.now() };
+      playbackAnchor = {
+        position: pb.position,
+        status: pb.status,
+        mediaId,
+        rate,
+        revision: pb.revision,
+        at: Date.now(),
+      };
     }
     room = next;
   }
@@ -202,7 +204,7 @@
   }
   function scheduleSeek(position: number) {
     if (seekTimer) clearTimeout(seekTimer);
-    seekTimer = setTimeout(() => command('player.seek', { position }), 300);
+    seekTimer = setTimeout(() => command('player.seek', { position }, { silentStale: true, bypassPending: true }), 300);
   }
   // Segments the room actually skips: only the acted-on categories, and only while the
   // room has SponsorBlock enabled. Passed to the player, which performs the jump.
@@ -368,6 +370,7 @@
             type,
             requestId: randomUUID(),
             expectedRevision: room.revision,
+            expectedPlaybackRevision: room.playback.revision,
             payload,
           }),
         }),
@@ -684,13 +687,20 @@
             canControl={can('playback.play_pause')}
             canSeek={can('playback.seek')}
             hasQueue={room.queue.length > 0}
-            onPlay={(pos) => command('player.play', { position: pos })}
-            onPause={(pos) => command('player.pause', { position: pos })}
+            onPlay={(pos) => command('player.play', { position: pos }, { silentStale: true, bypassPending: true })}
+            onPause={(pos) => command('player.pause', { position: pos }, { silentStale: true, bypassPending: true })}
             onSeek={scheduleSeek}
-            onRate={(newRate, pos) => command('player.rate', { rate: newRate, position: pos })}
+            onRate={(newRate, pos) =>
+              command('player.rate', { rate: newRate, position: pos }, { silentStale: true, bypassPending: true })}
             onSponsorSkip={skipSponsor}
-            onEnded={() => can('queue.skip') && command('queue.skip', {}, { silentStale: true })}
-            onSkip={can('queue.skip') ? () => command('queue.skip') : undefined}
+            onEnded={() =>
+              can('queue.skip') &&
+              command(
+                'queue.skip',
+                { mediaId: room?.playback.media?.id ?? '' },
+                { silentStale: true, bypassPending: true },
+              )}
+            onSkip={can('queue.skip') ? () => command('queue.skip', { discardCurrent: true }) : undefined}
             onDuration={(d) => (mediaDuration = d)}
             onDiagnostics={(value) => (diagnostics = value)}
           />{#if !room.playback.media && room.queue.length && can('queue.skip')}<button

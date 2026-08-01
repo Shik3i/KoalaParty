@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { PLAYER_STATE, stateChangeAction, timelineJump, type StateChangeInput } from './playerSync';
+import {
+  PLAYER_STATE,
+  normalizedDuration,
+  shouldReanchorPlayback,
+  stateChangeAction,
+  timelineJump,
+  type StateChangeInput,
+} from './playerSync';
 
 const { ENDED, PLAYING, PAUSED, BUFFERING } = PLAYER_STATE;
 
@@ -11,6 +18,9 @@ const base: StateChangeInput = {
   guarded: false,
   ready: true,
   hasVideo: true,
+  videoMatches: true,
+  currentTime: 98,
+  duration: 100,
   canControl: true,
 };
 
@@ -19,9 +29,17 @@ describe('stateChangeAction', () => {
     expect(stateChangeAction({ ...base, state: ENDED })).toBe('ended');
   });
 
-  it('advances on end of video even while guarded or before ready', () => {
+  it('advances a confirmed natural end even while guarded', () => {
     expect(stateChangeAction({ ...base, state: ENDED, guarded: true })).toBe('ended');
-    expect(stateChangeAction({ ...base, state: ENDED, ready: false, hasVideo: false })).toBe('ended');
+  });
+
+  it('ignores false ENDED events from initialization, video replacement and failed embeds', () => {
+    expect(stateChangeAction({ ...base, state: ENDED, ready: false })).toBe('ignore');
+    expect(stateChangeAction({ ...base, state: ENDED, hasVideo: false })).toBe('ignore');
+    expect(stateChangeAction({ ...base, state: ENDED, videoMatches: false })).toBe('ignore');
+    expect(stateChangeAction({ ...base, state: ENDED, currentTime: 0, duration: 0 })).toBe('ignore');
+    expect(stateChangeAction({ ...base, state: ENDED, currentTime: 12, duration: 100 })).toBe('ignore');
+    expect(stateChangeAction({ ...base, state: ENDED, currentTime: Number.NaN })).toBe('ignore');
   });
 
   it('ignores state changes before the player is ready or with no video', () => {
@@ -63,6 +81,30 @@ describe('stateChangeAction', () => {
     expect(stateChangeAction({ ...base, state: BUFFERING, serverStatus: 'playing' })).toBe('ignore');
     expect(stateChangeAction({ ...base, state: BUFFERING, serverStatus: 'paused' })).toBe('ignore');
   });
+});
+
+describe('playback anchors', () => {
+  it('does not re-anchor for an extrapolated position in an unrelated room snapshot', () => {
+    expect(shouldReanchorPlayback({ mediaId: 'video-a', revision: 7 }, { mediaId: 'video-a', revision: 7 })).toBe(
+      false,
+    );
+  });
+
+  it('re-anchors for a player command or media replacement', () => {
+    expect(shouldReanchorPlayback({ mediaId: 'video-a', revision: 7 }, { mediaId: 'video-a', revision: 8 })).toBe(true);
+    expect(shouldReanchorPlayback({ mediaId: 'video-a', revision: 7 }, { mediaId: 'video-b', revision: 7 })).toBe(true);
+  });
+});
+
+describe('player duration compatibility', () => {
+  it('keeps finite on-demand video durations', () => {
+    expect(normalizedDuration(4_375.961)).toBe(4_375.961);
+  });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 121_601_512])(
+    'treats %s as an unavailable or live-stream duration',
+    (duration) => expect(normalizedDuration(duration)).toBe(0),
+  );
 });
 
 describe('timelineJump', () => {
