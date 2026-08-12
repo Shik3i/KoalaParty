@@ -73,6 +73,35 @@ export function normalizedDuration(duration: number): number {
   return Number.isFinite(duration) && duration > 0 && duration <= 604_800 ? duration : 0;
 }
 
+// The IFrame API may report an empty video ID during its first error callback,
+// but an ID belonging to another loaded item is a stale callback from a prior
+// request and must not cover the active player.
+export function isCurrentVideoError(expectedVideoId: string | null, reportedVideoId: string): boolean {
+  return !!expectedVideoId && (!reportedVideoId || reportedVideoId === expectedVideoId);
+}
+
+export function playerErrorMessage(code: number): string {
+  switch (code) {
+    case 2:
+      return 'YouTube rejected this video request.';
+    case 5:
+      return 'YouTube could not play this video in the embedded player.';
+    case 100:
+      return 'This YouTube video no longer exists.';
+    case 101:
+    case 150:
+      return 'This video does not allow embedded playback.';
+    case 153:
+      return 'YouTube could not verify the embedded player origin.';
+    default:
+      return 'This video is unavailable or cannot be embedded.';
+  }
+}
+
+export function isRetryablePlayerError(code: number): boolean {
+  return code === 0 || code === 5 || ![2, 100, 101, 150, 153].includes(code);
+}
+
 export function timelineJump(
   currentTime: number,
   previousTime: number,

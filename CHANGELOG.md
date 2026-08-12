@@ -4,6 +4,20 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-08-12
+
+### Added
+
+- Added request-correlated structured server logs, runtime counters, and an admin metrics view for diagnosing failed HTTP, WebSocket, and command flows.
+- Added bounded local playback diagnostics with copyable event timelines for browser, network, YouTube API, autoplay, and synchronization failures.
+- Added idempotent command request IDs and a receipt migration so retries cannot duplicate queue or playback mutations.
+
+### Fixed
+
+- Recovered video startup after transient YouTube API, iframe, autoplay, visibility, or network failures with guarded retries, mute fallback, watchdogs, and explicit retry controls.
+- Prevented stale player callbacks and duplicate client retries from changing the current media or advancing the shared queue.
+- Added a deterministic E2E server shutdown path and direct binary startup so the complete browser suite exits cleanly on Windows.
+
 ## [0.11.1] - 2026-08-01
 
 ### Fixed

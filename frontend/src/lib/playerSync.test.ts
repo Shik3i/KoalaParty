@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   PLAYER_STATE,
+  isCurrentVideoError,
+  isRetryablePlayerError,
   normalizedDuration,
+  playerErrorMessage,
   shouldReanchorPlayback,
   stateChangeAction,
   timelineJump,
@@ -105,6 +108,35 @@ describe('player duration compatibility', () => {
     'treats %s as an unavailable or live-stream duration',
     (duration) => expect(normalizedDuration(duration)).toBe(0),
   );
+});
+
+describe('player error attribution', () => {
+  it('accepts an active or not-yet-reported video and rejects a stale one', () => {
+    expect(isCurrentVideoError('active', 'active')).toBe(true);
+    expect(isCurrentVideoError('active', '')).toBe(true);
+    expect(isCurrentVideoError('active', 'replacement')).toBe(false);
+    expect(isCurrentVideoError(null, 'active')).toBe(false);
+  });
+
+  it.each([
+    [2, 'YouTube rejected this video request.'],
+    [5, 'YouTube could not play this video in the embedded player.'],
+    [100, 'This YouTube video no longer exists.'],
+    [101, 'This video does not allow embedded playback.'],
+    [150, 'This video does not allow embedded playback.'],
+    [153, 'YouTube could not verify the embedded player origin.'],
+    [999, 'This video is unavailable or cannot be embedded.'],
+  ])('maps YouTube error %s to a useful message', (code, message) => {
+    expect(playerErrorMessage(code)).toBe(message);
+  });
+
+  it('only retries transient or unknown player failures', () => {
+    expect(isRetryablePlayerError(5)).toBe(true);
+    expect(isRetryablePlayerError(0)).toBe(true);
+    expect(isRetryablePlayerError(153)).toBe(false);
+    expect(isRetryablePlayerError(150)).toBe(false);
+    expect(isRetryablePlayerError(999)).toBe(true);
+  });
 });
 
 describe('timelineJump', () => {

@@ -15,6 +15,7 @@
     onlineUsers: number;
     activeRooms: ActiveRoom[];
   }
+  type RuntimeMetrics = Record<string, number>;
 
   interface Settings {
     sessionTTL: string;
@@ -44,6 +45,7 @@
 
   let activeTab = $state<'stats' | 'settings' | 'reports'>('stats');
   let stats: Stats | null = $state(null);
+  let metrics: RuntimeMetrics | null = $state(null);
   let settings: Settings | null = $state(null);
   let reports: Report[] | null = $state(null);
   let reportsTotal = $state(0);
@@ -76,16 +78,18 @@
     loading = true;
     error = '';
     try {
-      const [statsResult, settingsResult, reportsResult] = await Promise.allSettled([
+      const [statsResult, metricsResult, settingsResult, reportsResult] = await Promise.allSettled([
         api<Stats>('/api/admin/stats'),
+        api<RuntimeMetrics>('/api/admin/metrics'),
         api<Settings>('/api/admin/settings'),
         api<ReportPage>('/api/admin/reports'),
       ]);
       stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
+      metrics = metricsResult.status === 'fulfilled' ? metricsResult.value : null;
       settings = settingsResult.status === 'fulfilled' ? settingsResult.value : null;
       reports = reportsResult.status === 'fulfilled' ? reportsResult.value.reports : null;
       reportsTotal = reportsResult.status === 'fulfilled' ? reportsResult.value.total : 0;
-      const failures = [statsResult, settingsResult, reportsResult].filter(
+      const failures = [statsResult, metricsResult, settingsResult, reportsResult].filter(
         (result): result is PromiseRejectedResult => result.status === 'rejected',
       );
       if (failures.length) {
@@ -94,6 +98,7 @@
       }
     } catch (e) {
       stats = null;
+      metrics = null;
       settings = null;
       reports = null;
       reportsTotal = 0;
@@ -231,6 +236,28 @@
             <span class="stat-value">{stats.totalRooms}</span>
             <p class="muted">Active created rooms</p>
           </div>
+        </section>
+
+        <section class="runtime-metrics-section">
+          <div class="section-heading">
+            <div>
+              <h2>Runtime diagnostics</h2>
+              <p class="muted">Process-lifetime counters; no payloads, cookies, or raw room IDs.</p>
+            </div>
+            <button class="secondary" type="button" onclick={loadData}>Refresh</button>
+          </div>
+          {#if metrics}
+            <div class="metrics-grid">
+              {#each Object.entries(metrics) as [name, value]}
+                <div class="metric-card">
+                  <span>{name.replaceAll('_', ' ')}</span>
+                  <strong>{value.toLocaleString()}</strong>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <p class="empty-state">Runtime metrics are unavailable.</p>
+          {/if}
         </section>
 
         <section class="active-rooms-section">
@@ -471,6 +498,45 @@
   .active-rooms-section h2 {
     font-size: 1.3rem;
     margin-bottom: 1rem;
+  }
+  .runtime-metrics-section {
+    margin-bottom: 2.5rem;
+  }
+  .section-heading {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .section-heading h2 {
+    margin: 0 0 0.35rem;
+    font-size: 1.3rem;
+  }
+  .section-heading p {
+    margin: 0;
+  }
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.75rem;
+  }
+  .metric-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--surface-panel);
+  }
+  .metric-card span {
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    text-transform: capitalize;
+  }
+  .metric-card strong {
+    font-size: 1.35rem;
   }
   .table-wrapper {
     overflow-x: auto;

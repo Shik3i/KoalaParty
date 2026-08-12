@@ -1,6 +1,6 @@
 # Testing strategy
 
-`make verify` runs backend race tests and static analysis plus frontend formatting, lint, type checks, unit tests, and production build. CI also builds the Docker image. Automated browser tests cover application synchronization and automatic privacy-enhanced YouTube API loading on room entry; real YouTube playback remains a manual smoke test.
+`make verify` runs backend race tests and static analysis plus frontend formatting, lint, type checks, unit tests, and production build. CI also builds the Docker image. Automated browser tests cover application synchronization and automatic privacy-enhanced YouTube API loading on room entry; real YouTube playback remains a manual smoke test. The player also records a bounded local diagnostic ring (never uploaded automatically), handles YouTube autoplay blocking, retries one transient start failure, watches for a stuck start, and re-requests playback after online/visibility recovery. Use **Copy diagnostics** in a room when a browser-specific playback failure needs investigation.
 
 Exact commands:
 
@@ -24,3 +24,13 @@ The Playwright suite uses isolated browser contexts for owner, member, and banne
 3. Queue `https://www.youtube.com/watch?v=aqz-KE-bpKQ`, then use **Skip next**.
 4. Confirm privacy-enhanced iframe loading, play/pause/seek synchronization, elapsed-position preservation, queue advance, reload recovery, and reconnect after a brief server restart.
 5. Optionally try `https://www.youtube.com/watch?v=dQw4w9WgXcQ` to confirm the embedded player's unavailable-video state.
+
+## Playback failure matrix
+
+- Open two rooms/tabs with autoplay blocked or sound permissions denied: the room must continue muted and show the one-tap unmute action, without broadcasting a phantom pause.
+- Replace a video while the previous iframe is buffering: a late error or `ENDED` callback must not skip or cover the replacement.
+- Use an unavailable, private, or embed-disabled video: the error stays attached to that media item; it is never auto-skipped. `Try again` is bounded, while `Skip this video` explicitly discards it.
+- Hide the tab, go offline, restore connectivity, and return to the tab while a room is playing: the client records local lifecycle events and re-requests playback after recovery.
+- Repeat the same REST command with the same `requestId`: the room revision and queue change once. Reuse the same key for another command: expect HTTP 409 with `request_id_conflict`.
+
+Playwright starts a compiled backend binary through `scripts/build-e2e-server.mjs`; the test-only shutdown hook closes it before Playwright's Windows process cleanup, so no `go run` wrapper or orphan server remains.

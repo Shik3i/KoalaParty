@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -24,6 +25,8 @@ import (
 type application struct {
 	db             *sql.DB
 	hub            *hub
+	logger         *slog.Logger
+	metrics        *runtimeMetrics
 	cookieSecure   bool
 	trustedOrigins map[string]bool
 	trustedProxies []*net.IPNet
@@ -83,7 +86,9 @@ func Run() error {
 		return e
 	}
 	defer db.Close()
-	a := &application{db: db, hub: newHub(), sessionTTL: cfg.sessionTTL, cookieSecure: cfg.cookieSecure, trustedOrigins: cfg.trustedOrigins, trustedProxies: cfg.trustedProxies, activityMaxAge: cfg.activityMaxAge, activityMaxEvents: cfg.activityMaxEvents, roomMaxIdle: cfg.roomMaxIdle, publicRooms: cfg.publicRooms, settingOverrides: cfg.settingOverrides}
+	logger := newLogger()
+	metrics := newRuntimeMetrics()
+	a := &application{db: db, hub: newHub(metrics), logger: logger, metrics: metrics, sessionTTL: cfg.sessionTTL, cookieSecure: cfg.cookieSecure, trustedOrigins: cfg.trustedOrigins, trustedProxies: cfg.trustedProxies, activityMaxAge: cfg.activityMaxAge, activityMaxEvents: cfg.activityMaxEvents, roomMaxIdle: cfg.roomMaxIdle, publicRooms: cfg.publicRooms, settingOverrides: cfg.settingOverrides}
 	if cfg.youtubeMetadata {
 		a.fetchTitle = fetchYouTubeTitle
 	}
@@ -94,6 +99,7 @@ func Run() error {
 		return fmt.Errorf("load db settings: %w", err)
 	}
 	mux := http.NewServeMux()
+	shutdownRequested := make(chan struct{}, 1)
 	identityLimiter := newRateLimiter(60, time.Minute, a.trustedProxies)
 	loginLimiter := newRateLimiter(20, time.Minute, a.trustedProxies)
 	commandLimiter := newRateLimiter(180, time.Minute, a.trustedProxies)
@@ -112,6 +118,15 @@ func Run() error {
 		}
 		writeJSON(w, 200, map[string]string{"status": "ready"})
 	})
+	if strings.EqualFold(env("KOALAPARTY_E2E", "false"), "true") {
+		mux.HandleFunc("POST /api/e2e/shutdown", func(w http.ResponseWriter, _ *http.Request) {
+			select {
+			case shutdownRequested <- struct{}{}:
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+	}
 	mux.HandleFunc("POST /api/identity/exchange", identityLimiter.wrap(a.sessionBootstrap(a.exchangeIdentity)))
 	mux.HandleFunc("GET /api/me", a.me)
 	mux.HandleFunc("POST /api/accounts/register", registrationLimiter.wrap(a.requireAuth(a.register)))
@@ -140,6 +155,7 @@ func Run() error {
 	mux.HandleFunc("POST /api/rooms/{roomId}/reports", reportLimiter.wrap(a.requireAuth(a.report)))
 	mux.HandleFunc("GET /api/discover", a.discover)
 	mux.HandleFunc("GET /api/admin/stats", a.requireAdmin(a.adminStats))
+	mux.HandleFunc("GET /api/admin/metrics", a.requireAdmin(a.adminMetrics))
 	mux.HandleFunc("GET /api/admin/settings", a.requireAdmin(a.adminSettings))
 	mux.HandleFunc("POST /api/admin/settings", a.requireAdmin(a.adminSettings))
 	mux.HandleFunc("GET /api/admin/reports", a.requireAdmin(a.adminReports))
@@ -150,19 +166,24 @@ func Run() error {
 	maintenanceCtx, cancelMaintenance := context.WithCancel(context.Background())
 	defer cancelMaintenance()
 	go a.maintenanceLoop(maintenanceCtx)
-	srv := &http.Server{Addr: cfg.addr, Handler: securityHeaders(mux, contentSecurityPolicy(webRoot)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	handler := requestLogging(logger, metrics, securityHeaders(mux, contentSecurityPolicy(webRoot)))
+	srv := &http.Server{Addr: cfg.addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		<-stop
+		select {
+		case <-stop:
+		case <-shutdownRequested:
+		}
 		cancelMaintenance()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(ctx)
 	}()
-	fmt.Printf(`{"level":"info","message":"server started","addr":%q,"version":%q,"commit":%q}`+"\n", srv.Addr, Version, Commit)
+	logger.Info("server started", "addr", srv.Addr, "version", Version, "commit", Commit)
 	e = srv.ListenAndServe()
 	if e == http.ErrServerClosed {
+		logger.Info("server stopped")
 		return nil
 	}
 	return e
@@ -229,7 +250,7 @@ func securityHeaders(next http.Handler, csp string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+		w.Header().Set("Permissions-Policy", `camera=(), microphone=(), geolocation=(), payment=(), usb=(), autoplay=(self "https://www.youtube-nocookie.com")`)
 		w.Header().Set("Content-Security-Policy", csp)
 		next.ServeHTTP(w, r)
 	})

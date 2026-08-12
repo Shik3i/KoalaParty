@@ -17,6 +17,7 @@
     type SponsorSegment,
   } from '$lib/room';
   import { shouldReanchorPlayback } from '$lib/playerSync';
+  import { formatDiagnosticEvents, type DiagnosticEvent } from '$lib/diagnostics';
   import {
     LinkSimple,
     Gear,
@@ -65,6 +66,9 @@
   let theater = false;
   let miniPlayer = false;
   let diagnostics = { drift: 0, state: 'loading', correctedAt: null as number | null };
+  let diagnosticEvents: DiagnosticEvent[] = [];
+  let online = true;
+  let visible = true;
   let reactions: Array<{ id: string; emoji: string }> = [];
   let videoURL = '';
   let mobileTab: 'queue' | 'people' | 'activity' = 'queue';
@@ -125,6 +129,29 @@
     notice = message;
     noticeKind = kind;
     if (clearAfter > 0) noticeTimer = setTimeout(() => (notice = ''), clearAfter);
+  }
+  function recordDiagnostic(event: DiagnosticEvent) {
+    diagnosticEvents = [...diagnosticEvents, event].slice(-60);
+    if (['error', 'retry', 'stalled', 'offline'].includes(event.event)) {
+      console.warn('[KoalaParty diagnostic]', event);
+    }
+  }
+  async function copyDiagnostics() {
+    const report = formatDiagnosticEvents(diagnosticEvents, {
+      roomId,
+      online,
+      visible,
+      connected,
+      roomRevision: room?.revision ?? null,
+      playbackRevision: room?.playback.revision ?? null,
+      userAgent: typeof navigator === 'undefined' ? null : navigator.userAgent,
+    });
+    try {
+      await navigator.clipboard.writeText(report);
+      showNotice('Diagnostics copied. They stay local until you share them.', 2600, 'success');
+    } catch {
+      showNotice('Diagnostics could not be copied. Check clipboard permissions.', 3000, 'error');
+    }
   }
   function ask(title: string, confirmLabel: string, danger = false): Promise<boolean> {
     return new Promise((resolve) => {
@@ -282,6 +309,31 @@
   }
   let reactionTimers: ReturnType<typeof setTimeout>[] = [];
   onMount(() => {
+    online = navigator.onLine;
+    visible = document.visibilityState === 'visible';
+    const onOnline = () => {
+      online = true;
+      recordDiagnostic({ at: new Date().toISOString(), source: 'room', event: 'online', details: {} });
+      if (!connected) void joinWithRetry();
+    };
+    const onOffline = () => {
+      online = false;
+      recordDiagnostic({ at: new Date().toISOString(), source: 'room', event: 'offline', details: {} });
+      showNotice('You are offline. Changes will resume after reconnecting.', 0, 'error');
+    };
+    const onVisibility = () => {
+      visible = document.visibilityState === 'visible';
+      recordDiagnostic({
+        at: new Date().toISOString(),
+        source: 'room',
+        event: visible ? 'visible' : 'hidden',
+        details: {},
+      });
+      if (visible && !connected) void joinWithRetry();
+    };
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    document.addEventListener('visibilitychange', onVisibility);
     try {
       theater = localStorage.getItem('koalaparty.theater') === '1';
     } catch {
@@ -300,6 +352,9 @@
       const activeSocket = socket;
       socket = null;
       activeSocket?.close();
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   });
   function connect() {
@@ -309,6 +364,7 @@
     ws.onopen = () => {
       if (socket !== ws) return;
       connected = true;
+      recordDiagnostic({ at: new Date().toISOString(), source: 'websocket', event: 'open', details: {} });
       if (everConnected) showNotice('Reconnected', 1800, 'success');
       everConnected = true;
     };
@@ -316,6 +372,7 @@
       if (socket !== ws) return;
       socket = null;
       connected = false;
+      recordDiagnostic({ at: new Date().toISOString(), source: 'websocket', event: 'close', details: {} });
       if (disposed) return;
       showNotice('Connection lost. Reconnecting…', 0, 'error');
       reconnectTimer = setTimeout(() => {
@@ -323,12 +380,16 @@
         void joinWithRetry();
       }, 1500);
     };
+    ws.onerror = () =>
+      recordDiagnostic({ at: new Date().toISOString(), source: 'websocket', event: 'error', details: {} });
     ws.onmessage = (event) => {
       if (socket !== ws) return;
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'snapshot') updateRoom(data.payload);
-        else if (data.type === 'reaction') {
+        if (data.type === 'snapshot') {
+          recordDiagnostic({ at: new Date().toISOString(), source: 'websocket', event: 'snapshot', details: {} });
+          updateRoom(data.payload);
+        } else if (data.type === 'reaction') {
           const reaction = { id: randomUUID(), emoji: String(data.emoji) };
           reactions = [...reactions, reaction];
           const timer = setTimeout(() => {
@@ -336,8 +397,17 @@
             reactionTimers = reactionTimers.filter((t) => t !== timer);
           }, 2600);
           reactionTimers.push(timer);
-        } else if (data.type === 'error') showNotice(data.message || 'The server denied that action.', 0, 'error');
+        } else if (data.type === 'error') {
+          recordDiagnostic({
+            at: new Date().toISOString(),
+            source: 'websocket',
+            event: 'command_error',
+            details: { code: typeof data.code === 'string' ? data.code : null },
+          });
+          showNotice(data.message || 'The server denied that action.', 0, 'error');
+        }
       } catch {
+        recordDiagnostic({ at: new Date().toISOString(), source: 'websocket', event: 'invalid_message', details: {} });
         showNotice('Received an invalid room update. Reconnecting…', 0, 'error');
         ws.close();
       }
@@ -357,24 +427,37 @@
     // user command is in flight, so the synchronized seek is never silently dropped.
     // Such commands leave the shared pending lock untouched to avoid clobbering it.
     const managePending = !opts.bypassPending;
+    const requestId = randomUUID();
     if (managePending) {
       if (commandPending) return false;
       commandPending = true;
       showNotice('');
     }
     try {
+      recordDiagnostic({
+        at: new Date().toISOString(),
+        source: 'command',
+        event: 'started',
+        details: { type, requestId },
+      });
       updateRoom(
         await api(`/api/rooms/${roomId}/commands`, {
           method: 'POST',
           body: JSON.stringify({
             type,
-            requestId: randomUUID(),
+            requestId,
             expectedRevision: room.revision,
             expectedPlaybackRevision: room.playback.revision,
             payload,
           }),
         }),
       );
+      recordDiagnostic({
+        at: new Date().toISOString(),
+        source: 'command',
+        event: 'succeeded',
+        details: { type, requestId },
+      });
       return true;
     } catch (e) {
       // A stale-revision race on an automatic action (e.g. every client that can
@@ -382,6 +465,17 @@
       // expected and harmless: the winner's snapshot reconciles everyone. Suppress
       // that toast so it never surfaces as an error.
       if (opts.silentStale && e instanceof ApiError && e.status === 409) return false;
+      recordDiagnostic({
+        at: new Date().toISOString(),
+        source: 'command',
+        event: 'failed',
+        details: {
+          type,
+          requestId,
+          status: e instanceof ApiError ? e.status : null,
+          code: e instanceof ApiError ? (e.code ?? null) : null,
+        },
+      });
       showNotice(e instanceof Error ? e.message : 'Action failed.', 0, 'error');
       return false;
     } finally {
@@ -679,6 +773,8 @@
           <YouTubePlayer
             enabled={watching}
             videoId={room.playback.media?.providerId}
+            mediaId={room.playback.media?.id}
+            playbackRevision={room.playback.revision}
             status={room.playback.status}
             position={playbackAnchor.position}
             positionAt={playbackAnchor.at}
@@ -693,16 +789,15 @@
             onRate={(newRate, pos) =>
               command('player.rate', { rate: newRate, position: pos }, { silentStale: true, bypassPending: true })}
             onSponsorSkip={skipSponsor}
-            onEnded={() =>
+            onEnded={(endedMediaId) =>
               can('queue.skip') &&
-              command(
-                'queue.skip',
-                { mediaId: room?.playback.media?.id ?? '' },
-                { silentStale: true, bypassPending: true },
-              )}
-            onSkip={can('queue.skip') ? () => command('queue.skip', { discardCurrent: true }) : undefined}
+              command('queue.skip', { mediaId: endedMediaId }, { silentStale: true, bypassPending: true })}
+            onSkip={can('queue.skip')
+              ? (brokenMediaId) => command('queue.skip', { mediaId: brokenMediaId, discardCurrent: true })
+              : undefined}
             onDuration={(d) => (mediaDuration = d)}
             onDiagnostics={(value) => (diagnostics = value)}
+            onDiagnosticEvent={recordDiagnostic}
           />{#if !room.playback.media && room.queue.length && can('queue.skip')}<button
               class="start"
               onclick={() => command('queue.skip')}
@@ -775,6 +870,9 @@
           >{#if diagnostics.correctedAt}<small
               >last corrected {Math.max(0, Math.round((nowTick - diagnostics.correctedAt) / 1000))}s ago</small
             >{/if}
+          <button class="ghost diagnostics-copy" onclick={copyDiagnostics} title="Copy local playback diagnostics">
+            <ClipboardText size={14} weight="bold" />Copy diagnostics
+          </button>
         </div>
         <div class="reaction-bar" aria-label="Send a reaction">
           {#each ['❤️', '😂', '🔥', '👀', '😴', '👏'] as emoji}<button class="ghost" onclick={() => react(emoji)}
@@ -1137,6 +1235,10 @@
   }
   .sync-diagnostics small {
     margin-left: auto;
+  }
+  .diagnostics-copy {
+    margin-left: 0.35rem;
+    font-size: 0.72rem;
   }
   .reaction-bar button {
     font-size: 1.1rem;

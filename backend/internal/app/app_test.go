@@ -214,6 +214,33 @@ func TestQueueTitleCannotOverwriteSharedMediaMetadata(t *testing.T) {
 	}
 }
 
+func TestCommandRequestIDIsIdempotent(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174012", strings.Repeat("i", 43))
+	room := createTestRoom(t, a, cookie, owner)
+	s, err := a.snapshot(t.Context(), room, owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestID := "retry-queue-1"
+	cmd := command{Type: "queue.add", RequestID: requestID, ExpectedRevision: s.Revision, Payload: json.RawMessage(`{"videoId":"abc12345678"}`)}
+	first, err := a.applyCommand(t.Context(), room, owner, cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := a.applyCommand(t.Context(), room, owner, cmd)
+	if err != nil {
+		t.Fatalf("retry should return the committed snapshot: %v", err)
+	}
+	if first.Revision != second.Revision || len(second.Queue) != 1 {
+		t.Fatalf("retry changed room state: first revision=%d second revision=%d queue=%d", first.Revision, second.Revision, len(second.Queue))
+	}
+	_, err = a.applyCommand(t.Context(), room, owner, command{Type: "queue.play_now", RequestID: requestID, ExpectedRevision: second.Revision, Payload: json.RawMessage(`{"videoId":"def12345678"}`)})
+	if commandErrorCode(err) != "request_id_conflict" {
+		t.Fatalf("request ID reuse across commands returned %v", err)
+	}
+}
+
 func TestQueuePolishCommands(t *testing.T) {
 	a := testApp(t)
 	cookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174014", strings.Repeat("q", 43))

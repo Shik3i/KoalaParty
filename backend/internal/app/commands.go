@@ -27,15 +27,34 @@ func (a *application) roomCommand(w http.ResponseWriter, r *http.Request, p prin
 	}
 	s, e := a.applyCommand(r.Context(), id, p, c)
 	if e != nil {
-		if errors.Is(e, errDenied) {
-			problem(w, 403, "permission_denied", "The server denied this room action.")
-		} else if errors.Is(e, errStale) {
-			problem(w, 409, "stale_revision", "Room state changed; use the latest snapshot.")
-		} else {
-			problem(w, 400, "command_failed", e.Error())
+		code := commandErrorCode(e)
+		status := http.StatusBadRequest
+		message := "Room command failed."
+		switch code {
+		case "permission_denied":
+			status, message = http.StatusForbidden, "The server denied this room action."
+		case "stale_revision":
+			status, message = http.StatusConflict, "Room state changed; use the latest snapshot."
+		case "request_id_conflict":
+			status, message = http.StatusConflict, "Request ID was already used for another command."
+		case "invalid_command":
+			message = "The room command was invalid."
+		case "not_found":
+			status, message = http.StatusNotFound, "The requested room resource was not found."
+		case "unsupported_command":
+			message = "This room command is not supported."
 		}
+		if a.metrics != nil {
+			a.metrics.commandsRejected.Add(1)
+		}
+		a.logCommand(r.Context(), id, p, c, "rejected", code)
+		problem(w, status, code, message)
 		return
 	}
+	if a.metrics != nil {
+		a.metrics.commandsAccepted.Add(1)
+	}
+	a.logCommand(r.Context(), id, p, c, "accepted", "")
 	a.hub.broadcast(id, s)
 	writeJSON(w, 200, s)
 }
@@ -97,6 +116,9 @@ func capFor(t string) string {
 	return ""
 }
 func (a *application) applyCommand(ctx context.Context, room string, p principal, c command) (snapshot, error) {
+	if c.RequestID != "" && !validRequestID(c.RequestID) {
+		return snapshot{}, errors.New("invalid request ID")
+	}
 	cap := capFor(c.Type)
 	role, allowed := a.roleAndAllowed(room, p.IdentityID, cap)
 	if cap == "" || !allowed {
@@ -144,6 +166,25 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	var current int64
 	if e = tx.QueryRow("SELECT revision FROM rooms WHERE id=? AND deleted_at IS NULL", room).Scan(&current); e != nil {
 		return snapshot{}, errDenied
+	}
+	if c.RequestID != "" {
+		result, receiptErr := tx.Exec("INSERT OR IGNORE INTO command_receipts(room_id,identity_id,request_id,command_type) VALUES(?,?,?,?)", room, p.IdentityID, c.RequestID, c.Type)
+		if receiptErr != nil {
+			return snapshot{}, receiptErr
+		}
+		if changed, rowsErr := result.RowsAffected(); rowsErr != nil {
+			return snapshot{}, rowsErr
+		} else if changed == 0 {
+			var previousType string
+			if scanErr := tx.QueryRow("SELECT command_type FROM command_receipts WHERE room_id=? AND identity_id=? AND request_id=?", room, p.IdentityID, c.RequestID).Scan(&previousType); scanErr != nil {
+				return snapshot{}, scanErr
+			}
+			_ = tx.Rollback()
+			if previousType != c.Type {
+				return snapshot{}, errors.New("request ID already used for another command")
+			}
+			return a.snapshot(ctx, room, p.IdentityID)
+		}
 	}
 	playbackCommand := strings.HasPrefix(c.Type, "player.")
 	if playbackCommand && c.ExpectedPlaybackRevision != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -22,6 +23,9 @@ type client struct {
 	lastReaction time.Time
 	commandCount int
 	commandReset time.Time
+	logger       *slog.Logger
+	metrics      *runtimeMetrics
+	roomHash     string
 }
 
 func (c *client) enqueue(v any) bool {
@@ -31,6 +35,12 @@ func (c *client) enqueue(v any) bool {
 	case c.send <- v:
 		return true
 	default:
+		if c.metrics != nil {
+			c.metrics.websocketQueueFull.Add(1)
+		}
+		if c.logger != nil {
+			c.logger.Warn("websocket send queue full", "room_hash", c.roomHash, "identity_hash", shortHash(c.identity))
+		}
 		c.shutdown()
 		return false
 	}
@@ -52,14 +62,20 @@ func (c *client) writePump() {
 			return
 		case message := <-c.send:
 			_ = c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			if c.conn.WriteJSON(message) != nil {
+			if err := c.conn.WriteJSON(message); err != nil {
+				if c.logger != nil {
+					c.logger.Warn("websocket write failed", "room_hash", c.roomHash, "identity_hash", shortHash(c.identity), "error", err.Error())
+				}
 				c.shutdown()
 				return
 			}
 		case <-ticker.C:
 			deadline := time.Now().Add(5 * time.Second)
 			_ = c.conn.SetWriteDeadline(deadline)
-			if c.conn.WriteControl(websocket.PingMessage, nil, deadline) != nil {
+			if err := c.conn.WriteControl(websocket.PingMessage, nil, deadline); err != nil {
+				if c.logger != nil {
+					c.logger.Warn("websocket ping failed", "room_hash", c.roomHash, "identity_hash", shortHash(c.identity), "error", err.Error())
+				}
 				c.shutdown()
 				return
 			}
@@ -80,6 +96,7 @@ type hub struct {
 	rooms           map[string]map[*client]struct{}
 	commandBuckets  map[string]rateBucket
 	reactionBuckets map[string]rateBucket
+	metrics         *runtimeMetrics
 }
 
 type rateBucket struct {
@@ -95,11 +112,16 @@ const (
 	maxTotalConnections       = 5000
 )
 
-func newHub() *hub {
+func newHub(metrics ...*runtimeMetrics) *hub {
+	var runtime *runtimeMetrics
+	if len(metrics) > 0 {
+		runtime = metrics[0]
+	}
 	return &hub{
 		rooms:           map[string]map[*client]struct{}{},
 		commandBuckets:  map[string]rateBucket{},
 		reactionBuckets: map[string]rateBucket{},
+		metrics:         runtime,
 	}
 }
 func (h *hub) tryAdd(room string, c *client) error {
@@ -321,8 +343,11 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(70 * time.Second))
 	})
-	c := &client{conn: conn, identity: p.IdentityID, sessionHash: p.SessionHash, remoteIP: clientIP(r, a.trustedProxies), send: make(chan any, 32), done: make(chan struct{})}
+	c := &client{conn: conn, identity: p.IdentityID, sessionHash: p.SessionHash, remoteIP: clientIP(r, a.trustedProxies), send: make(chan any, 32), done: make(chan struct{}), logger: a.logger, metrics: a.metrics, roomHash: shortHash(room)}
 	if e = a.hub.tryAdd(room, c); e != nil {
+		if a.logger != nil {
+			a.logger.Warn("websocket connection rejected", "room_hash", shortHash(room), "identity_hash", shortHash(p.IdentityID), "reason", e.Error())
+		}
 		code, message := websocket.CloseTryAgainLater, "Connection limit reached."
 		if e.Error() == "room_full" {
 			code, message = websocket.ClosePolicyViolation, "Room participant limit reached."
@@ -330,6 +355,12 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, message), time.Now().Add(time.Second))
 		_ = conn.Close()
 		return
+	}
+	if a.metrics != nil {
+		a.metrics.websocketOpened.Add(1)
+	}
+	if a.logger != nil {
+		a.logger.Info("websocket connected", "room_hash", shortHash(room), "identity_hash", shortHash(p.IdentityID))
 	}
 	go c.writePump()
 	if refreshed, snapshotErr := a.snapshot(r.Context(), room, p.IdentityID); snapshotErr == nil {
@@ -347,6 +378,12 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 	}
 	defer func() {
 		expiryTimer.Stop()
+		if a.metrics != nil {
+			a.metrics.websocketClosed.Add(1)
+		}
+		if a.logger != nil {
+			a.logger.Info("websocket disconnected", "room_hash", shortHash(room), "identity_hash", shortHash(p.IdentityID))
+		}
 		lastForIdentity := a.hub.remove(room, c)
 		c.shutdown()
 		if lastForIdentity {
@@ -377,7 +414,7 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 		}
 		var cmd command
 		if json.Unmarshal(raw, &cmd) != nil {
-			c.enqueue(map[string]any{"type": "error", "code": "invalid_json"})
+			c.enqueue(map[string]any{"type": "error", "code": "invalid_json", "message": "Invalid command JSON."})
 			continue
 		}
 		current, authErr := a.principalBySessionHash(c.sessionHash)
@@ -392,7 +429,7 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 			}
 			allowed := map[string]bool{"❤️": true, "😂": true, "🔥": true, "👀": true, "😴": true, "👏": true}
 			if json.Unmarshal(cmd.Payload, &payload) != nil || !allowed[payload.Emoji] {
-				c.enqueue(map[string]any{"type": "error", "requestId": cmd.RequestID, "message": "invalid reaction"})
+				c.enqueue(map[string]any{"type": "error", "requestId": cmd.RequestID, "code": "invalid_reaction", "message": "Invalid reaction."})
 				continue
 			}
 			if time.Since(c.lastReaction) < 750*time.Millisecond || !a.hub.allowReaction(p.IdentityID, time.Now()) {
@@ -404,13 +441,34 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 		}
 		if !c.allowCommand(time.Now()) || !a.hub.allowCommand(p.IdentityID, time.Now()) {
 			c.enqueue(map[string]any{"type": "error", "requestId": cmd.RequestID, "code": "rate_limited", "message": "Too many room commands. Try again shortly."})
+			if a.metrics != nil {
+				a.metrics.commandsRejected.Add(1)
+			}
+			a.logCommand(r.Context(), room, p, cmd, "rejected", "rate_limited")
 			continue
 		}
 		s, e = a.applyCommand(r.Context(), room, p, cmd)
 		if e != nil {
-			c.enqueue(map[string]any{"type": "error", "requestId": cmd.RequestID, "message": e.Error()})
+			code := commandErrorCode(e)
+			message := "Room command failed."
+			if code == "stale_revision" {
+				message = "Room state changed; use the latest snapshot."
+			} else if code == "permission_denied" {
+				message = "The server denied this room action."
+			} else if code == "request_id_conflict" {
+				message = "Request ID was already used for another command."
+			}
+			c.enqueue(map[string]any{"type": "error", "requestId": cmd.RequestID, "code": code, "message": message})
+			if a.metrics != nil {
+				a.metrics.commandsRejected.Add(1)
+			}
+			a.logCommand(r.Context(), room, p, cmd, "rejected", code)
 			continue
 		}
+		if a.metrics != nil {
+			a.metrics.commandsAccepted.Add(1)
+		}
+		a.logCommand(r.Context(), room, p, cmd, "accepted", "")
 		a.hub.broadcast(room, s)
 	}
 }

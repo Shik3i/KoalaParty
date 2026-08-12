@@ -12,7 +12,7 @@ func TestMigrationFromEmptyDatabase(t *testing.T) {
 	}
 	defer db.Close()
 	var version int
-	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 7 {
+	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 8 {
 		t.Fatalf("migration version=%d err=%v", version, e)
 	}
 	var rateColumn int
@@ -40,6 +40,10 @@ func TestMigrationFromEmptyDatabase(t *testing.T) {
 	if e = db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('queue_votes','room_history')").Scan(&queueTables); e != nil || queueTables != 2 {
 		t.Fatalf("queue tables missing: count=%d err=%v", queueTables, e)
 	}
+	var receipts int
+	if e = db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='command_receipts'").Scan(&receipts); e != nil || receipts != 1 {
+		t.Fatalf("command receipt table missing: count=%d err=%v", receipts, e)
+	}
 }
 
 func TestReportLimitMigrationResolvesLegacyDuplicates(t *testing.T) {
@@ -50,7 +54,8 @@ func TestReportLimitMigrationResolvesLegacyDuplicates(t *testing.T) {
 	}
 	if _, err = db.Exec(`
 		DROP INDEX room_reports_pending_reporter_idx;
-		DELETE FROM schema_migrations WHERE version=7;
+		DROP TABLE command_receipts;
+		DELETE FROM schema_migrations WHERE version IN (7, 8);
 		INSERT INTO identities(id,secret_hash,display_name,avatar_seed) VALUES('owner','hash','Owner','owner');
 		INSERT INTO rooms(id,owner_identity_id) VALUES('AAAAAAAAAAAAAAAA','owner');
 		INSERT INTO room_reports(id,room_id,reporter_identity_id,reason) VALUES

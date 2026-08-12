@@ -1,11 +1,23 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Play, Warning, Hourglass, SkipForward, SpeakerSimpleSlash } from 'phosphor-svelte';
-  import { normalizedDuration, PLAYER_STATE, stateChangeAction, timelineJump } from '$lib/playerSync';
+  import {
+    isCurrentVideoError,
+    isRetryablePlayerError,
+    normalizedDuration,
+    PLAYER_STATE,
+    playerErrorMessage,
+    stateChangeAction,
+    timelineJump,
+  } from '$lib/playerSync';
+  import { createDiagnosticEvent, type DiagnosticEvent } from '$lib/diagnostics';
+  import { loadYouTubeAPI } from '$lib/youtubeApi';
   import type { SponsorSegment } from '$lib/room';
   let {
     enabled = false,
     videoId = null,
+    mediaId = null,
+    playbackRevision = 0,
     status = 'paused',
     position = 0,
     positionAt = 0,
@@ -23,9 +35,12 @@
     onSkip = undefined,
     onDuration = () => {},
     onDiagnostics = () => {},
+    onDiagnosticEvent = () => {},
   }: {
     enabled?: boolean;
     videoId?: string | null;
+    mediaId?: string | null;
+    playbackRevision?: number;
     status?: string;
     position?: number;
     positionAt?: number;
@@ -39,20 +54,24 @@
     onSeek?: (position: number) => void;
     onRate?: (rate: number, position: number) => void;
     onSponsorSkip?: (segment: SponsorSegment) => void;
-    onEnded?: () => void;
-    onSkip?: (() => void) | undefined;
+    onEnded?: (mediaId: string) => void;
+    onSkip?: ((mediaId: string) => void) | undefined;
     onDuration?: (duration: number) => void;
     onDiagnostics?: (diagnostics: { drift: number; state: string; correctedAt: number | null }) => void;
+    onDiagnosticEvent?: (event: DiagnosticEvent) => void;
   } = $props();
   let host: HTMLDivElement;
-  let player: any = null;
+  let player = $state<any>(null);
   let disposed = false;
-  let loading = false;
-  let failed = false;
-  let ready = false;
+  let loading = $state(false);
+  let failed = $state(false);
+  let ready = $state(false);
   let lastVideo: string | null = null;
+  let lastMediaId = $state<string | null>(null);
   let confirmedVideo: string | null = null;
   let playerError = $state('');
+  let playerErrorCode = $state<number | null>(null);
+  let playerState = $state<number | null>(null);
 
   // The server is authoritative. `status`/`position`/`positionAt` describe the last
   // confirmed playback change: at `positionAt` (client clock) the media was at
@@ -60,6 +79,8 @@
   // re-baseline on unrelated snapshots, so the expected position stays correct.
   const { PLAYING, PAUSED, BUFFERING } = PLAYER_STATE;
   const POLL_MS = 500;
+  const READY_TIMEOUT_MS = 15_000;
+  const START_TIMEOUT_MS = 10_000;
   const SEEK_JUMP = 1.5; // discontinuity in the player's own timeline => local scrub
   const DRIFT_MAX = 1.8; // divergence from the expected server position => realign
   let guardUntil = 0; // suppress the monitor right after we drive the player
@@ -72,8 +93,40 @@
   // play. We detect the blocked play, fall back to muted autoplay (always allowed),
   // and surface a one-tap unmute — so the video starts for everyone immediately.
   let autoplayTimer: ReturnType<typeof setTimeout> | null = null;
+  let readyTimer: ReturnType<typeof setTimeout> | null = null;
+  let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let retryCount = 0;
+  let loadToken = 0;
   let mutedForAutoplay = $state(false);
   let correctedAt: number | null = null;
+
+  function emitDiagnostic(event: string, details: Record<string, string | number | boolean | null> = {}) {
+    onDiagnosticEvent(
+      createDiagnosticEvent('player', event, {
+        videoId: lastVideo,
+        mediaId: lastMediaId,
+        playbackRevision,
+        status,
+        ready,
+        playerState,
+        online: typeof navigator === 'undefined' ? null : navigator.onLine,
+        visible: typeof document === 'undefined' ? null : document.visibilityState === 'visible',
+        ...details,
+      }),
+    );
+  }
+
+  function clearRecoveryTimers() {
+    if (autoplayTimer) clearTimeout(autoplayTimer);
+    if (readyTimer) clearTimeout(readyTimer);
+    if (watchdogTimer) clearTimeout(watchdogTimer);
+    if (retryTimer) clearTimeout(retryTimer);
+    autoplayTimer = null;
+    readyTimer = null;
+    watchdogTimer = null;
+    retryTimer = null;
+  }
 
   function currentTime(): number {
     return player?.getCurrentTime?.() ?? 0;
@@ -100,7 +153,37 @@
     guard();
     player.playVideo?.();
     scheduleAutoplayCheck();
+    scheduleStartWatchdog('play_request');
   }
+
+  function scheduleStartWatchdog(reason: string) {
+    if (watchdogTimer) clearTimeout(watchdogTimer);
+    if (status !== 'playing' || !lastVideo) return;
+    const token = loadToken;
+    watchdogTimer = setTimeout(() => {
+      watchdogTimer = null;
+      if (disposed || token !== loadToken || !player || status !== 'playing' || !lastVideo) return;
+      const state = player.getPlayerState?.();
+      if (state === PLAYING || state === PAUSED) return;
+      emitDiagnostic('stalled', { reason, state: state ?? null });
+      if (retryCount < 1) {
+        retryCurrentVideo('start_watchdog');
+      } else {
+        playerError = 'YouTube did not start this video. Try again or skip it.';
+        playerErrorCode = null;
+      }
+    }, START_TIMEOUT_MS);
+  }
+
+  function startMutedAutoplay(reason: string) {
+    if (!player || status !== 'playing') return;
+    guard();
+    player.mute?.();
+    mutedForAutoplay = true;
+    emitDiagnostic('autoplay_fallback', { reason });
+    player.playVideo?.();
+  }
+
   function scheduleAutoplayCheck() {
     if (autoplayTimer) clearTimeout(autoplayTimer);
     // A single snapshot is fragile: a slow network shows BUFFERING before PLAYING,
@@ -119,13 +202,33 @@
       // muted and surface a one-tap unmute, then confirm the muted play took. Re-arm
       // the guard so the resulting state changes are recognised as our own and never
       // relayed to the room, even when a slow network resolves them late.
-      guard();
-      player.mute?.();
-      mutedForAutoplay = true;
-      player.playVideo?.();
+      startMutedAutoplay('autoplay_check');
       if (attempt < 3) autoplayTimer = setTimeout(() => check(attempt + 1), 600);
     };
     autoplayTimer = setTimeout(() => check(0), 450);
+  }
+
+  function retryCurrentVideo(reason = 'manual') {
+    if (!player || !ready || !lastVideo) {
+      retryInitialization();
+      return;
+    }
+    retryCount += 1;
+    loadToken += 1;
+    clearRecoveryTimers();
+    playerError = '';
+    playerErrorCode = null;
+    confirmedVideo = null;
+    guard(3000);
+    emitDiagnostic('retry', { reason, retryCount });
+    const request = { videoId: lastVideo, startSeconds: Math.max(0, expectedPosition()) };
+    if (status === 'playing') {
+      player.loadVideoById(request);
+      scheduleAutoplayCheck();
+      scheduleStartWatchdog('retry');
+    } else {
+      player.cueVideoById(request);
+    }
   }
   function unmute() {
     player?.unMute?.();
@@ -142,87 +245,126 @@
     }
   }
 
-  type YTWindow = Window & { YT?: any; onYouTubeIframeAPIReady?: () => void };
+  type YTWindow = Window & { YT?: any };
   async function loadAPI() {
-    const w = window as YTWindow;
-    if (w.YT?.Player) return;
-    await new Promise<void>((resolve, reject) => {
-      const timeout = window.setTimeout(() => reject(new Error('YouTube player loading timed out.')), 12_000);
-      const previous = w.onYouTubeIframeAPIReady;
-      w.onYouTubeIframeAPIReady = () => {
-        clearTimeout(timeout);
-        resolve();
-        try {
-          previous?.();
-        } catch {
-          /* another consumer's callback must not break this player */
-        }
-      };
-      let script = document.querySelector<HTMLScriptElement>('script[src*="youtube.com/iframe_api"]');
-      if (!script) {
-        script = document.createElement('script');
-        script.src = 'https://www.youtube.com/iframe_api';
-        document.head.appendChild(script);
-      }
-      script.addEventListener(
-        'error',
-        () => {
-          clearTimeout(timeout);
-          reject(new Error('YouTube player could not be loaded.'));
-        },
-        { once: true },
-      );
-    });
+    await loadYouTubeAPI();
   }
   async function initialize() {
     loading = true;
+    failed = false;
+    emitDiagnostic('initialize_started');
     try {
       await loadAPI();
     } catch (error) {
       loading = false;
       failed = true;
       playerError = error instanceof Error ? error.message : 'YouTube player could not be loaded.';
+      emitDiagnostic('initialize_failed', { message: playerError });
       return;
     }
-    if (disposed) return;
+    if (disposed) {
+      loading = false;
+      return;
+    }
     const w = window as YTWindow;
-    player = new w.YT.Player(host, {
-      host: 'https://www.youtube-nocookie.com',
-      // cc_load_policy: 0 stops us forcing captions on. Whether captions still appear
-      // then depends on the viewer's own YouTube/browser caption preference, which we
-      // cannot override; unloadModule below is a best-effort hide on top of that.
-      playerVars: { origin: location.origin, rel: 0, cc_load_policy: 0 },
-      events: {
-        onReady: () => {
-          // Best-effort: hide auto-captions that would otherwise show by default. The
-          // viewer can always re-enable them with the player's CC button.
-          try {
-            player.unloadModule?.('captions');
-            player.unloadModule?.('cc');
-          } catch {
-            /* module may not be loaded yet; harmless */
-          }
-          ready = true;
-          sync();
-          startMonitor();
+    const token = ++loadToken;
+    try {
+      player = new w.YT.Player(host, {
+        host: 'https://www.youtube-nocookie.com',
+        // cc_load_policy: 0 stops us forcing captions on. Whether captions still appear
+        // then depends on the viewer's own YouTube/browser caption preference, which we
+        // cannot override; unloadModule below is a best-effort hide on top of that.
+        playerVars: { origin: location.origin, rel: 0, cc_load_policy: 0 },
+        events: {
+          onReady: () => {
+            if (token !== loadToken || disposed) return;
+            if (readyTimer) clearTimeout(readyTimer);
+            readyTimer = null;
+            loading = false;
+            failed = false;
+            try {
+              player.getIframe?.()?.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
+            } catch {
+              /* iframe permissions are best-effort across browser versions */
+            }
+            // Best-effort: hide auto-captions that would otherwise show by default. The
+            // viewer can always re-enable them with the player's CC button.
+            try {
+              player.unloadModule?.('captions');
+              player.unloadModule?.('cc');
+            } catch {
+              /* module may not be loaded yet; harmless */
+            }
+            ready = true;
+            emitDiagnostic('ready');
+            sync();
+            startMonitor();
+          },
+          onAutoplayBlocked: () => {
+            emitDiagnostic('autoplay_blocked');
+            startMutedAutoplay('youtube_event');
+          },
+          onStateChange: (e: any) => handleStateChange(e.data),
+          onPlaybackRateChange: (e: any) => handleRateChange(e.data),
+          onError: (e: any) => {
+            const iframeVideo = player?.getVideoData?.()?.video_id ?? '';
+            // The IFrame API exposes no event-local video ID. Ignore an error when
+            // the iframe is still reporting a different media item; that is a late
+            // callback from the previous load and must not cover the replacement.
+            // During the first error callback getVideoData() can still be empty, so
+            // an empty ID is accepted for the current request and remains visible
+            // until a successful PLAYING event clears it.
+            if (!isCurrentVideoError(lastVideo, iframeVideo)) return;
+            const code = Number(e?.data);
+            playerErrorCode = Number.isFinite(code) ? code : null;
+            emitDiagnostic('error', { code: playerErrorCode });
+            if (isRetryablePlayerError(code) && status === 'playing' && retryCount < 1) {
+              playerError = 'Playback interrupted. Retrying…';
+              retryTimer = setTimeout(() => retryCurrentVideo('player_error'), 450);
+            } else {
+              playerError = playerErrorMessage(code);
+            }
+          },
         },
-        onStateChange: (e: any) => handleStateChange(e.data),
-        onPlaybackRateChange: (e: any) => handleRateChange(e.data),
-        onError: () => {
-          playerError = 'This video is unavailable or cannot be embedded.';
-        },
-      },
-    });
+      });
+      readyTimer = setTimeout(() => {
+        readyTimer = null;
+        if (token !== loadToken || ready || disposed) return;
+        failed = true;
+        loading = false;
+        playerError = 'YouTube player did not initialize. Try again.';
+        emitDiagnostic('ready_timeout');
+        player?.destroy?.();
+        player = null;
+      }, READY_TIMEOUT_MS);
+    } catch (error) {
+      loading = false;
+      failed = true;
+      player = null;
+      playerError = error instanceof Error ? error.message : 'YouTube player could not be initialized.';
+      emitDiagnostic('initialize_failed', { message: playerError });
+    }
   }
   // React to the local viewer operating the native player chrome and forward the
   // gesture to the server. If the viewer lacks the capability, snap the player
   // back to the authoritative state instead of emitting.
   function handleStateChange(state: number) {
-    const iframeVideo = player?.getVideoData?.().video_id;
-    if (iframeVideo === lastVideo && (state === PLAYING || state === PAUSED || state === BUFFERING)) {
+    playerState = state;
+    const iframeVideo = player?.getVideoData?.()?.video_id ?? '';
+    if (iframeVideo === lastVideo && (state === PLAYING || state === PAUSED)) {
       confirmedVideo = lastVideo;
     }
-    if (state === PLAYING) playerError = '';
+    if (state === PLAYING) {
+      playerError = '';
+      playerErrorCode = null;
+      retryCount = 0;
+      if (watchdogTimer) clearTimeout(watchdogTimer);
+      watchdogTimer = null;
+      emitDiagnostic('playing');
+    } else if (state === BUFFERING && status === 'playing') {
+      emitDiagnostic('buffering');
+      scheduleStartWatchdog('buffering');
+    }
     const action = stateChangeAction({
       state,
       serverStatus: status,
@@ -236,7 +378,8 @@
     });
     switch (action) {
       case 'ended':
-        onEnded();
+        emitDiagnostic('ended');
+        if (lastMediaId) onEnded(lastMediaId);
         return;
       case 'emit-play':
         onPlay(currentTime());
@@ -275,6 +418,19 @@
   function stopMonitor() {
     if (monitor) clearInterval(monitor);
     monitor = null;
+  }
+  function retryInitialization() {
+    clearRecoveryTimers();
+    loadToken += 1;
+    player?.destroy?.();
+    player = null;
+    ready = false;
+    loading = false;
+    failed = false;
+    playerError = '';
+    playerErrorCode = null;
+    emitDiagnostic('initialize_retry');
+    void initialize();
   }
   // YouTube exposes no "seeked" event. We distinguish a local scrub (a discontinuity
   // in the player's OWN timeline) from ordinary drift (divergence from the server's
@@ -341,10 +497,25 @@
     }
   }
   onMount(() => {
+    const onOnline = () => {
+      emitDiagnostic('online');
+      if (status === 'playing') requestPlay();
+    };
+    const onOffline = () => emitDiagnostic('offline');
+    const onVisibility = () => {
+      emitDiagnostic(document.visibilityState === 'visible' ? 'visible' : 'hidden');
+      if (document.visibilityState === 'visible' && status === 'playing') requestPlay();
+    };
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       disposed = true;
       stopMonitor();
-      if (autoplayTimer) clearTimeout(autoplayTimer);
+      clearRecoveryTimers();
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+      document.removeEventListener('visibilitychange', onVisibility);
       player?.destroy();
     };
   });
@@ -358,34 +529,48 @@
     if (!ready) return;
     if (!videoId) {
       if (lastVideo) {
-        if (autoplayTimer) clearTimeout(autoplayTimer);
-        autoplayTimer = null;
+        clearRecoveryTimers();
         mutedForAutoplay = false;
+        retryCount = 0;
+        playerError = '';
+        playerErrorCode = null;
         reportedDuration = 0;
         onDuration(0);
+        // Invalidate the old media before asking the iframe to stop. YouTube may
+        // synchronously emit ENDED/PAUSED while clearing a video.
+        lastVideo = null;
+        lastMediaId = null;
         confirmedVideo = null;
         player.stopVideo?.();
         player.clearVideo?.();
-        lastVideo = null;
       }
       return;
     }
+    if (lastMediaId !== mediaId) lastMediaId = mediaId;
     const target = Math.max(0, expectedPosition());
     if (lastVideo !== videoId) {
-      if (autoplayTimer) clearTimeout(autoplayTimer);
-      autoplayTimer = null;
+      clearRecoveryTimers();
       mutedForAutoplay = false;
+      retryCount = 0;
+      playerError = '';
+      playerErrorCode = null;
+      loadToken += 1;
       reportedDuration = 0;
       onDuration(0);
+      // Publish the new identity before calling the iframe. A synchronous state
+      // callback from load/cue must be associated with the new request, while a
+      // delayed callback for the old request will fail the video-ID check.
+      lastVideo = videoId;
+      lastMediaId = mediaId;
       confirmedVideo = null;
       guard(3000);
       const request = { videoId, startSeconds: target };
       if (status === 'playing') {
         player.loadVideoById(request);
         scheduleAutoplayCheck();
+        scheduleStartWatchdog('media_load');
       } else player.cueVideoById(request);
       applyRate();
-      lastVideo = videoId;
       prevTime = target;
       prevWall = Date.now();
       localSeekUntil = 0;
@@ -425,10 +610,18 @@
   {#if playerError}<div class="player-error" role="alert">
       <span><Warning size={38} weight="fill" /></span>
       <p>{playerError}</p>
-      <small>Try another video or reload the room.</small>
-      {#if onSkip}<button class="secondary skip-broken" onclick={onSkip}
-          ><SkipForward size={16} weight="fill" />Skip this video</button
-        >{/if}
+      <small
+        >{playerErrorCode === 153
+          ? 'The embedded player identity could not be verified.'
+          : 'Playback can recover after a retry or a different video.'}</small
+      >
+      <div class="player-error-actions">
+        {#if player && ready}<button class="secondary" onclick={() => retryCurrentVideo('manual')}>Try again</button
+          >{:else}<button class="secondary" onclick={retryInitialization}>Reload player</button>{/if}
+        {#if onSkip && lastMediaId}<button class="secondary skip-broken" onclick={() => onSkip(lastMediaId!)}
+            ><SkipForward size={16} weight="fill" />Skip this video</button
+          >{/if}
+      </div>
     </div>{/if}
   {#if !videoId}<div class="empty">
       <span
@@ -489,7 +682,14 @@
     margin: 0.5rem 0;
   }
   .skip-broken {
+    margin-top: 0;
+  }
+  .player-error-actions {
+    display: flex;
+    justify-content: center;
+    gap: 0.6rem;
     margin-top: 0.9rem;
+    flex-wrap: wrap;
   }
   .empty span {
     font-size: 2.4rem;

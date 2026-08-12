@@ -1,4 +1,4 @@
-import { getIdentity, replaceWithAnonymousIdentity } from './identity';
+import { getIdentity, randomUUID, replaceWithAnonymousIdentity } from './identity';
 export interface Principal {
   identityId: string;
   accountId?: string;
@@ -10,10 +10,14 @@ export interface Principal {
 // a transient server/proxy blip (5xx) — e.g. a Bad Gateway during a deploy.
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  code?: string;
+  requestId?: string;
+  constructor(status: number, message: string, code?: string, requestId?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
+    this.requestId = requestId;
   }
 }
 let principal: Principal | null = null;
@@ -22,9 +26,18 @@ export function getPrincipal() {
 }
 let establishing: Promise<Principal> | null = null;
 async function currentPrincipal(): Promise<Principal | null> {
-  const response = await fetch('/api/me');
+  const requestId = randomUUID();
+  const response = await fetch('/api/me', { headers: { 'X-Request-ID': requestId } });
   if (response.status === 204 || response.status === 401) return null;
-  if (!response.ok) throw new ApiError(response.status, await message(response));
+  if (!response.ok) {
+    const details = await problemDetails(response);
+    throw new ApiError(
+      response.status,
+      details.message,
+      details.code,
+      response.headers.get('X-Request-ID') ?? requestId,
+    );
+  }
   return (await response.json()) as Principal;
 }
 export async function establish(): Promise<Principal> {
@@ -39,7 +52,7 @@ export async function establish(): Promise<Principal> {
     const exchange = (i: ReturnType<typeof getIdentity>) =>
       fetch('/api/identity/exchange', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Request-ID': randomUUID() },
         body: JSON.stringify({ id: i.id, secret: i.secret, displayName: i.displayName }),
       });
     let r = await exchange(getIdentity());
@@ -49,7 +62,10 @@ export async function establish(): Promise<Principal> {
       // fresh anonymous identity; the account remains available through Log in.
       r = await exchange(replaceWithAnonymousIdentity());
     }
-    if (!r.ok) throw new ApiError(r.status, await message(r));
+    if (!r.ok) {
+      const details = await problemDetails(r);
+      throw new ApiError(r.status, details.message, details.code, r.headers.get('X-Request-ID') ?? undefined);
+    }
     principal = (await r.json()) as Principal;
     return principal;
   })().finally(() => {
@@ -57,17 +73,20 @@ export async function establish(): Promise<Principal> {
   });
   return establishing;
 }
-async function message(r: Response) {
+async function problemDetails(r: Response): Promise<{ code?: string; message: string }> {
   try {
-    return ((await r.json()) as { message?: string }).message ?? r.statusText;
+    const body = (await r.json()) as { code?: string; message?: string };
+    return { code: body.code, message: body.message ?? r.statusText };
   } catch {
-    return r.statusText;
+    return { message: r.statusText };
   }
 }
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   let p = await establish();
+  const logicalRequestId = randomUUID();
   const request = () => {
     const headers = new Headers(init.headers);
+    headers.set('X-Request-ID', logicalRequestId);
     if (init.body) headers.set('Content-Type', 'application/json');
     if (init.method && init.method !== 'GET') headers.set('X-CSRF-Token', p.csrfToken);
     return fetch(path, { ...init, headers });
@@ -79,18 +98,18 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     r = await request();
   }
   if (r.status === 403) {
-    let problem: { code?: string; message?: string } = {};
-    try {
-      problem = (await r.json()) as { code?: string; message?: string };
-    } catch {
-      /* Response body may not be JSON (e.g., WAF/proxy HTML page) */
+    const problem = await problemDetails(r);
+    if (problem.code !== 'csrf_failed') {
+      throw new ApiError(403, problem.message, problem.code, r.headers.get('X-Request-ID') ?? logicalRequestId);
     }
-    if (problem.code !== 'csrf_failed') throw new ApiError(403, problem.message ?? r.statusText);
     principal = null;
     p = await establish();
     r = await request();
   }
-  if (!r.ok) throw new ApiError(r.status, await message(r));
+  if (!r.ok) {
+    const problem = await problemDetails(r);
+    throw new ApiError(r.status, problem.message, problem.code, r.headers.get('X-Request-ID') ?? logicalRequestId);
+  }
   if (r.status === 204) return undefined as T;
   return (await r.json()) as T;
 }

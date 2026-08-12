@@ -1,11 +1,18 @@
 import { expect, test, type Page } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 
 async function identityId(page: Page) {
   return page.evaluate(() => JSON.parse(localStorage.getItem('koalaparty.identity.v1')!).id as string);
 }
-async function command(page: Page, roomId: string, type: string, payload: Record<string, unknown>) {
+async function command(
+  page: Page,
+  roomId: string,
+  type: string,
+  payload: Record<string, unknown>,
+  requestId = randomUUID(),
+) {
   return page.evaluate(
-    async ({ roomId, type, payload }) => {
+    async ({ roomId, type, payload, requestId }) => {
       const me = await fetch('/api/me').then((r) => r.json());
       const room = await fetch(`/api/rooms/${roomId}`).then((r) => r.json());
       const response = await fetch(`/api/rooms/${roomId}/commands`, {
@@ -13,14 +20,14 @@ async function command(page: Page, roomId: string, type: string, payload: Record
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': me.csrfToken },
         body: JSON.stringify({
           type,
-          requestId: crypto.randomUUID(),
+          requestId,
           expectedRevision: room.revision,
           payload,
         }),
       });
       return { status: response.status, body: await response.text() };
     },
-    { roomId, type, payload },
+    { roomId, type, payload, requestId },
   );
 }
 
@@ -49,7 +56,19 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   await owner.getByLabel('YouTube URL').fill('https://youtu.be/M7lc1UVf-VE');
   await owner.getByRole('button', { name: 'Add to queue' }).click();
   await expect(owner.locator('.queue li')).toHaveCount(1);
-  await owner.locator('.queue .icon').click();
+  const retryRequestId = randomUUID();
+  expect((await command(owner, roomId, 'queue.add', { videoId: '9bZkp7q19f0' }, retryRequestId)).status).toBe(200);
+  expect((await command(owner, roomId, 'queue.add', { videoId: '9bZkp7q19f0' }, retryRequestId)).status).toBe(200);
+  expect(
+    await owner.evaluate(async (id) => {
+      const snapshot = await fetch(`/api/rooms/${id}`).then((response) => response.json());
+      return snapshot.queue.filter((item: { media: { providerId: string } }) => item.media.providerId === '9bZkp7q19f0')
+        .length;
+    }, roomId),
+  ).toBe(1);
+  await owner.locator('.queue .icon').first().click();
+  await expect(owner.locator('.queue li')).toHaveCount(1);
+  await owner.locator('.queue .icon').first().click();
   await expect(owner.locator('.queue li')).toHaveCount(0);
   const member = await memberContext.newPage();
   await member.goto(`/room/${roomId}`);
