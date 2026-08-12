@@ -4,6 +4,12 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-08-12
+
+### Fixed
+
+- Added a repository line-ending rule for Go sources so `gofmt` remains clean in both local Windows and Linux CI checkouts.
+
 ## [0.11.2] - 2026-08-12
 
 ### Added
