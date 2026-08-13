@@ -70,6 +70,14 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   await expect(owner.locator('.queue li')).toHaveCount(1);
   await owner.locator('.queue .icon').first().click();
   await expect(owner.locator('.queue li')).toHaveCount(0);
+  const playbackSpeed = owner.getByLabel('Playback speed');
+  await expect(playbackSpeed).toBeVisible();
+  const playbackSpeedBox = await playbackSpeed.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return { width: rect.width, viewportWidth: window.innerWidth };
+  });
+  expect(playbackSpeedBox.width).toBeGreaterThan(120);
+  expect(playbackSpeedBox.width).toBeLessThan(240);
   const member = await memberContext.newPage();
   await member.goto(`/room/${roomId}`);
   await expect(member.locator('.room-header h1')).toBeVisible();

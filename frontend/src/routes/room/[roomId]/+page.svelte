@@ -1350,7 +1350,9 @@
     padding: 0.5rem 0.8rem;
   }
   .speed-control {
-    flex: 0 0 auto;
+    flex: 0 0 9.75rem;
+    width: 9.75rem;
+    max-width: 100%;
     padding: 0.5rem 0.6rem;
     border-radius: var(--radius-md);
     border: 1px solid var(--border-subtle);

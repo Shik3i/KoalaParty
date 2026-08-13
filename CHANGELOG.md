@@ -4,6 +4,12 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.11.6] - 2026-08-13
+
+### Fixed
+
+- Fixed the room playback-speed selector rendering at full player width and added an end-to-end layout regression check.
+
 ## [0.11.5] - 2026-08-13
 
 ### Fixed
