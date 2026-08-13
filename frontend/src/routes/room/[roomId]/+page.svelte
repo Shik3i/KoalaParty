@@ -947,14 +947,14 @@
             <button
               type="button"
               class="ghost preset-btn"
-              onclick={() => quickAdd('jfKfPfyJRdk')}
-              disabled={commandPending || !can('queue.add')}>🎵 Lofi Girl</button
+              onclick={() => quickAdd('M7lc1UVf-VE')}
+              disabled={commandPending || !can('queue.add')}>🎵 Player demo</button
             >
             <button
               type="button"
               class="ghost preset-btn"
-              onclick={() => quickAdd('4xDzrJKXOOY')}
-              disabled={commandPending || !can('queue.add')}>🌊 Synthwave</button
+              onclick={() => quickAdd('9bZkp7q19f0')}
+              disabled={commandPending || !can('queue.add')}>🌊 Music video</button
             >
             <button
               type="button"

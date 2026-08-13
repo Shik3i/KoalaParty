@@ -72,6 +72,8 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   await expect(owner.locator('.queue li')).toHaveCount(0);
   const playbackSpeed = owner.getByLabel('Playback speed');
   await expect(playbackSpeed).toBeVisible();
+  await expect(owner.getByRole('button', { name: '🎵 Player demo' })).toBeVisible();
+  await expect(owner.getByRole('button', { name: '🌊 Music video' })).toBeVisible();
   const playbackSpeedBox = await playbackSpeed.evaluate((node) => {
     const rect = node.getBoundingClientRect();
     return { width: rect.width, viewportWidth: window.innerWidth };

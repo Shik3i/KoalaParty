@@ -4,6 +4,12 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.11.7] - 2026-08-13
+
+### Fixed
+
+- Replaced retired live-stream examples with stable, embeddable YouTube videos so fresh rooms do not start with unavailable recordings.
+
 ## [0.11.6] - 2026-08-13
 
 ### Fixed
