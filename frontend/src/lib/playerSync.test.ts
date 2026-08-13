@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   PLAYER_STATE,
   isCurrentVideoError,
+  isLocalTimelineJump,
+  isStableTimelineState,
   isRetryablePlayerError,
   normalizedDuration,
   playerErrorMessage,
   shouldReanchorPlayback,
+  shouldBaselineTimeline,
   stateChangeAction,
   timelineJump,
   type StateChangeInput,
@@ -108,6 +111,30 @@ describe('player duration compatibility', () => {
     'treats %s as an unavailable or live-stream duration',
     (duration) => expect(normalizedDuration(duration)).toBe(0),
   );
+});
+
+describe('timeline state stability', () => {
+  it.each([PLAYING, PAUSED])('accepts stable state %s for scrub detection', (state) => {
+    expect(isStableTimelineState(state)).toBe(true);
+  });
+  it.each([ENDED, BUFFERING, -1, 5])('rejects transient state %s for scrub detection', (state) => {
+    expect(isStableTimelineState(state)).toBe(false);
+  });
+  it('does not broadcast a buffering reset as a seek', () => {
+    expect(isLocalTimelineJump(BUFFERING, -2, 1.5)).toBe(false);
+  });
+  it('broadcasts a real backward scrub while playing', () => {
+    expect(isLocalTimelineJump(PLAYING, -2, 1.5)).toBe(true);
+  });
+  it('baselines the first playing tick after buffering', () => {
+    expect(shouldBaselineTimeline(PLAYING, BUFFERING, 2_000, 0)).toBe(true);
+  });
+  it('baselines within the active buffering recovery window', () => {
+    expect(shouldBaselineTimeline(PLAYING, PLAYING, 2_000, 2_500)).toBe(true);
+  });
+  it('allows stable playback outside buffering recovery', () => {
+    expect(shouldBaselineTimeline(PLAYING, PLAYING, 2_000, 1_999)).toBe(false);
+  });
 });
 
 describe('player error attribution', () => {

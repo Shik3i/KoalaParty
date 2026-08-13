@@ -73,6 +73,26 @@ export function normalizedDuration(duration: number): number {
   return Number.isFinite(duration) && duration > 0 && duration <= 604_800 ? duration : 0;
 }
 
+// Buffering and initial/cued states can move the iframe timeline backwards while
+// YouTube swaps buffers or recovers a stream. Those transitions are not user seeks.
+// Only stable playback states are safe inputs for local scrub detection.
+export function isStableTimelineState(state: number): boolean {
+  return state === PLAYER_STATE.PLAYING || state === PLAYER_STATE.PAUSED;
+}
+
+export function isLocalTimelineJump(state: number, jump: number, threshold: number): boolean {
+  return isStableTimelineState(state) && Number.isFinite(jump) && Math.abs(jump) > threshold;
+}
+
+export function shouldBaselineTimeline(
+  state: number,
+  previousState: number | null,
+  now: number,
+  recoveryUntil: number,
+): boolean {
+  return !isStableTimelineState(state) || previousState === PLAYER_STATE.BUFFERING || now < recoveryUntil;
+}
+
 // The IFrame API may report an empty video ID during its first error callback,
 // but an ID belonging to another loaded item is a stale callback from a prior
 // request and must not cover the active player.

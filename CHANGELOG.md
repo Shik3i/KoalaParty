@@ -4,6 +4,12 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-08-13
+
+### Fixed
+
+- Prevented transient YouTube buffering and media-replacement timeline resets from being broadcast as local seeks that restart every client at `0:00`.
+
 ## [0.11.3] - 2026-08-12
 
 ### Fixed

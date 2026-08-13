@@ -3,10 +3,12 @@
   import { Play, Warning, Hourglass, SkipForward, SpeakerSimpleSlash } from 'phosphor-svelte';
   import {
     isCurrentVideoError,
+    isLocalTimelineJump,
     isRetryablePlayerError,
     normalizedDuration,
     PLAYER_STATE,
     playerErrorMessage,
+    shouldBaselineTimeline,
     stateChangeAction,
     timelineJump,
   } from '$lib/playerSync';
@@ -81,12 +83,15 @@
   const POLL_MS = 500;
   const READY_TIMEOUT_MS = 15_000;
   const START_TIMEOUT_MS = 10_000;
+  const TIMELINE_RECOVERY_MS = 1_200;
   const SEEK_JUMP = 1.5; // discontinuity in the player's own timeline => local scrub
   const DRIFT_MAX = 1.8; // divergence from the expected server position => realign
   let guardUntil = 0; // suppress the monitor right after we drive the player
   let localSeekUntil = 0; // suppress drift correction while our own seek round-trips
   let prevTime = 0; // last observed media time (for discontinuity detection)
   let prevWall = 0; // wall clock at prevTime
+  let previousTimelineState: number | null = null;
+  let timelineRecoveryUntil = 0;
   let monitor: ReturnType<typeof setInterval> | null = null;
   // Browsers block autoplay WITH SOUND until the tab has a user gesture, so a
   // passive viewer would otherwise sit on a paused video when someone else presses
@@ -362,6 +367,7 @@
       watchdogTimer = null;
       emitDiagnostic('playing');
     } else if (state === BUFFERING && status === 'playing') {
+      timelineRecoveryUntil = Math.max(timelineRecoveryUntil, Date.now() + TIMELINE_RECOVERY_MS);
       emitDiagnostic('buffering');
       scheduleStartWatchdog('buffering');
     }
@@ -441,6 +447,11 @@
     const now = Date.now();
     const t = currentTime();
     const state = player.getPlayerState?.();
+    const previousState = previousTimelineState;
+    previousTimelineState = state;
+    if (state === BUFFERING) {
+      timelineRecoveryUntil = Math.max(timelineRecoveryUntil, now + TIMELINE_RECOVERY_MS);
+    }
     const duration = normalizedDuration(player.getDuration?.() ?? 0);
     if (duration > 0 && Math.abs(duration - reportedDuration) > 0.5) {
       reportedDuration = duration;
@@ -467,10 +478,18 @@
         return;
       }
     }
+    // YouTube is allowed to reset its reported time while buffering or replacing
+    // media. Baseline those transitions without treating them as a user scrub;
+    // otherwise the transient 0-second reset is broadcast and every client loops.
+    if (shouldBaselineTimeline(state, previousState, now, timelineRecoveryUntil)) {
+      prevTime = t;
+      prevWall = now;
+      return;
+    }
     const jump = timelineJump(t, prevTime, (now - prevWall) / 1000, playing, rate || 1);
     prevTime = t;
     prevWall = now;
-    if (Math.abs(jump) > SEEK_JUMP) {
+    if (isLocalTimelineJump(state, jump, SEEK_JUMP)) {
       if (canSeek) {
         onSeek(t);
         localSeekUntil = now + 4000;
@@ -541,6 +560,8 @@
         lastVideo = null;
         lastMediaId = null;
         confirmedVideo = null;
+        previousTimelineState = null;
+        timelineRecoveryUntil = 0;
         player.stopVideo?.();
         player.clearVideo?.();
       }
@@ -563,6 +584,8 @@
       lastVideo = videoId;
       lastMediaId = mediaId;
       confirmedVideo = null;
+      previousTimelineState = null;
+      timelineRecoveryUntil = 0;
       guard(3000);
       const request = { videoId, startSeconds: target };
       if (status === 'playing') {
