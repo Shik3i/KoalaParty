@@ -5,6 +5,7 @@
     isCurrentVideoError,
     isLocalTimelineJump,
     isRetryablePlayerError,
+    isUnboundedTimeline,
     normalizedDuration,
     PLAYER_STATE,
     playerErrorMessage,
@@ -452,10 +453,21 @@
     if (state === BUFFERING) {
       timelineRecoveryUntil = Math.max(timelineRecoveryUntil, now + TIMELINE_RECOVERY_MS);
     }
-    const duration = normalizedDuration(player.getDuration?.() ?? 0);
+    const rawDuration = player.getDuration?.() ?? 0;
+    const duration = normalizedDuration(rawDuration);
     if (duration > 0 && Math.abs(duration - reportedDuration) > 0.5) {
       reportedDuration = duration;
       onDuration(duration);
+    }
+    // Live streams expose an absolute timeline (for example several million
+    // seconds since the stream began), not the room-relative VOD position. A
+    // drift correction against that value seeks the live stream back to 0 every
+    // polling interval, which looks like a two-second loop to every viewer.
+    if (isUnboundedTimeline(rawDuration, t)) {
+      prevTime = t;
+      prevWall = now;
+      onDiagnostics({ drift: 0, state: 'live', correctedAt });
+      return;
     }
     if (now < guardUntil) {
       prevTime = t;

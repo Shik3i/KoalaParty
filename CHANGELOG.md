@@ -4,6 +4,12 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.11.5] - 2026-08-13
+
+### Fixed
+
+- Prevented absolute YouTube live-stream timelines from being compared with room-relative VOD positions and repeatedly sought back to `0:00`.
+
 ## [0.11.4] - 2026-08-13
 
 ### Fixed

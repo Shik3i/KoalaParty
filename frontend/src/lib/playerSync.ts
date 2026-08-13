@@ -73,6 +73,13 @@ export function normalizedDuration(duration: number): number {
   return Number.isFinite(duration) && duration > 0 && duration <= 604_800 ? duration : 0;
 }
 
+// Continuous YouTube streams expose either a pseudo-duration or an absolute
+// timeline that can be much larger than the room's seven-day position bound.
+// Such timelines cannot be compared with the room-relative playback position.
+export function isUnboundedTimeline(duration: number, currentTime: number): boolean {
+  return (Number.isFinite(duration) && duration > 604_800) || (Number.isFinite(currentTime) && currentTime > 604_800);
+}
+
 // Buffering and initial/cued states can move the iframe timeline backwards while
 // YouTube swaps buffers or recovers a stream. Those transitions are not user seeks.
 // Only stable playback states are safe inputs for local scrub detection.

@@ -5,6 +5,7 @@ import {
   isLocalTimelineJump,
   isStableTimelineState,
   isRetryablePlayerError,
+  isUnboundedTimeline,
   normalizedDuration,
   playerErrorMessage,
   shouldReanchorPlayback,
@@ -111,6 +112,15 @@ describe('player duration compatibility', () => {
     'treats %s as an unavailable or live-stream duration',
     (duration) => expect(normalizedDuration(duration)).toBe(0),
   );
+  it('detects a pseudo-duration live stream', () => {
+    expect(isUnboundedTimeline(121_601_512, 4_854_202.6)).toBe(true);
+  });
+  it('detects an absolute live timeline when duration is unavailable', () => {
+    expect(isUnboundedTimeline(0, 4_854_202.6)).toBe(true);
+  });
+  it('keeps ordinary VOD timelines bounded', () => {
+    expect(isUnboundedTimeline(214, 42)).toBe(false);
+  });
 });
 
 describe('timeline state stability', () => {

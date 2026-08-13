@@ -864,9 +864,11 @@
               ? 'Offline'
               : diagnostics.state === 'buffering'
                 ? 'Buffering'
-                : Math.abs(diagnostics.drift) < 0.6
-                  ? 'Perfectly synced'
-                  : `${Math.abs(diagnostics.drift).toFixed(1)}s ${diagnostics.drift < 0 ? 'behind' : 'ahead'}`}</span
+                : diagnostics.state === 'live'
+                  ? 'Live stream'
+                  : Math.abs(diagnostics.drift) < 0.6
+                    ? 'Perfectly synced'
+                    : `${Math.abs(diagnostics.drift).toFixed(1)}s ${diagnostics.drift < 0 ? 'behind' : 'ahead'}`}</span
           >{#if diagnostics.correctedAt}<small
               >last corrected {Math.max(0, Math.round((nowTick - diagnostics.correctedAt) / 1000))}s ago</small
             >{/if}
