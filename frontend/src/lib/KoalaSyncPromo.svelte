@@ -26,7 +26,7 @@
   <div class="platforms" aria-label="Platforms supported by KoalaSync">
     {#each platforms as platform}
       <div class:wide={platform.wide} class="platform">
-        <img src={platform.icon} alt="" width={platform.wide ? 54 : 28} height="28" loading="lazy" />
+        <img src={platform.icon} alt="" width={platform.wide ? 54 : 28} height="28" />
         <span>{platform.name}</span>
       </div>
     {/each}

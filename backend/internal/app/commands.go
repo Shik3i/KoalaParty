@@ -61,6 +61,7 @@ func (a *application) roomCommand(w http.ResponseWriter, r *http.Request, p prin
 
 var errDenied = errors.New("permission denied")
 var errStale = errors.New("stale revision")
+var errNoActiveMedia = errors.New("invalid player command without active media")
 
 func (a *application) roleAndAllowed(room, identity, cap string) (string, bool) {
 	var role string
@@ -84,6 +85,8 @@ func capFor(t string) string {
 		return "playback.play_pause"
 	case "player.seek":
 		return "playback.seek"
+	case "playback.ended":
+		return "queue.skip"
 	case "queue.add":
 		return "queue.add"
 	case "queue.play_now":
@@ -135,6 +138,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	var mediaTitle, enrichVideoID string
 	var conditionalSkipMediaID string
 	var discardSkippedMedia bool
+	var endedPosition, endedDuration float64
 	if c.Type == "queue.add" || c.Type == "queue.play_now" {
 		var in struct {
 			VideoID string `json:"videoId"`
@@ -147,13 +151,21 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		if a.fetchTitle != nil {
 			enrichVideoID = in.VideoID
 		}
-	} else if c.Type == "queue.skip" {
+	} else if c.Type == "queue.skip" || c.Type == "playback.ended" {
 		var in struct {
-			MediaID        string `json:"mediaId"`
-			DiscardCurrent bool   `json:"discardCurrent"`
+			MediaID        string  `json:"mediaId"`
+			DiscardCurrent bool    `json:"discardCurrent"`
+			Position       float64 `json:"position"`
+			Duration       float64 `json:"duration"`
 		}
 		if len(c.Payload) > 0 && json.Unmarshal(c.Payload, &in) != nil {
 			return snapshot{}, errors.New("invalid queue skip")
+		}
+		if c.Type == "playback.ended" {
+			if c.ExpectedPlaybackRevision == nil || in.MediaID == "" || !validEndedPosition(in.Position, in.Duration) {
+				return snapshot{}, errors.New("invalid playback end report")
+			}
+			endedPosition, endedDuration = in.Position, in.Duration
 		}
 		conditionalSkipMediaID = in.MediaID
 		discardSkippedMedia = in.DiscardCurrent
@@ -187,20 +199,28 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		}
 	}
 	playbackCommand := strings.HasPrefix(c.Type, "player.")
-	if playbackCommand && c.ExpectedPlaybackRevision != nil {
+	if playbackCommand || conditionalSkipMediaID != "" {
 		var playbackRevision int64
-		if e = tx.QueryRow("SELECT revision FROM playback_states WHERE room_id=?", room).Scan(&playbackRevision); e != nil {
+		var currentMediaID sql.NullString
+		var playbackStatus string
+		if e = tx.QueryRow("SELECT revision,current_media_id,status FROM playback_states WHERE room_id=?", room).Scan(&playbackRevision, &currentMediaID, &playbackStatus); e != nil {
 			return snapshot{}, e
 		}
-		if *c.ExpectedPlaybackRevision != playbackRevision {
+		if c.ExpectedPlaybackRevision != nil && *c.ExpectedPlaybackRevision != playbackRevision {
 			return snapshot{}, errStale
 		}
-	} else if conditionalSkipMediaID != "" {
-		var currentMediaID sql.NullString
-		if e = tx.QueryRow("SELECT current_media_id FROM playback_states WHERE room_id=?", room).Scan(&currentMediaID); e != nil {
-			return snapshot{}, e
-		}
-		if !currentMediaID.Valid || currentMediaID.String != conditionalSkipMediaID {
+		if playbackCommand {
+			// Older clients do not send the dedicated playback revision. Preserve
+			// their room-revision guard instead of silently accepting stale commands.
+			if c.ExpectedPlaybackRevision == nil && c.ExpectedRevision != current {
+				return snapshot{}, errStale
+			}
+			if !currentMediaID.Valid {
+				return snapshot{}, errNoActiveMedia
+			}
+		} else if !currentMediaID.Valid || currentMediaID.String != conditionalSkipMediaID {
+			return snapshot{}, errStale
+		} else if c.Type == "playback.ended" && playbackStatus != "playing" {
 			return snapshot{}, errStale
 		}
 	} else if c.ExpectedRevision != current {
@@ -389,7 +409,12 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		} else {
 			_, e = tx.Exec("INSERT INTO queue_votes(room_id,queue_item_id,identity_id) VALUES(?,?,?)", room, in.ItemID, p.IdentityID)
 		}
-	case "queue.skip":
+	case "queue.skip", "playback.ended":
+		if c.Type == "playback.ended" {
+			eventType = "media.ended"
+			payload["position"] = endedPosition
+			payload["duration"] = endedDuration
+		}
 		var loop bool
 		_ = tx.QueryRow("SELECT queue_loop FROM rooms WHERE id=?", room).Scan(&loop)
 		if e = addCurrentToHistory(tx, room); e != nil {
@@ -582,6 +607,18 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	}
 	return a.snapshot(ctx, room, p.IdentityID)
 }
+
+func validEndedPosition(position, duration float64) bool {
+	if math.IsNaN(position) || math.IsInf(position, 0) || math.IsNaN(duration) || math.IsInf(duration, 0) {
+		return false
+	}
+	if position <= 0 || duration <= 0 || duration > 604800 || position > duration+2 {
+		return false
+	}
+	tolerance := math.Min(5, math.Max(1.5, duration*0.02))
+	return duration-position <= tolerance
+}
+
 func resequence(tx *sql.Tx, room string) error {
 	rows, e := tx.Query("SELECT id FROM room_queue_items WHERE room_id=? ORDER BY position", room)
 	if e != nil {

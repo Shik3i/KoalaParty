@@ -23,7 +23,7 @@ Privacy-first shared YouTube rooms. Synchronized playback and a collaborative qu
 
 ## Quick start
 
-Requirements: Go 1.26.5, Node.js 24 LTS, npm 12, and Docker.
+Requirements: Go 1.26.8, Node.js 24 LTS, npm 12, and Docker.
 
 ```sh
 git clone https://github.com/Shik3i/KoalaParty.git

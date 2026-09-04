@@ -333,12 +333,13 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 		roomProblem(w, e)
 		return
 	}
-	up := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	up := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }, EnableCompression: true}
 	conn, e := up.Upgrade(w, r, nil)
 	if e != nil {
 		return
 	}
 	conn.SetReadLimit(64 << 10)
+	conn.EnableWriteCompression(true)
 	_ = conn.SetReadDeadline(time.Now().Add(70 * time.Second))
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(70 * time.Second))

@@ -8,8 +8,12 @@
   import { rememberRoom } from '$lib/recentRooms';
   import YouTubePlayer from '$lib/YouTubePlayer.svelte';
   import {
+    automaticEndDelay,
+    filterQueue,
     formatActivity,
     parseYouTube,
+    participantNameParts,
+    reconnectDelay,
     SKIPPED_SPONSOR_CATEGORIES,
     SPONSOR_CATEGORY_LABELS,
     type Snapshot,
@@ -41,6 +45,8 @@
     Repeat,
     ThumbsUp,
     PictureInPicture,
+    ArrowsClockwise,
+    DownloadSimple,
   } from 'phosphor-svelte';
   const roomId = (page.params.roomId ?? '').toUpperCase();
   let room: Snapshot | null = null;
@@ -51,10 +57,14 @@
   let disposed = false;
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let joinWaitTimer: ReturnType<typeof setTimeout> | null = null;
+  let resolveJoinWait: (() => void) | null = null;
   let noticeTimer: ReturnType<typeof setTimeout> | null = null;
   let commandPending = false;
   let error = '';
   let joinAttempt = 0;
+  let joinInFlight = false;
+  let suspended = false;
   let notice = '';
   let noticeKind: 'info' | 'success' | 'error' = 'info';
   let connected = false;
@@ -71,6 +81,7 @@
   let visible = true;
   let reactions: Array<{ id: string; emoji: string }> = [];
   let videoURL = '';
+  let queueQuery = '';
   let mobileTab: 'queue' | 'people' | 'activity' = 'queue';
   let dragging: string | null = null;
   let settingsOpen = false;
@@ -81,6 +92,9 @@
   let reportPending = false;
   let reportSubmitted = false;
   let seekTimer: ReturnType<typeof setTimeout> | null = null;
+  let progressTimer: ReturnType<typeof setInterval> | null = null;
+  let endedReportTimer: ReturnType<typeof setTimeout> | null = null;
+  let syncRequest = 0;
   let confirmDialog: { title: string; confirmLabel: string; danger: boolean; resolve: (ok: boolean) => void } | null =
     null;
   const me = () => room?.members.find((m) => m.identityId === room?.me);
@@ -89,10 +103,52 @@
     return !!m && (m.role === 'owner' || m.role === 'admin' || m.permissions[cap] !== false);
   };
   const manages = () => me()?.role === 'owner' || me()?.role === 'admin';
+  const queueIndex = (items: Snapshot['queue'], itemId: string) => items.findIndex((item) => item.id === itemId);
+  function updateMediaSession(next: Snapshot) {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    try {
+      const media = next.playback.media;
+      navigator.mediaSession.metadata = media
+        ? new MediaMetadata({
+            title: media.title,
+            artist: next.label,
+            album: 'KoalaParty',
+            artwork: media.thumbnail ? [{ src: media.thumbnail }] : [],
+          })
+        : null;
+      navigator.mediaSession.playbackState = media
+        ? next.playback.status === 'playing'
+          ? 'playing'
+          : 'paused'
+        : 'none';
+    } catch {
+      /* Media Session metadata support varies independently from the API object. */
+    }
+  }
+  function updateMediaPosition() {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator) || mediaDuration <= 0) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: mediaDuration,
+        playbackRate: playbackAnchor.rate,
+        position: Math.min(mediaDuration, Math.max(0, livePosition())),
+      });
+    } catch {
+      /* Media Session position support varies by browser and live-stream type. */
+    }
+  }
   function updateRoom(next: Snapshot) {
     if (room && next.revision < room.revision) return;
     const pb = next.playback;
     const mediaId = pb.media?.id ?? '';
+    if (mediaId !== playbackAnchor.mediaId && seekTimer) {
+      clearTimeout(seekTimer);
+      seekTimer = null;
+    }
+    if ((mediaId !== playbackAnchor.mediaId || pb.revision !== playbackAnchor.revision) && endedReportTimer) {
+      clearTimeout(endedReportTimer);
+      endedReportTimer = null;
+    }
     const rate = pb.rate || 1;
     if (!room || shouldReanchorPlayback(playbackAnchor, { mediaId, revision: pb.revision })) {
       if (mediaId !== playbackAnchor.mediaId) mediaDuration = 0;
@@ -106,6 +162,9 @@
       };
     }
     room = next;
+    updateMediaSession(next);
+    updateMediaPosition();
+    updateProgressTimer();
   }
   const livePosition = (now = Date.now()) =>
     playbackAnchor.status === 'playing'
@@ -113,16 +172,20 @@
       : playbackAnchor.position;
   let mediaDuration = 0;
   let nowTick = Date.now();
+  function updateProgressTimer() {
+    if (progressTimer) clearInterval(progressTimer);
+    progressTimer = null;
+    nowTick = Date.now();
+    if (!visible || playbackAnchor.status !== 'playing' || !playbackAnchor.mediaId) return;
+    progressTimer = setInterval(() => (nowTick = Date.now()), 500);
+  }
   function fmtTime(seconds: number) {
     const s = Math.max(0, Math.floor(seconds));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   }
-  // Names look like "🐸 Nimble Frog": use the leading emoji as the avatar badge
-  // and show the rest as the label. Falls back to an initial for custom names.
-  function nameParts(displayName: string): { badge: string; label: string } {
-    const match = displayName.match(/^(\p{Extended_Pictographic}️?)\s+(.+)$/u);
-    if (match) return { badge: match[1], label: match[2] };
-    return { badge: (displayName.trim()[0] ?? '?').toUpperCase(), label: displayName };
+  function handleDuration(duration: number) {
+    mediaDuration = duration;
+    updateMediaPosition();
   }
   function showNotice(message: string, clearAfter = 0, kind: 'info' | 'success' | 'error' = 'info') {
     if (noticeTimer) clearTimeout(noticeTimer);
@@ -130,14 +193,30 @@
     noticeKind = kind;
     if (clearAfter > 0) noticeTimer = setTimeout(() => (notice = ''), clearAfter);
   }
+  function cancelJoinWait() {
+    if (joinWaitTimer) clearTimeout(joinWaitTimer);
+    joinWaitTimer = null;
+    resolveJoinWait?.();
+    resolveJoinWait = null;
+  }
+  function waitForReconnect(delay: number) {
+    return new Promise<void>((resolve) => {
+      resolveJoinWait = resolve;
+      joinWaitTimer = setTimeout(() => {
+        joinWaitTimer = null;
+        resolveJoinWait = null;
+        resolve();
+      }, delay);
+    });
+  }
   function recordDiagnostic(event: DiagnosticEvent) {
     diagnosticEvents = [...diagnosticEvents, event].slice(-60);
     if (['error', 'retry', 'stalled', 'offline'].includes(event.event)) {
       console.warn('[KoalaParty diagnostic]', event);
     }
   }
-  async function copyDiagnostics() {
-    const report = formatDiagnosticEvents(diagnosticEvents, {
+  function diagnosticReport() {
+    return formatDiagnosticEvents(diagnosticEvents, {
       roomId,
       online,
       visible,
@@ -146,12 +225,23 @@
       playbackRevision: room?.playback.revision ?? null,
       userAgent: typeof navigator === 'undefined' ? null : navigator.userAgent,
     });
+  }
+  async function copyDiagnostics() {
     try {
-      await navigator.clipboard.writeText(report);
+      await navigator.clipboard.writeText(diagnosticReport());
       showNotice('Diagnostics copied. They stay local until you share them.', 2600, 'success');
     } catch {
       showNotice('Diagnostics could not be copied. Check clipboard permissions.', 3000, 'error');
     }
+  }
+  function downloadDiagnostics() {
+    const url = URL.createObjectURL(new Blob([diagnosticReport()], { type: 'text/plain;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `koalaparty-${roomId.toLowerCase()}-diagnostics.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showNotice('Diagnostics downloaded. They contain local technical state only.', 2600, 'success');
   }
   function ask(title: string, confirmLabel: string, danger = false): Promise<boolean> {
     return new Promise((resolve) => {
@@ -230,8 +320,14 @@
     };
   }
   function scheduleSeek(position: number) {
+    const mediaId = room?.playback.media?.id;
+    if (!mediaId) return;
     if (seekTimer) clearTimeout(seekTimer);
-    seekTimer = setTimeout(() => command('player.seek', { position }, { silentStale: true, bypassPending: true }), 300);
+    seekTimer = setTimeout(() => {
+      seekTimer = null;
+      if (room?.playback.media?.id !== mediaId) return;
+      void command('player.seek', { position }, { silentStale: true, bypassPending: true });
+    }, 300);
   }
   // Segments the room actually skips: only the acted-on categories, and only while the
   // room has SponsorBlock enabled. Passed to the player, which performs the jump.
@@ -269,33 +365,39 @@
   // retried with backoff; only a genuine client error (4xx: forbidden, not
   // found, banned) stops and shows the fatal screen.
   async function joinWithRetry() {
-    while (!disposed) {
-      try {
-        await establish();
-        if (disposed) return;
-        const joinedRoom = await api<Snapshot>(`/api/rooms/${roomId}`);
-        updateRoom(joinedRoom);
-        rememberRoom({
-          id: joinedRoom.id,
-          label: joinedRoom.label,
-          title: joinedRoom.playback.media?.title ?? '',
-        });
-        if (disposed) return;
-        error = '';
-        joinAttempt = 0;
-        connect();
-        announceCreation();
-        return;
-      } catch (e) {
-        if (disposed) return;
-        const status = e instanceof ApiError ? e.status : undefined;
-        if (status !== undefined && status >= 400 && status < 500) {
-          error = e instanceof Error ? e.message : 'Could not join room.';
+    if (disposed || suspended || joinInFlight || socket || !navigator.onLine) return;
+    joinInFlight = true;
+    try {
+      while (!disposed && !suspended && navigator.onLine && !socket) {
+        try {
+          await establish();
+          if (disposed || socket) return;
+          const joinedRoom = await api<Snapshot>(`/api/rooms/${roomId}`);
+          updateRoom(joinedRoom);
+          rememberRoom({
+            id: joinedRoom.id,
+            label: joinedRoom.label,
+            title: joinedRoom.playback.media?.title ?? '',
+          });
+          if (disposed || socket) return;
+          error = '';
+          joinAttempt = 0;
+          connect();
+          announceCreation();
           return;
+        } catch (e) {
+          if (disposed || !navigator.onLine) return;
+          const status = e instanceof ApiError ? e.status : undefined;
+          if (status !== undefined && status >= 400 && status < 500) {
+            error = e instanceof Error ? e.message : 'Could not join room.';
+            return;
+          }
+          joinAttempt++;
+          await waitForReconnect(reconnectDelay(joinAttempt));
         }
-        joinAttempt++;
-        await new Promise((resolve) => setTimeout(resolve, Math.min(1500 * joinAttempt, 6000)));
       }
+    } finally {
+      joinInFlight = false;
     }
   }
   // Theater mode is a per-device viewing preference, so persist it across reloads.
@@ -313,40 +415,119 @@
     visible = document.visibilityState === 'visible';
     const onOnline = () => {
       online = true;
+      cancelJoinWait();
       recordDiagnostic({ at: new Date().toISOString(), source: 'room', event: 'online', details: {} });
-      if (!connected) void joinWithRetry();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      if (!socket) void joinWithRetry();
     };
     const onOffline = () => {
       online = false;
+      cancelJoinWait();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      const activeSocket = socket;
+      socket = null;
+      connected = false;
+      activeSocket?.close();
       recordDiagnostic({ at: new Date().toISOString(), source: 'room', event: 'offline', details: {} });
       showNotice('You are offline. Changes will resume after reconnecting.', 0, 'error');
     };
     const onVisibility = () => {
       visible = document.visibilityState === 'visible';
+      updateProgressTimer();
       recordDiagnostic({
         at: new Date().toISOString(),
         source: 'room',
         event: visible ? 'visible' : 'hidden',
         details: {},
       });
-      if (visible && !connected) void joinWithRetry();
+      if (visible && !socket) void joinWithRetry();
     };
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || !room?.playback.media) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (target?.closest('input, textarea, select, button, a, [contenteditable="true"]')) return;
+      if (event.key.toLowerCase() === 'k' && can('playback.play_pause')) {
+        event.preventDefault();
+        void command(room.playback.status === 'playing' ? 'player.pause' : 'player.play', {
+          position: livePosition(),
+        });
+      } else if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && can('playback.seek')) {
+        event.preventDefault();
+        const delta = event.key === 'ArrowLeft' ? -5 : 5;
+        void command('player.seek', { position: Math.max(0, livePosition() + delta) });
+      }
+    };
+    const onPageHide = () => {
+      suspended = true;
+      cancelJoinWait();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      const activeSocket = socket;
+      socket = null;
+      connected = false;
+      activeSocket?.close();
+    };
+    const onPageShow = () => {
+      suspended = false;
+      if (!socket) void Promise.resolve().then(joinWithRetry);
+    };
+    const mediaActions: MediaSessionAction[] = [];
+    const setMediaAction = (action: MediaSessionAction, handler: MediaSessionActionHandler) => {
+      if (!('mediaSession' in navigator)) return;
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+        mediaActions.push(action);
+      } catch {
+        /* Unsupported Media Session action in this browser. */
+      }
+    };
+    setMediaAction('play', () => {
+      if (room?.playback.media && can('playback.play_pause')) {
+        void command('player.play', { position: livePosition() });
+      }
+    });
+    setMediaAction('pause', () => {
+      if (room?.playback.media && can('playback.play_pause')) {
+        void command('player.pause', { position: livePosition() });
+      }
+    });
+    setMediaAction('seekbackward', (details) => {
+      if (room?.playback.media && can('playback.seek')) {
+        void command('player.seek', { position: Math.max(0, livePosition() - (details.seekOffset ?? 10)) });
+      }
+    });
+    setMediaAction('seekforward', (details) => {
+      if (room?.playback.media && can('playback.seek')) {
+        void command('player.seek', { position: Math.max(0, livePosition() + (details.seekOffset ?? 10)) });
+      }
+    });
+    setMediaAction('seekto', (details) => {
+      if (room?.playback.media && can('playback.seek') && details.seekTime !== undefined) {
+        void command('player.seek', { position: Math.max(0, details.seekTime) });
+      }
+    });
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
     document.addEventListener('visibilitychange', onVisibility);
+    document.addEventListener('keydown', onKeydown);
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
     try {
       theater = localStorage.getItem('koalaparty.theater') === '1';
     } catch {
       /* localStorage unavailable */
     }
     void joinWithRetry();
-    const progressTimer = setInterval(() => (nowTick = Date.now()), 500);
     return () => {
       disposed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      cancelJoinWait();
       if (noticeTimer) clearTimeout(noticeTimer);
       if (seekTimer) clearTimeout(seekTimer);
-      clearInterval(progressTimer);
+      if (progressTimer) clearInterval(progressTimer);
+      if (endedReportTimer) clearTimeout(endedReportTimer);
       reactionTimers.forEach(clearTimeout);
       reactionTimers = [];
       const activeSocket = socket;
@@ -355,6 +536,14 @@
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
       document.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener('keydown', onKeydown);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
+      if ('mediaSession' in navigator) {
+        for (const action of mediaActions) navigator.mediaSession.setActionHandler(action, null);
+        navigator.mediaSession.metadata = null;
+        navigator.mediaSession.playbackState = 'none';
+      }
     };
   });
   function connect() {
@@ -363,6 +552,8 @@
     socket = ws;
     ws.onopen = () => {
       if (socket !== ws) return;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = null;
       connected = true;
       recordDiagnostic({ at: new Date().toISOString(), source: 'websocket', event: 'open', details: {} });
       if (everConnected) showNotice('Reconnected', 1800, 'success');
@@ -373,12 +564,13 @@
       socket = null;
       connected = false;
       recordDiagnostic({ at: new Date().toISOString(), source: 'websocket', event: 'close', details: {} });
-      if (disposed) return;
+      if (disposed || suspended) return;
       showNotice('Connection lost. Reconnecting…', 0, 'error');
+      if (!navigator.onLine) return;
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         void joinWithRetry();
-      }, 1500);
+      }, reconnectDelay(++joinAttempt));
     };
     ws.onerror = () =>
       recordDiagnostic({ at: new Date().toISOString(), source: 'websocket', event: 'error', details: {} });
@@ -481,6 +673,46 @@
     } finally {
       if (managePending) commandPending = false;
     }
+  }
+  function reportEnded(mediaId: string, position: number, duration: number, attempt = 0) {
+    if (!room || room.playback.media?.id !== mediaId) return;
+    const revision = room.playback.revision;
+    const delay = automaticEndDelay(room);
+    if (delay === null) return;
+    if (endedReportTimer) clearTimeout(endedReportTimer);
+    endedReportTimer = setTimeout(() => {
+      endedReportTimer = null;
+      if (room?.playback.media?.id !== mediaId || room.playback.revision !== revision) return;
+      const signature = `${mediaId}:${revision}`;
+      const storageKey = `koalaparty.ended.${roomId}`;
+      try {
+        const stored = JSON.parse(localStorage.getItem(storageKey) ?? 'null') as {
+          signature?: string;
+          at?: number;
+        } | null;
+        if (stored?.signature === signature && Date.now() - (stored.at ?? 0) < 15_000) return;
+        localStorage.setItem(storageKey, JSON.stringify({ signature, at: Date.now() }));
+      } catch {
+        /* localStorage coordination is best-effort; server revisions remain authoritative */
+      }
+      void command('playback.ended', { mediaId, position, duration }, { silentStale: true, bypassPending: true }).then(
+        (success) => {
+          if (success || room?.playback.media?.id !== mediaId || room.playback.revision !== revision) return;
+          try {
+            const stored = JSON.parse(localStorage.getItem(storageKey) ?? 'null') as { signature?: string } | null;
+            if (stored?.signature === signature) localStorage.removeItem(storageKey);
+          } catch {
+            /* localStorage cleanup is best-effort */
+          }
+          if (attempt < 2) {
+            endedReportTimer = setTimeout(
+              () => reportEnded(mediaId, position, duration, attempt + 1),
+              reconnectDelay(attempt + 1),
+            );
+          }
+        },
+      );
+    }, delay);
   }
   async function add(playNow = false) {
     const id = parseYouTube(videoURL);
@@ -775,6 +1007,7 @@
             videoId={room.playback.media?.providerId}
             mediaId={room.playback.media?.id}
             playbackRevision={room.playback.revision}
+            {syncRequest}
             status={room.playback.status}
             position={playbackAnchor.position}
             positionAt={playbackAnchor.at}
@@ -789,13 +1022,11 @@
             onRate={(newRate, pos) =>
               command('player.rate', { rate: newRate, position: pos }, { silentStale: true, bypassPending: true })}
             onSponsorSkip={skipSponsor}
-            onEnded={(endedMediaId) =>
-              can('queue.skip') &&
-              command('queue.skip', { mediaId: endedMediaId }, { silentStale: true, bypassPending: true })}
+            onEnded={reportEnded}
             onSkip={can('queue.skip')
               ? (brokenMediaId) => command('queue.skip', { mediaId: brokenMediaId, discardCurrent: true })
               : undefined}
-            onDuration={(d) => (mediaDuration = d)}
+            onDuration={handleDuration}
             onDiagnostics={(value) => (diagnostics = value)}
             onDiagnosticEvent={recordDiagnostic}
           />{#if !room.playback.media && room.queue.length && can('queue.skip')}<button
@@ -861,7 +1092,9 @@
         <div class="sync-diagnostics" title="Estimated difference between this player and the shared room clock">
           <Pulse size={14} weight="bold" /><span
             >{!connected
-              ? 'Offline'
+              ? online
+                ? 'Reconnecting…'
+                : 'Offline'
               : diagnostics.state === 'buffering'
                 ? 'Buffering'
                 : diagnostics.state === 'live'
@@ -875,7 +1108,18 @@
           <button class="ghost diagnostics-copy" onclick={copyDiagnostics} title="Copy local playback diagnostics">
             <ClipboardText size={14} weight="bold" />Copy diagnostics
           </button>
+          <button class="ghost diagnostics-copy" onclick={() => (syncRequest += 1)} title="Realign this player now">
+            <ArrowsClockwise size={14} weight="bold" />Sync now
+          </button>
+          <button
+            class="ghost diagnostics-copy"
+            onclick={downloadDiagnostics}
+            title="Download local playback diagnostics"
+          >
+            <DownloadSimple size={14} weight="bold" />Download
+          </button>
         </div>
+        {#if room.queue[0]}<p class="up-next"><strong>Up next:</strong> {room.queue[0].media.title}</p>{/if}
         <div class="reaction-bar" aria-label="Send a reaction">
           {#each ['❤️', '😂', '🔥', '👀', '😴', '👏'] as emoji}<button class="ghost" onclick={() => react(emoji)}
               >{emoji}</button
@@ -1033,13 +1277,21 @@
               >
             </div>
           </header>
+          {#if room.queue.length > 4}<label class="queue-search">
+              <span>Search queue</span>
+              <input bind:value={queueQuery} type="search" placeholder="Title or video ID" />
+            </label>{/if}
           {#if !room.queue.length}<div class="empty">
               <span>🎋</span>
               <p>The queue is empty.<br />Add a YouTube link together.</p>
+            </div>{:else if !filterQueue(room.queue, queueQuery).length}<div class="empty">
+              <span>🔎</span>
+              <p>No queued video matches “{queueQuery}”.</p>
             </div>{:else}<ol class="queue">
-              {#each room.queue as item, i (item.id)}<li
+              {#each filterQueue(room.queue, queueQuery) as item (item.id)}{@const i = queueIndex(room.queue, item.id)}
+                <li
                   animate:flip={{ duration: 260 }}
-                  draggable={!commandPending && can('queue.reorder')}
+                  draggable={!queueQuery && !commandPending && can('queue.reorder')}
                   ondragstart={() => (dragging = item.id)}
                   ondragover={(e) => e.preventDefault()}
                   ondrop={() => drop(item.id)}
@@ -1100,7 +1352,7 @@
             >
           </header>
           <ul class="members">
-            {#each room.members as member}{@const parts = nameParts(member.displayName)}
+            {#each room.members as member}{@const parts = participantNameParts(member.displayName)}
               <li>
                 <div class="avatar" class:offline={!member.active}>
                   <span aria-hidden="true">{parts.badge}</span><span
@@ -1235,12 +1487,23 @@
     font-size: 0.78rem;
     margin-top: 0.55rem;
   }
+  .sync-diagnostics {
+    flex-wrap: wrap;
+  }
   .sync-diagnostics small {
     margin-left: auto;
   }
   .diagnostics-copy {
     margin-left: 0.35rem;
     font-size: 0.72rem;
+  }
+  .up-next {
+    margin: 0.45rem 0 0;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .reaction-bar button {
     font-size: 1.1rem;
@@ -1545,6 +1808,16 @@
   .side-column h2 {
     font-size: 1rem;
     margin: 0;
+  }
+  .queue-search {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0 1rem 0.8rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+  }
+  .queue-search input {
+    width: 100%;
   }
   .empty {
     text-align: center;

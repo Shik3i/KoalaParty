@@ -42,7 +42,9 @@ export function stateChangeAction(i: StateChangeInput): StateChangeAction {
   if (i.state === PLAYER_STATE.ENDED) {
     const finiteTimeline = Number.isFinite(i.currentTime) && Number.isFinite(i.duration) && i.duration > 0;
     const endTolerance = Math.max(2, Math.min(5, i.duration * 0.01));
-    return i.videoMatches && finiteTimeline && i.currentTime >= i.duration - endTolerance ? 'ended' : 'ignore';
+    return i.videoMatches && finiteTimeline && i.currentTime > 0 && i.currentTime >= i.duration - endTolerance
+      ? 'ended'
+      : 'ignore';
   }
   if (i.guarded) return 'ignore';
   if (i.state === PLAYER_STATE.PLAYING && i.serverStatus !== 'playing') {
@@ -87,17 +89,40 @@ export function isStableTimelineState(state: number): boolean {
   return state === PLAYER_STATE.PLAYING || state === PLAYER_STATE.PAUSED;
 }
 
+// Visibility/fullscreen/online transitions may need to wake a paused or cued
+// iframe. Never call playVideo for an iframe that is already playing, buffering,
+// or locally ended: replaying ENDED while the conditional queue skip is in flight
+// can leave detached fullscreen playback running after the room becomes empty.
+export function shouldRecoverPlayback(serverStatus: string, hasVideo: boolean, state: number | null | undefined) {
+  return (
+    serverStatus === 'playing' &&
+    hasVideo &&
+    state !== PLAYER_STATE.PLAYING &&
+    state !== PLAYER_STATE.BUFFERING &&
+    state !== PLAYER_STATE.ENDED
+  );
+}
+
 export function isLocalTimelineJump(state: number, jump: number, threshold: number): boolean {
   return isStableTimelineState(state) && Number.isFinite(jump) && Math.abs(jump) > threshold;
 }
 
-export function shouldBaselineTimeline(
-  state: number,
-  previousState: number | null,
-  now: number,
-  recoveryUntil: number,
-): boolean {
-  return !isStableTimelineState(state) || previousState === PLAYER_STATE.BUFFERING || now < recoveryUntil;
+// A buffering interval may legitimately leave the iframe anywhere between its
+// last stable position and the position it would have reached without buffering.
+// Anything outside that range is a real timeline discontinuity (usually a local
+// scrub) and must still be broadcast once the player becomes stable again.
+export function timelineRecoveryJump(
+  currentTime: number,
+  previousTime: number,
+  elapsedSeconds: number,
+  playing: boolean,
+  playbackRate: number,
+): number {
+  const delta = currentTime - previousTime;
+  const maximumNaturalAdvance = playing ? Math.max(0, elapsedSeconds) * Math.max(0, playbackRate || 1) : 0;
+  if (delta < 0) return delta;
+  if (delta > maximumNaturalAdvance) return delta - maximumNaturalAdvance;
+  return 0;
 }
 
 // The IFrame API may report an empty video ID during its first error callback,

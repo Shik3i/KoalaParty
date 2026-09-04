@@ -5,13 +5,15 @@
     isCurrentVideoError,
     isLocalTimelineJump,
     isRetryablePlayerError,
+    isStableTimelineState,
     isUnboundedTimeline,
     normalizedDuration,
     PLAYER_STATE,
     playerErrorMessage,
-    shouldBaselineTimeline,
+    shouldRecoverPlayback,
     stateChangeAction,
     timelineJump,
+    timelineRecoveryJump,
   } from '$lib/playerSync';
   import { createDiagnosticEvent, type DiagnosticEvent } from '$lib/diagnostics';
   import { loadYouTubeAPI } from '$lib/youtubeApi';
@@ -21,6 +23,7 @@
     videoId = null,
     mediaId = null,
     playbackRevision = 0,
+    syncRequest = 0,
     status = 'paused',
     position = 0,
     positionAt = 0,
@@ -44,6 +47,7 @@
     videoId?: string | null;
     mediaId?: string | null;
     playbackRevision?: number;
+    syncRequest?: number;
     status?: string;
     position?: number;
     positionAt?: number;
@@ -57,7 +61,7 @@
     onSeek?: (position: number) => void;
     onRate?: (rate: number, position: number) => void;
     onSponsorSkip?: (segment: SponsorSegment) => void;
-    onEnded?: (mediaId: string) => void;
+    onEnded?: (mediaId: string, position: number, duration: number) => void;
     onSkip?: ((mediaId: string) => void) | undefined;
     onDuration?: (duration: number) => void;
     onDiagnostics?: (diagnostics: { drift: number; state: string; correctedAt: number | null }) => void;
@@ -89,11 +93,12 @@
   const DRIFT_MAX = 1.8; // divergence from the expected server position => realign
   let guardUntil = 0; // suppress the monitor right after we drive the player
   let localSeekUntil = 0; // suppress drift correction while our own seek round-trips
+  let localControlUntil = 0; // do not undo a local play/pause while its command is in flight
   let prevTime = 0; // last observed media time (for discontinuity detection)
   let prevWall = 0; // wall clock at prevTime
   let previousTimelineState: number | null = null;
   let timelineRecoveryUntil = 0;
-  let monitor: ReturnType<typeof setInterval> | null = null;
+  let monitor: ReturnType<typeof setTimeout> | null = null;
   // Browsers block autoplay WITH SOUND until the tab has a user gesture, so a
   // passive viewer would otherwise sit on a paused video when someone else presses
   // play. We detect the blocked play, fall back to muted autoplay (always allowed),
@@ -102,10 +107,16 @@
   let readyTimer: ReturnType<typeof setTimeout> | null = null;
   let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let autoplayGeneration = 0;
+  let watchdogGeneration = 0;
+  let retryGeneration = 0;
   let retryCount = 0;
   let loadToken = 0;
+  let playerGeneration = 0;
   let mutedForAutoplay = $state(false);
   let correctedAt: number | null = null;
+  let endedMediaId: string | null = null;
+  let handledSyncRequest = 0;
 
   function emitDiagnostic(event: string, details: Record<string, string | number | boolean | null> = {}) {
     onDiagnosticEvent(
@@ -124,6 +135,9 @@
   }
 
   function clearRecoveryTimers() {
+    autoplayGeneration += 1;
+    watchdogGeneration += 1;
+    retryGeneration += 1;
     if (autoplayTimer) clearTimeout(autoplayTimer);
     if (readyTimer) clearTimeout(readyTimer);
     if (watchdogTimer) clearTimeout(watchdogTimer);
@@ -162,13 +176,62 @@
     scheduleStartWatchdog('play_request');
   }
 
+  function recoverPlayback(reason: string) {
+    const state = player?.getPlayerState?.();
+    if (Date.now() < localControlUntil) {
+      emitDiagnostic('recovery_skipped', { reason, state: state ?? null, localCommandPending: true });
+      return;
+    }
+    if (!shouldRecoverPlayback(status, !!lastVideo, state)) {
+      emitDiagnostic('recovery_skipped', { reason, state: state ?? null });
+      return;
+    }
+    emitDiagnostic('recovery_requested', { reason, state: state ?? null });
+    requestPlay();
+  }
+
+  function forceResync(reason: string) {
+    if (!player || !ready || !lastVideo) return;
+    if (player.getPlayerState?.() === PLAYER_STATE.ENDED || endedMediaId === lastMediaId) {
+      emitDiagnostic('recovery_skipped', { reason, state: PLAYER_STATE.ENDED });
+      return;
+    }
+    localSeekUntil = 0;
+    localControlUntil = 0;
+    const target = expectedPosition();
+    const drift = currentTime() - target;
+    guard();
+    applyRate();
+    if (Math.abs(drift) > 0.25) {
+      player.seekTo(target, true);
+      prevTime = target;
+      prevWall = Date.now();
+      correctedAt = Date.now();
+    }
+    emitDiagnostic('forced_resync', { reason, drift });
+    if (status === 'playing') recoverPlayback(reason);
+    else if (player.getPlayerState?.() !== PAUSED && player.getPlayerState?.() !== PLAYER_STATE.ENDED) {
+      player.pauseVideo?.();
+    }
+    onDiagnostics({ drift: 0, state: status === 'playing' ? 'playing' : 'paused', correctedAt });
+  }
+
   function scheduleStartWatchdog(reason: string) {
     if (watchdogTimer) clearTimeout(watchdogTimer);
     if (status !== 'playing' || !lastVideo) return;
     const token = loadToken;
+    const generation = ++watchdogGeneration;
     watchdogTimer = setTimeout(() => {
       watchdogTimer = null;
-      if (disposed || token !== loadToken || !player || status !== 'playing' || !lastVideo) return;
+      if (
+        disposed ||
+        generation !== watchdogGeneration ||
+        token !== loadToken ||
+        !player ||
+        status !== 'playing' ||
+        !lastVideo
+      )
+        return;
       const state = player.getPlayerState?.();
       if (state === PLAYING || state === PAUSED) return;
       emitDiagnostic('stalled', { reason, state: state ?? null });
@@ -183,6 +246,7 @@
 
   function startMutedAutoplay(reason: string) {
     if (!player || status !== 'playing') return;
+    if (player.getPlayerState?.() === PLAYER_STATE.ENDED) return;
     guard();
     player.mute?.();
     mutedForAutoplay = true;
@@ -192,12 +256,13 @@
 
   function scheduleAutoplayCheck() {
     if (autoplayTimer) clearTimeout(autoplayTimer);
+    const generation = ++autoplayGeneration;
     // A single snapshot is fragile: a slow network shows BUFFERING before PLAYING,
     // while a blocked autoplay stays UNSTARTED/CUED/PAUSED. Poll a few times so we
     // only fall back to muted playback once it is clear the sound play never took.
     const check = (attempt: number) => {
       autoplayTimer = null;
-      if (disposed || !player || status !== 'playing') return;
+      if (disposed || generation !== autoplayGeneration || !player || status !== 'playing') return;
       const state = player.getPlayerState?.();
       if (state === PLAYING) return; // playing (with or without sound) — nothing to do
       if (state === BUFFERING && attempt < 3) {
@@ -225,6 +290,7 @@
     playerError = '';
     playerErrorCode = null;
     confirmedVideo = null;
+    endedMediaId = null;
     guard(3000);
     emitDiagnostic('retry', { reason, retryCount });
     const request = { videoId: lastVideo, startSeconds: Math.max(0, expectedPosition()) };
@@ -256,26 +322,33 @@
     await loadYouTubeAPI();
   }
   async function initialize() {
+    if (!enabled || !videoId || disposed) return;
+    const initializationVideo = videoId;
+    const generation = ++playerGeneration;
     loading = true;
     failed = false;
     emitDiagnostic('initialize_started');
     try {
       await loadAPI();
     } catch (error) {
+      if (disposed || generation !== playerGeneration) return;
       loading = false;
       failed = true;
       playerError = error instanceof Error ? error.message : 'YouTube player could not be loaded.';
       emitDiagnostic('initialize_failed', { message: playerError });
       return;
     }
-    if (disposed) {
+    if (disposed || generation !== playerGeneration || !enabled || videoId !== initializationVideo) {
       loading = false;
       return;
     }
     const w = window as YTWindow;
-    const token = ++loadToken;
     try {
-      player = new w.YT.Player(host, {
+      const mount = document.createElement('div');
+      // The IFrame API owns and replaces this mount node; reset only its dedicated host.
+      // eslint-disable-next-line svelte/no-dom-manipulating
+      host.replaceChildren(mount);
+      player = new w.YT.Player(mount, {
         host: 'https://www.youtube-nocookie.com',
         // cc_load_policy: 0 stops us forcing captions on. Whether captions still appear
         // then depends on the viewer's own YouTube/browser caption preference, which we
@@ -283,7 +356,7 @@
         playerVars: { origin: location.origin, rel: 0, cc_load_policy: 0 },
         events: {
           onReady: () => {
-            if (token !== loadToken || disposed) return;
+            if (generation !== playerGeneration || disposed) return;
             if (readyTimer) clearTimeout(readyTimer);
             readyTimer = null;
             loading = false;
@@ -304,15 +377,20 @@
             ready = true;
             emitDiagnostic('ready');
             sync();
-            startMonitor();
           },
           onAutoplayBlocked: () => {
+            if (generation !== playerGeneration || disposed) return;
             emitDiagnostic('autoplay_blocked');
             startMutedAutoplay('youtube_event');
           },
-          onStateChange: (e: any) => handleStateChange(e.data),
-          onPlaybackRateChange: (e: any) => handleRateChange(e.data),
+          onStateChange: (e: any) => {
+            if (generation === playerGeneration && !disposed) handleStateChange(e.data);
+          },
+          onPlaybackRateChange: (e: any) => {
+            if (generation === playerGeneration && !disposed) handleRateChange(e.data);
+          },
           onError: (e: any) => {
+            if (generation !== playerGeneration || disposed) return;
             const iframeVideo = player?.getVideoData?.()?.video_id ?? '';
             // The IFrame API exposes no event-local video ID. Ignore an error when
             // the iframe is still reporting a different media item; that is a late
@@ -326,7 +404,12 @@
             emitDiagnostic('error', { code: playerErrorCode });
             if (isRetryablePlayerError(code) && status === 'playing' && retryCount < 1) {
               playerError = 'Playback interrupted. Retrying…';
-              retryTimer = setTimeout(() => retryCurrentVideo('player_error'), 450);
+              if (retryTimer) clearTimeout(retryTimer);
+              const retry = ++retryGeneration;
+              retryTimer = setTimeout(() => {
+                retryTimer = null;
+                if (retry === retryGeneration) retryCurrentVideo('player_error');
+              }, 450);
             } else {
               playerError = playerErrorMessage(code);
             }
@@ -335,7 +418,7 @@
       });
       readyTimer = setTimeout(() => {
         readyTimer = null;
-        if (token !== loadToken || ready || disposed) return;
+        if (generation !== playerGeneration || ready || disposed) return;
         failed = true;
         loading = false;
         playerError = 'YouTube player did not initialize. Try again.';
@@ -366,6 +449,8 @@
       retryCount = 0;
       if (watchdogTimer) clearTimeout(watchdogTimer);
       watchdogTimer = null;
+      watchdogGeneration += 1;
+      endedMediaId = null;
       emitDiagnostic('playing');
     } else if (state === BUFFERING && status === 'playing') {
       timelineRecoveryUntil = Math.max(timelineRecoveryUntil, Date.now() + TIMELINE_RECOVERY_MS);
@@ -386,12 +471,18 @@
     switch (action) {
       case 'ended':
         emitDiagnostic('ended');
-        if (lastMediaId) onEnded(lastMediaId);
+        clearRecoveryTimers();
+        if (lastMediaId && endedMediaId !== lastMediaId) {
+          endedMediaId = lastMediaId;
+          onEnded(lastMediaId, currentTime(), normalizedDuration(player?.getDuration?.() ?? 0));
+        }
         return;
       case 'emit-play':
+        localControlUntil = Date.now() + 4000;
         onPlay(currentTime());
         return;
       case 'emit-pause':
+        localControlUntil = Date.now() + 4000;
         onPause(currentTime());
         return;
       case 'snap-pause':
@@ -420,16 +511,34 @@
     stopMonitor();
     prevTime = currentTime();
     prevWall = Date.now();
-    monitor = setInterval(tick, POLL_MS);
+    scheduleMonitor();
+  }
+  function scheduleMonitor() {
+    if (!player || !ready || !lastVideo || disposed) return;
+    const delay = document.visibilityState === 'visible' ? POLL_MS : 2_000;
+    monitor = setTimeout(() => {
+      monitor = null;
+      try {
+        tick();
+      } catch (error) {
+        emitDiagnostic('monitor_error', { message: error instanceof Error ? error.message : 'unknown' });
+      } finally {
+        scheduleMonitor();
+      }
+    }, delay);
   }
   function stopMonitor() {
-    if (monitor) clearInterval(monitor);
+    if (monitor) clearTimeout(monitor);
     monitor = null;
   }
   function retryInitialization() {
     clearRecoveryTimers();
     loadToken += 1;
+    playerGeneration += 1;
     player?.destroy?.();
+    // Rebuild the dedicated third-party mount after destroy() removed its iframe.
+    // eslint-disable-next-line svelte/no-dom-manipulating
+    host?.replaceChildren();
     player = null;
     ready = false;
     loading = false;
@@ -470,8 +579,13 @@
       return;
     }
     if (now < guardUntil) {
-      prevTime = t;
-      prevWall = now;
+      // Programmatic seeks set their target baseline before entering BUFFERING.
+      // Keep it until YouTube reports a stable timeline again; buffering may
+      // temporarily expose 0 or another unrelated position.
+      if (isStableTimelineState(state)) {
+        prevTime = t;
+        prevWall = now;
+      }
       return;
     }
     const playing = state === PLAYING;
@@ -490,15 +604,15 @@
         return;
       }
     }
-    // YouTube is allowed to reset its reported time while buffering or replacing
-    // media. Baseline those transitions without treating them as a user scrub;
-    // otherwise the transient 0-second reset is broadcast and every client loops.
-    if (shouldBaselineTimeline(state, previousState, now, timelineRecoveryUntil)) {
-      prevTime = t;
-      prevWall = now;
-      return;
-    }
-    const jump = timelineJump(t, prevTime, (now - prevWall) / 1000, playing, rate || 1);
+    // Preserve the last stable sample while YouTube buffers. A native seek also
+    // enters BUFFERING, so overwriting the baseline here makes the seek invisible
+    // and lets drift correction snap the viewer back to the old server position.
+    if (!isStableTimelineState(state)) return;
+    const elapsed = (now - prevWall) / 1000;
+    const recovering = previousState === BUFFERING || now < timelineRecoveryUntil;
+    const jump = recovering
+      ? timelineRecoveryJump(t, prevTime, elapsed, playing, rate || 1)
+      : timelineJump(t, prevTime, elapsed, playing, rate || 1);
     prevTime = t;
     prevWall = now;
     if (isLocalTimelineJump(state, jump, SEEK_JUMP)) {
@@ -511,6 +625,9 @@
       }
       return;
     }
+    // Give a genuine buffering recovery time to settle before applying drift
+    // correction. Local seeks have already been emitted above.
+    if (recovering) return;
     if (now < localSeekUntil || (state !== PLAYING && state !== PAUSED)) return;
     const expected = expectedPosition();
     const drift = t - expected;
@@ -530,37 +647,57 @@
   onMount(() => {
     const onOnline = () => {
       emitDiagnostic('online');
-      if (status === 'playing') requestPlay();
+      recoverPlayback('online');
     };
     const onOffline = () => emitDiagnostic('offline');
     const onVisibility = () => {
       emitDiagnostic(document.visibilityState === 'visible' ? 'visible' : 'hidden');
-      if (document.visibilityState === 'visible' && status === 'playing') requestPlay();
+      if (lastVideo) startMonitor();
+      if (document.visibilityState === 'visible') forceResync('visible');
+    };
+    const onFullscreen = () => {
+      const fullscreen = !!(
+        document.fullscreenElement ||
+        (document as Document & { webkitFullscreenElement?: Element }).webkitFullscreenElement
+      );
+      emitDiagnostic(fullscreen ? 'fullscreen_entered' : 'fullscreen_exited');
+      if (!fullscreen) forceResync('fullscreen_exit');
     };
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
     document.addEventListener('visibilitychange', onVisibility);
+    document.addEventListener('fullscreenchange', onFullscreen);
+    document.addEventListener('webkitfullscreenchange', onFullscreen);
     return () => {
       disposed = true;
+      playerGeneration += 1;
       stopMonitor();
       clearRecoveryTimers();
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
       document.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener('fullscreenchange', onFullscreen);
+      document.removeEventListener('webkitfullscreenchange', onFullscreen);
       player?.destroy();
+      // Ensure a late third-party iframe cannot outlive the Svelte component.
+      // eslint-disable-next-line svelte/no-dom-manipulating
+      host?.replaceChildren();
     };
   });
   $effect(() => {
-    if (enabled && !loading && !failed && !player) void initialize();
+    if (enabled && videoId && !loading && !failed && !player) void initialize();
   });
   // Runs only when the server reports a real playback change (media, status, or a
   // new position anchor) — never on unrelated snapshots — so it will not fight the
   // monitor's continuous correction.
   function sync() {
-    if (!ready) return;
     if (!videoId) {
-      if (lastVideo) {
+      if (player || loading || lastVideo) {
+        emitDiagnostic('deactivated', { reason: 'no_media' });
         clearRecoveryTimers();
+        stopMonitor();
+        loadToken += 1;
+        playerGeneration += 1;
         mutedForAutoplay = false;
         retryCount = 0;
         playerError = '';
@@ -572,13 +709,36 @@
         lastVideo = null;
         lastMediaId = null;
         confirmedVideo = null;
+        endedMediaId = null;
         previousTimelineState = null;
         timelineRecoveryUntil = 0;
-        player.stopVideo?.();
-        player.clearVideo?.();
+        playerState = null;
+        guardUntil = 0;
+        localSeekUntil = 0;
+        localControlUntil = 0;
+        const inactivePlayer = player;
+        player = null;
+        ready = false;
+        loading = false;
+        failed = false;
+        try {
+          inactivePlayer?.stopVideo?.();
+        } catch {
+          /* the iframe may already have been removed while leaving fullscreen */
+        }
+        try {
+          inactivePlayer?.destroy?.();
+        } catch {
+          /* removal below is the final lifecycle backstop */
+        }
+        // Removing the dedicated host contents also terminates native fullscreen media.
+        // eslint-disable-next-line svelte/no-dom-manipulating
+        host?.replaceChildren();
       }
       return;
     }
+    if (!ready) return;
+    localControlUntil = 0;
     if (lastMediaId !== mediaId) lastMediaId = mediaId;
     const target = Math.max(0, expectedPosition());
     if (lastVideo !== videoId) {
@@ -596,6 +756,7 @@
       lastVideo = videoId;
       lastMediaId = mediaId;
       confirmedVideo = null;
+      endedMediaId = null;
       previousTimelineState = null;
       timelineRecoveryUntil = 0;
       guard(3000);
@@ -609,6 +770,7 @@
       prevTime = target;
       prevWall = Date.now();
       localSeekUntil = 0;
+      startMonitor();
       return;
     }
     // A confirmed change arrived: stop suppressing correction and realign now.
@@ -620,8 +782,11 @@
       prevTime = target;
       prevWall = Date.now();
     }
-    if (status === 'playing') requestPlay();
-    else player.pauseVideo?.();
+    if (status === 'playing') recoverPlayback('authoritative_sync');
+    else {
+      const state = player.getPlayerState?.();
+      if (state !== PAUSED && state !== PLAYER_STATE.ENDED) player.pauseVideo?.();
+    }
   }
   $effect(() => {
     videoId;
@@ -634,6 +799,12 @@
     positionAt;
     rate;
     sync();
+  });
+  $effect(() => {
+    if (syncRequest > handledSyncRequest) {
+      handledSyncRequest = syncRequest;
+      forceResync('manual');
+    }
   });
 </script>
 

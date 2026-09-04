@@ -10,10 +10,15 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 45_000,
   fullyParallel: false,
+  workers: 1,
   retries: process.env.CI ? 1 : 0,
   globalTeardown: './e2e/global-teardown.mjs',
   use: { baseURL: 'http://127.0.0.1:4187', trace: 'retain-on-failure' },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+  ],
   webServer: {
     command: e2eServer,
     url: 'http://127.0.0.1:4187/api/health',

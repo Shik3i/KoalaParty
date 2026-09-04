@@ -4,7 +4,7 @@ By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Requirements
 
-- Go 1.26.5+
+- Go 1.26.8+
 - Node.js 24+ and npm 11+
 - Docker with Compose for full-stack and image checks
 

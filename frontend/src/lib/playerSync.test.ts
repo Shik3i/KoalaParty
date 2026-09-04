@@ -9,9 +9,10 @@ import {
   normalizedDuration,
   playerErrorMessage,
   shouldReanchorPlayback,
-  shouldBaselineTimeline,
+  shouldRecoverPlayback,
   stateChangeAction,
   timelineJump,
+  timelineRecoveryJump,
   type StateChangeInput,
 } from './playerSync';
 
@@ -47,6 +48,7 @@ describe('stateChangeAction', () => {
     expect(stateChangeAction({ ...base, state: ENDED, currentTime: 0, duration: 0 })).toBe('ignore');
     expect(stateChangeAction({ ...base, state: ENDED, currentTime: 12, duration: 100 })).toBe('ignore');
     expect(stateChangeAction({ ...base, state: ENDED, currentTime: Number.NaN })).toBe('ignore');
+    expect(stateChangeAction({ ...base, state: ENDED, currentTime: 0, duration: 1 })).toBe('ignore');
   });
 
   it('ignores state changes before the player is ready or with no video', () => {
@@ -87,6 +89,19 @@ describe('stateChangeAction', () => {
   it('ignores transient buffering', () => {
     expect(stateChangeAction({ ...base, state: BUFFERING, serverStatus: 'playing' })).toBe('ignore');
     expect(stateChangeAction({ ...base, state: BUFFERING, serverStatus: 'paused' })).toBe('ignore');
+  });
+});
+
+describe('playback recovery', () => {
+  it.each([PLAYING, BUFFERING, ENDED])('does not restart state %s after a presentation transition', (state) => {
+    expect(shouldRecoverPlayback('playing', true, state)).toBe(false);
+  });
+
+  it('wakes a paused or cued iframe only while the room is still playing that media', () => {
+    expect(shouldRecoverPlayback('playing', true, PAUSED)).toBe(true);
+    expect(shouldRecoverPlayback('playing', true, 5)).toBe(true);
+    expect(shouldRecoverPlayback('paused', true, PAUSED)).toBe(false);
+    expect(shouldRecoverPlayback('playing', false, PAUSED)).toBe(false);
   });
 });
 
@@ -136,14 +151,18 @@ describe('timeline state stability', () => {
   it('broadcasts a real backward scrub while playing', () => {
     expect(isLocalTimelineJump(PLAYING, -2, 1.5)).toBe(true);
   });
-  it('baselines the first playing tick after buffering', () => {
-    expect(shouldBaselineTimeline(PLAYING, BUFFERING, 2_000, 0)).toBe(true);
+  it('detects a user scrub after YouTube buffered the seek', () => {
+    const jump = timelineRecoveryJump(70, 10, 1, true, 1);
+    expect(isLocalTimelineJump(PLAYING, jump, 1.5)).toBe(true);
   });
-  it('baselines within the active buffering recovery window', () => {
-    expect(shouldBaselineTimeline(PLAYING, PLAYING, 2_000, 2_500)).toBe(true);
+  it('does not mistake a stalled or naturally advancing buffer recovery for a seek', () => {
+    expect(timelineRecoveryJump(10, 10, 4, true, 1)).toBe(0);
+    expect(timelineRecoveryJump(12, 10, 4, true, 1)).toBe(0);
+    expect(timelineRecoveryJump(14, 10, 4, true, 1)).toBe(0);
   });
-  it('allows stable playback outside buffering recovery', () => {
-    expect(shouldBaselineTimeline(PLAYING, PLAYING, 2_000, 1_999)).toBe(false);
+  it('detects a backward scrub after buffering', () => {
+    const jump = timelineRecoveryJump(10, 70, 1, true, 1);
+    expect(isLocalTimelineJump(PLAYING, jump, 1.5)).toBe(true);
   });
 });
 

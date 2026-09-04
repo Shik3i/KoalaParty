@@ -4,6 +4,26 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-04
+
+### Added
+
+- Added Media Session controls, keyboard playback shortcuts, manual resynchronization, downloadable local diagnostics, queue search, and an up-next preview.
+- Added Chromium, Firefox, and WebKit end-to-end coverage for terminal playback, fullscreen teardown, offline and page-suspend recovery, diagnostics, and responsive platform artwork.
+
+### Changed
+
+- Reduced hidden-tab polling, added jittered reconnect backoff, compressed WebSocket snapshots, and validated personalized fan-out at the 100-viewer room limit.
+- Updated the supported Go toolchain and release images to Go 1.26.8.
+
+### Fixed
+
+- Prevented ended YouTube playback from restarting after fullscreen exit and ensured an inactive player's iframe is destroyed when shared playback becomes empty.
+- Made end-of-video advancement a permission-checked, media- and playback-revision-bound server command with plausible terminal-state validation and duplicate-client protection.
+- Preserved native forward and backward seeks across YouTube buffering instead of snapping the viewer back to the previous shared position.
+- Hardened player callback, retry, delayed-seek, reconnect, offline, visibility, and back-forward-cache races.
+- Restored the koala avatar for legacy `Koala NNN` identities without mutating their persistent names, and loaded small local platform icons consistently in WebKit.
+
 ## [0.11.7] - 2026-08-13
 
 ### Fixed

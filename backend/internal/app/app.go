@@ -103,7 +103,12 @@ func Run() error {
 	identityLimiter := newRateLimiter(60, time.Minute, a.trustedProxies)
 	loginLimiter := newRateLimiter(20, time.Minute, a.trustedProxies)
 	commandLimiter := newRateLimiter(180, time.Minute, a.trustedProxies)
-	registrationLimiter := newRateLimiter(5, time.Hour, a.trustedProxies)
+	registrationLimit := 5
+	e2eMode := strings.EqualFold(env("KOALAPARTY_E2E", "false"), "true")
+	if e2eMode {
+		registrationLimit = 100
+	}
+	registrationLimiter := newRateLimiter(registrationLimit, time.Hour, a.trustedProxies)
 	roomCreationLimiter := newRateLimiter(30, time.Hour, a.trustedProxies)
 	reportLimiter := newRateLimiter(20, time.Hour, a.trustedProxies)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -118,7 +123,7 @@ func Run() error {
 		}
 		writeJSON(w, 200, map[string]string{"status": "ready"})
 	})
-	if strings.EqualFold(env("KOALAPARTY_E2E", "false"), "true") {
+	if e2eMode {
 		mux.HandleFunc("POST /api/e2e/shutdown", func(w http.ResponseWriter, _ *http.Request) {
 			select {
 			case shutdownRequested <- struct{}{}:

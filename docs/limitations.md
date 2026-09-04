@@ -8,5 +8,6 @@
 - Individual permission enforcement and updates are implemented and covered end-to-end; the initial room UI exposes role, kick, and ban controls but not the complete per-capability editor or ban list.
 - Reports are persisted and can be listed, resolved, or used to immediately delist a room through the protected web admin console or host-only operator CLI. Public discovery is disabled by default.
 - Automated player synchronization uses UI/API state and a mockable boundary. Real YouTube iframe behavior requires the documented manual smoke test.
+- Natural queue advancement still needs one active browser whose member may skip. The server validates and deduplicates `playback.ended`, but cannot independently observe a cross-origin YouTube iframe or know a video's authoritative duration without an additional trusted metadata service. Mobile Safari fullscreen and hardware Media Session behavior therefore remain manual-device checks despite WebKit automation.
 
 Future adapters: PostgreSQL repository, event bus, additional `MediaProvider` implementations, chat storage, and recovery credentials.

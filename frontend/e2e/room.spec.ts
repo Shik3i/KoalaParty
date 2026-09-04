@@ -1,6 +1,18 @@
 import { expect, test, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 
+type FakePlayerHarness = {
+  videoId: string;
+  playCalls: number;
+  stopCalls: number;
+  destroyCalls: number;
+  currentTime: number;
+  finish: () => void;
+};
+
+const E2E_VIDEO_ID = 'idempo12345';
+const E2E_QUEUE_VIDEO_ID = 'queuex12345';
+
 async function identityId(page: Page) {
   return page.evaluate(() => JSON.parse(localStorage.getItem('koalaparty.identity.v1')!).id as string);
 }
@@ -31,6 +43,158 @@ async function command(
   );
 }
 
+const fakeYouTubeAPI = String.raw`
+  (() => {
+    class FakePlayer {
+      constructor(mountPoint, options) {
+        this.events = options.events;
+        this.state = -1;
+        this.currentTime = 0;
+        this.duration = 100;
+        this.videoId = '';
+        this.playCalls = 0;
+        this.stopCalls = 0;
+        this.destroyCalls = 0;
+        this.iframe = document.createElement('iframe');
+        mountPoint.replaceWith(this.iframe);
+        window.__koalaFakePlayer = this;
+        queueMicrotask(() => this.events.onReady());
+      }
+      loadVideoById(request) {
+        this.videoId = request.videoId;
+        this.currentTime = request.startSeconds;
+      }
+      cueVideoById(request) {
+        this.loadVideoById(request);
+      }
+      getIframe() { return this.iframe; }
+      getVideoData() { return { video_id: this.videoId }; }
+      getPlayerState() { return this.state; }
+      getCurrentTime() { return this.currentTime; }
+      getDuration() { return this.duration; }
+      getPlaybackRate() { return 1; }
+      setPlaybackRate() {}
+      playVideo() {
+        this.playCalls += 1;
+        this.state = 1;
+        this.events.onStateChange({ data: 1 });
+      }
+      pauseVideo() {
+        this.state = 2;
+        this.events.onStateChange({ data: 2 });
+      }
+      seekTo(position) { this.currentTime = position; }
+      mute() {}
+      unMute() {}
+      setVolume() {}
+      unloadModule() {}
+      stopVideo() { this.stopCalls += 1; }
+      destroy() {
+        this.destroyCalls += 1;
+        this.iframe.remove();
+      }
+      finish() {
+        this.currentTime = this.duration;
+        this.state = 0;
+        this.events.onStateChange({ data: 0 });
+      }
+    }
+    window.YT = { Player: FakePlayer };
+    window.onYouTubeIframeAPIReady?.();
+  })();
+`;
+
+test('ended fullscreen playback is not restarted and its iframe is torn down', async ({ page }) => {
+  await page.route('**/iframe_api', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
+  );
+  await page.goto('/');
+  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await page.waitForFunction(
+    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
+  );
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+
+  const automaticSkip = page.waitForResponse((response) => {
+    if (!response.url().endsWith('/commands') || response.request().method() !== 'POST') return false;
+    const body = response.request().postDataJSON();
+    return body.type === 'playback.ended' && body.payload.position === 100 && body.payload.duration === 100;
+  });
+  const playCallsAtEnd = await page.evaluate(() => {
+    const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
+    player.finish();
+    document.dispatchEvent(new Event('fullscreenchange'));
+    document.dispatchEvent(new Event('webkitfullscreenchange'));
+    return player.playCalls;
+  });
+  expect((await automaticSkip).status()).toBe(200);
+  await expect(page.getByText('Add a YouTube video to start watching.')).toBeVisible();
+  expect(
+    await page.evaluate(() => {
+      const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
+      return {
+        playCalls: player.playCalls,
+        stopCalls: player.stopCalls,
+        destroyCalls: player.destroyCalls,
+        iframeCount: document.querySelectorAll('.player iframe').length,
+      };
+    }),
+  ).toEqual({ playCalls: playCallsAtEnd, stopCalls: 1, destroyCalls: 1, iframeCount: 0 });
+});
+
+test('keyboard controls, manual resync, diagnostics download and reconnect stay usable', async ({ browser }) => {
+  const context = await browser.newContext({ acceptDownloads: true });
+  const page = await context.newPage();
+  await page.route('**/iframe_api', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
+  );
+  await page.goto('/');
+  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await page.waitForFunction(
+    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
+  );
+  await expect(page.locator('.player iframe')).toHaveAttribute('allow', /picture-in-picture/);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press('k');
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  await page.keyboard.press('k');
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Sync now' }).click();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download' }).click();
+  await expect((await download).suggestedFilename()).toMatch(/^koalaparty-[a-z2-7]{16}-diagnostics\.txt$/);
+
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+  await expect(page.locator('.connection')).toHaveText('Reconnecting');
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  await expect(page.locator('.connection')).toHaveText('Live', { timeout: 15_000 });
+
+  await context.setOffline(true);
+  await expect(page.getByText('You are offline. Changes will resume after reconnecting.')).toBeVisible();
+  await expect(page.locator('.connection')).toHaveText('Reconnecting');
+  await context.setOffline(false);
+  await expect(page.locator('.connection')).toHaveText('Live', { timeout: 15_000 });
+  await context.close();
+});
+
+test('legacy anonymous koala names keep their animal badge', async ({ page }) => {
+  await page.addInitScript(
+    ({ id, secret }) => {
+      localStorage.setItem(
+        'koalaparty.identity.v1',
+        JSON.stringify({ id, secret, displayName: 'Koala 474', avatarSeed: 'legacy-koala' }),
+      );
+    },
+    { id: randomUUID(), secret: 'legacy-koala-secret'.padEnd(43, 'x') },
+  );
+  await page.goto('/');
+  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  const participant = page.locator('.members li').filter({ hasText: 'Koala 474' });
+  await expect(participant).toBeVisible();
+  await expect(participant.locator('.avatar')).toContainText('🐨');
+});
+
 test('anonymous room synchronization and authoritative permissions', async ({ browser }) => {
   const ownerContext = await browser.newContext();
   const memberContext = await browser.newContext();
@@ -53,18 +217,21 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   const sameIdentity = await ownerContext.newPage();
   await sameIdentity.goto(`/room/${roomId}`);
   await expect(sameIdentity.getByText('Live', { exact: true })).toBeVisible();
-  await owner.getByLabel('YouTube URL').fill('https://youtu.be/M7lc1UVf-VE');
+  await owner.getByLabel('YouTube URL').fill(`https://youtu.be/${E2E_QUEUE_VIDEO_ID}`);
   await owner.getByRole('button', { name: 'Add to queue' }).click();
   await expect(owner.locator('.queue li')).toHaveCount(1);
   const retryRequestId = randomUUID();
-  expect((await command(owner, roomId, 'queue.add', { videoId: '9bZkp7q19f0' }, retryRequestId)).status).toBe(200);
-  expect((await command(owner, roomId, 'queue.add', { videoId: '9bZkp7q19f0' }, retryRequestId)).status).toBe(200);
+  expect((await command(owner, roomId, 'queue.add', { videoId: E2E_VIDEO_ID }, retryRequestId)).status).toBe(200);
+  expect((await command(owner, roomId, 'queue.add', { videoId: E2E_VIDEO_ID }, retryRequestId)).status).toBe(200);
   expect(
-    await owner.evaluate(async (id) => {
-      const snapshot = await fetch(`/api/rooms/${id}`).then((response) => response.json());
-      return snapshot.queue.filter((item: { media: { providerId: string } }) => item.media.providerId === '9bZkp7q19f0')
-        .length;
-    }, roomId),
+    await owner.evaluate(
+      async ({ id, videoId }) => {
+        const snapshot = await fetch(`/api/rooms/${id}`).then((response) => response.json());
+        return snapshot.queue.filter((item: { media: { providerId: string } }) => item.media.providerId === videoId)
+          .length;
+      },
+      { id: roomId, videoId: E2E_VIDEO_ID },
+    ),
   ).toBe(1);
   await owner.locator('.queue .icon').first().click();
   await expect(owner.locator('.queue li')).toHaveCount(1);
@@ -105,7 +272,7 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   await expect(member.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
   // Use a video outside the random initial-preset pool so duplicate rejection
   // cannot make this synchronization assertion flaky.
-  await member.getByLabel('YouTube URL').fill('https://youtu.be/9bZkp7q19f0');
+  await member.getByLabel('YouTube URL').fill(`https://youtu.be/${E2E_VIDEO_ID}`);
   await member.getByRole('button', { name: 'Add to queue' }).click();
   await expect(owner.locator('.queue li')).toHaveCount(1);
   const memberId = await identityId(member);
@@ -147,9 +314,17 @@ test('KoalaSync promotion and legal pages are complete and responsive', async ({
     'href',
     'https://sync.koalastuff.net/',
   );
-  expect(await promo.locator('img').evaluateAll((images) => images.every((image) => image.naturalWidth > 0))).toBe(
-    true,
-  );
+  await expect
+    .poll(() =>
+      promo
+        .locator('img')
+        .evaluateAll((images) =>
+          images
+            .filter((image) => !image.complete || image.naturalWidth === 0)
+            .map((image) => image.getAttribute('src')),
+        ),
+    )
+    .toEqual([]);
 
   await page.goto('/privacy');
   await expect(page.getByRole('heading', { name: 'Privacy Policy' })).toBeVisible();
@@ -190,7 +365,7 @@ test('mobile navigation and room empty states remain usable', async ({ browser }
 test('account room library, private invitations, transfer, sessions and deletion work end to end', async ({
   browser,
 }) => {
-  const suffix = Date.now().toString(36);
+  const suffix = `${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
   const ownerName = `owner_${suffix}`;
   const memberName = `member_${suffix}`;
   const password = 'very-secure-password';

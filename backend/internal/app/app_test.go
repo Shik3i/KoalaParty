@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -354,6 +355,176 @@ func TestAutomaticSkipIsBoundToCurrentMedia(t *testing.T) {
 		Payload:          json.RawMessage(`{"mediaId":"` + currentMediaID + `"}`),
 	}); !errors.Is(err, errStale) {
 		t.Fatalf("delayed automatic skip advanced the replacement media: %v", err)
+	}
+}
+
+func TestAutomaticSkipRejectsAPlaybackChangeOnTheSameMedia(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174064", strings.Repeat("u", 43))
+	room := createTestRoom(t, a, cookie, owner)
+	s, err := a.snapshot(t.Context(), room, owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentMediaID := s.Playback.Media.ID
+	endedRevision := s.Playback.Revision
+	s, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:                     "player.seek",
+		ExpectedRevision:         s.Revision,
+		ExpectedPlaybackRevision: &endedRevision,
+		Payload:                  json.RawMessage(`{"position":12}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:                     "queue.skip",
+		ExpectedRevision:         s.Revision,
+		ExpectedPlaybackRevision: &endedRevision,
+		Payload:                  json.RawMessage(`{"mediaId":"` + currentMediaID + `"}`),
+	}); !errors.Is(err, errStale) {
+		t.Fatalf("delayed automatic skip ignored the newer playback revision: %v", err)
+	}
+	current, snapshotErr := a.snapshot(t.Context(), room, owner.IdentityID)
+	if snapshotErr != nil || current.Playback.Media == nil || current.Playback.Media.ID != currentMediaID {
+		t.Fatalf("stale automatic skip changed the active media: playback=%+v err=%v", current.Playback, snapshotErr)
+	}
+}
+
+func TestPlaybackEndedAdvancesOnceWithPlausibleTerminalState(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174066", strings.Repeat("x", 43))
+	room := createTestRoom(t, a, cookie, owner)
+	s, err := a.snapshot(t.Context(), room, owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:             "queue.add",
+		ExpectedRevision: s.Revision,
+		Payload:          json.RawMessage(`{"videoId":"ended123456"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	playbackRevision := s.Playback.Revision
+	s, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:                     "player.play",
+		ExpectedRevision:         s.Revision,
+		ExpectedPlaybackRevision: &playbackRevision,
+		Payload:                  json.RawMessage(`{"position":95}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endedRevision := s.Playback.Revision
+	ended := command{
+		Type:                     "playback.ended",
+		ExpectedRevision:         s.Revision,
+		ExpectedPlaybackRevision: &endedRevision,
+		Payload:                  json.RawMessage(`{"mediaId":"` + s.Playback.Media.ID + `","position":99.6,"duration":100}`),
+	}
+	s, err = a.applyCommand(t.Context(), room, owner, ended)
+	if err != nil || s.Playback.Media == nil || s.Playback.Media.ProviderID != "ended123456" {
+		t.Fatalf("valid end report did not advance queue: playback=%+v err=%v", s.Playback, err)
+	}
+	if _, err = a.applyCommand(t.Context(), room, owner, ended); !errors.Is(err, errStale) {
+		t.Fatalf("duplicate end report advanced replacement media: %v", err)
+	}
+}
+
+func TestPlaybackEndedRejectsInvalidStateAndPermission(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174067", strings.Repeat("y", 43))
+	room := createTestRoom(t, a, cookie, owner)
+	s, err := a.snapshot(t.Context(), room, owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:             "playback.ended",
+		ExpectedRevision: s.Revision,
+		Payload:          json.RawMessage(`{"mediaId":"` + s.Playback.Media.ID + `","position":99.6,"duration":100}`),
+	}); err == nil || err.Error() != "invalid playback end report" {
+		t.Fatalf("end report without playback revision was accepted: %v", err)
+	}
+	invalid := command{
+		Type:                     "playback.ended",
+		ExpectedRevision:         s.Revision,
+		ExpectedPlaybackRevision: &s.Playback.Revision,
+		Payload:                  json.RawMessage(`{"mediaId":"` + s.Playback.Media.ID + `","position":10,"duration":100}`),
+	}
+	if _, err = a.applyCommand(t.Context(), room, owner, invalid); err == nil {
+		t.Fatal("non-terminal end report was accepted")
+	}
+	_, member := exchange(t, a, "123e4567-e89b-42d3-a456-426614174068", strings.Repeat("z", 43))
+	s, err = a.joinAndSnapshot(t.Context(), room, member)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:             "member.permission",
+		ExpectedRevision: s.Revision,
+		Payload:          json.RawMessage(`{"identityId":"` + member.IdentityID + `","permission":"queue.skip","allowed":false}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.applyCommand(t.Context(), room, member, command{
+		Type:                     "playback.ended",
+		ExpectedRevision:         s.Revision,
+		ExpectedPlaybackRevision: &s.Playback.Revision,
+		Payload:                  json.RawMessage(`{"mediaId":"` + s.Playback.Media.ID + `","position":99.6,"duration":100}`),
+	}); !errors.Is(err, errDenied) {
+		t.Fatalf("member denied queue.skip could report an end: %v", err)
+	}
+}
+
+func TestValidEndedPosition(t *testing.T) {
+	for _, test := range []struct {
+		position float64
+		duration float64
+		valid    bool
+	}{
+		{99.6, 100, true},
+		{9.9, 10, true},
+		{98, 100, true},
+		{97.9, 100, false},
+		{0, 100, false},
+		{10, 0, false},
+		{103, 100, false},
+		{math.NaN(), 100, false},
+	} {
+		if got := validEndedPosition(test.position, test.duration); got != test.valid {
+			t.Fatalf("validEndedPosition(%v, %v)=%v want %v", test.position, test.duration, got, test.valid)
+		}
+	}
+}
+
+func TestPlayerCommandsRequireActiveMedia(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "123e4567-e89b-42d3-a456-426614174065", strings.Repeat("v", 43))
+	room := createTestRoom(t, a, cookie, owner)
+	s, err := a.snapshot(t.Context(), room, owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:                     "queue.skip",
+		ExpectedRevision:         s.Revision,
+		ExpectedPlaybackRevision: &s.Playback.Revision,
+		Payload:                  json.RawMessage(`{"mediaId":"` + s.Playback.Media.ID + `"}`),
+	})
+	if err != nil || s.Playback.Media != nil {
+		t.Fatalf("could not clear current media: playback=%+v err=%v", s.Playback, err)
+	}
+	if _, err = a.applyCommand(t.Context(), room, owner, command{
+		Type:                     "player.play",
+		ExpectedRevision:         s.Revision,
+		ExpectedPlaybackRevision: &s.Playback.Revision,
+		Payload:                  json.RawMessage(`{"position":0}`),
+	}); !errors.Is(err, errNoActiveMedia) {
+		t.Fatalf("player command without media was accepted: %v", err)
 	}
 }
 

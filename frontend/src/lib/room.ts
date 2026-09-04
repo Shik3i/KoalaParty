@@ -74,6 +74,48 @@ export function currentPlaybackPosition(playback: Snapshot['playback'], received
   // the playback rate. Rate defaults to 1 for snapshots that predate the field.
   return playback.position + (Math.max(0, now - receivedAt) / 1000) * (playback.rate || 1);
 }
+
+export function reconnectDelay(attempt: number, random = Math.random): number {
+  const exponent = Math.max(0, Math.min(6, Math.floor(attempt) - 1));
+  const base = Math.min(10_000, 1_000 * 2 ** exponent);
+  const jitter = Math.max(0, Math.min(1, random()));
+  return Math.round(base * (1 + jitter * 0.3));
+}
+
+export function automaticEndDelay(snapshot: Pick<Snapshot, 'members' | 'me'>): number | null {
+  const reporters = snapshot.members
+    .filter(
+      (member) =>
+        member.active &&
+        (member.role === 'owner' || member.role === 'admin' || member.permissions['queue.skip'] !== false),
+    )
+    .sort((a, b) => {
+      const roleRank = (member: Member) => (member.role === 'owner' ? 0 : member.role === 'admin' ? 1 : 2);
+      return roleRank(a) - roleRank(b) || a.identityId.localeCompare(b.identityId);
+    });
+  const rank = reporters.findIndex((member) => member.identityId === snapshot.me);
+  return rank < 0 ? null : rank * 400;
+}
+
+export function filterQueue(items: QueueItem[], value: string): QueueItem[] {
+  const query = value.trim().toLocaleLowerCase();
+  if (!query) return items;
+  return items.filter(
+    (item) =>
+      item.media.title.toLocaleLowerCase().includes(query) || item.media.providerId.toLocaleLowerCase().includes(query),
+  );
+}
+
+export function participantNameParts(displayName: string): { badge: string; label: string } {
+  const normalized = displayName.trim();
+  const emoji = normalized.match(/^(\p{Extended_Pictographic}️?)\s+(.+)$/u);
+  if (emoji) return { badge: emoji[1], label: emoji[2] };
+  // Anonymous identities created before v0.4.1 used "Koala NNN" without an
+  // emoji. Render their intended animal badge without mutating the persistent
+  // identity or requiring every legacy participant to reconnect first.
+  if (/^Koala \d{3}$/u.test(normalized)) return { badge: '🐨', label: normalized };
+  return { badge: (normalized[0] ?? '?').toUpperCase(), label: normalized || displayName };
+}
 export function parseYouTube(input: string): string | null {
   const value = input.trim();
   if (/^[A-Za-z0-9_-]{11}$/.test(value)) return value;
@@ -117,6 +159,8 @@ export function formatActivity(e: Activity) {
       return `${who} added “${title}” to the queue`;
     case 'media.activated':
       return `${who} started “${title}”`;
+    case 'media.ended':
+      return `${who} finished the video`;
     case 'queue.remove':
       return `${who} removed a video`;
     case 'queue.reorder':

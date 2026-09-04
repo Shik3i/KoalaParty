@@ -115,14 +115,29 @@ func testClient(identity, session, ip string) *client {
 
 func TestHubEnforcesActiveRoomAndConnectionLimits(t *testing.T) {
 	h := newHub()
+	clients := make([]*client, 0, maxRoomIdentities)
 	for index := 0; index < maxRoomIdentities; index++ {
 		c := testClient(fmt.Sprintf("identity-%d", index), fmt.Sprintf("session-%d", index), fmt.Sprintf("192.0.2.%d", index+1))
 		if err := h.tryAdd("room", c); err != nil {
 			t.Fatalf("identity %d rejected early: %v", index, err)
 		}
+		clients = append(clients, c)
 	}
 	if err := h.tryAdd("room", testClient("overflow", "overflow", "198.51.100.1")); err == nil || err.Error() != "room_full" {
 		t.Fatalf("room capacity result=%v, want room_full", err)
+	}
+	h.broadcast("room", snapshot{Revision: 42})
+	for index, c := range clients {
+		select {
+		case raw := <-c.send:
+			message, ok := raw.(map[string]any)
+			payload, payloadOK := message["payload"].(snapshot)
+			if !ok || !payloadOK || payload.Revision != 42 || payload.Me != c.identity {
+				t.Fatalf("client %d received invalid personalized snapshot: %#v", index, raw)
+			}
+		default:
+			t.Fatalf("client %d missed room broadcast", index)
+		}
 	}
 
 	limited := newHub()
