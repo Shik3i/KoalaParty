@@ -19,15 +19,16 @@ bundles or checksum files.
 1. Move completed entries from `[Unreleased]` into `## [X.Y.Z] - YYYY-MM-DD`.
 2. Run `node scripts/verify-release.mjs vX.Y.Z` (the same tag/changelog check CI runs).
 3. Run the verification suite: backend `gofmt`/`go vet`/`go test -race`, `frontend` `npm run check && npm run lint && npm test -- --run && npm run build`, `npm run test:e2e`, and a Docker health smoke test. (`make verify` runs most of this where `make` is available.)
-4. Commit and push the release-ready state to `main`; wait for the `CI` workflow to pass. Waiting matters: a tag is immutable, so a red pipeline after tagging burns the version.
-5. Create an annotated tag on that exact commit:
+4. Before creating the tag, complete the mandatory isolated-browser real-YouTube smoke test in `docs/testing.md` against the exact production build. It must cover two-tab synchronization, desktop and mobile iframe geometry, theater and mini-player layouts, fullscreen entry and exit, and a natural end while fullscreen. A mocked iframe or synthetic `ENDED` event does not satisfy this gate.
+5. Commit and push the release-ready state to `main`; wait for the `CI` workflow to pass. Waiting matters: a tag is immutable, so a red pipeline after tagging burns the version.
+6. Create an annotated tag on that exact commit:
 
    ```sh
    git tag -a vX.Y.Z -m "KoalaParty vX.Y.Z"
    git push origin vX.Y.Z
    ```
 
-6. Monitor the `Release` workflow until all three jobs (`verify`, `image`, `release`) succeed.
-7. Verify the auto-created GitHub Release, the image tags, digest, and attestation, and the `/api/version` output from the published image.
+7. Monitor the `Release` workflow until all three jobs (`verify`, `image`, `release`) succeed.
+8. Verify the auto-created GitHub Release, the image tags, digest, and attestation, and the `/api/version` output from the published image.
 
 Do not move or reuse a published tag. Correct a failed workflow on `main`, then publish a new version tag when the release artifact itself must change.

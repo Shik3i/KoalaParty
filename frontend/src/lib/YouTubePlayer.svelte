@@ -809,7 +809,7 @@
 </script>
 
 <div class="player">
-  <div bind:this={host}></div>
+  <div class="player-host" bind:this={host}></div>
   {#if mutedForAutoplay && !playerError}<button class="unmute" onclick={unmute}
       ><SpeakerSimpleSlash size={18} weight="fill" /><span>Muted — tap for sound</span></button
     >{/if}
@@ -845,7 +845,12 @@
     overflow: hidden;
     border-radius: var(--radius-md);
   }
+  .player-host {
+    position: absolute;
+    inset: 0;
+  }
   .player :global(iframe) {
+    display: block;
     width: 100%;
     height: 100%;
     border: 0;

@@ -1,6 +1,6 @@
 # Testing strategy
 
-`make verify` runs backend race tests and static analysis plus frontend formatting, lint, type checks, unit tests, and production build. CI also builds the Docker image. Automated browser tests cover application synchronization and automatic privacy-enhanced YouTube API loading on room entry; real YouTube playback remains a manual smoke test. The player also records a bounded local diagnostic ring (never uploaded automatically), handles YouTube autoplay blocking, retries one transient start failure, watches for a stuck start, and re-requests playback after online/visibility recovery. Use **Copy diagnostics** in a room when a browser-specific playback failure needs investigation.
+`make verify` runs backend race tests and static analysis plus frontend formatting, lint, type checks, unit tests, and production build. CI also builds the Docker image. Automated browser tests cover application synchronization and automatic privacy-enhanced YouTube API loading on room entry; the isolated-browser real YouTube smoke test below is mandatory before every release tag. The player also records a bounded local diagnostic ring (never uploaded automatically), handles YouTube autoplay blocking, retries one transient start failure, watches for a stuck start, and re-requests playback after online/visibility recovery. Use **Copy diagnostics** in a room when a browser-specific playback failure needs investigation.
 
 Exact commands:
 
@@ -19,11 +19,16 @@ The Playwright suite runs in Chromium, Firefox, and WebKit. It uses isolated bro
 
 ## Manual YouTube smoke test
 
+Run this against the exact production build in an isolated browser before creating a release tag. Record the viewport and measured player/iframe bounds; visual inspection alone is insufficient.
+
 1. Open one room in two browser tabs or profiles and confirm the privacy-enhanced YouTube player loads in both.
-2. Start `https://www.youtube.com/watch?v=M7lc1UVf-VE` with **Play now**.
-3. Queue `https://www.youtube.com/watch?v=aqz-KE-bpKQ`, then use **Skip next**.
-4. Confirm privacy-enhanced iframe loading, play/pause/seek synchronization, elapsed-position preservation, queue advance, reload recovery, and reconnect after a brief server restart.
-5. Optionally try `https://www.youtube.com/watch?v=dQw4w9WgXcQ` to confirm the embedded player's unavailable-video state.
+2. Start an embeddable real video with **Play now**. Confirm both players advance together, then pause from the second tab and verify both remain at the same stable position.
+3. At desktop and `390 × 844`, confirm the player mount and iframe exactly fill the 16:9 player and the document has no horizontal overflow.
+4. Confirm theater mode keeps the iframe equal to the enlarged player. Float the mini-player on desktop and mobile; it must remain fully visible and must not overlap the mobile bottom navigation.
+5. Enter and exit the real YouTube fullscreen control. Confirm the iframe fills the viewport in fullscreen, returns to the player bounds afterward, and playback resynchronizes.
+6. Start the 19-second `https://www.youtube.com/watch?v=jNQXAC9IVRw`, enter fullscreen, and let it end naturally. Confirm fullscreen closes, the iframe is removed, the player shows the empty state, and the room records `finished the video`.
+7. Queue `https://www.youtube.com/watch?v=aqz-KE-bpKQ`, then use **Skip next**. Confirm queue advance, elapsed-position preservation, reload recovery, and reconnect after a brief server restart.
+8. Optionally try an unavailable or embed-disabled video to confirm the embedded player's error and retry/skip state.
 
 ## Playback failure matrix
 

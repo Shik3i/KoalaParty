@@ -4,6 +4,18 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-09-06
+
+### Changed
+
+- Made the isolated real-YouTube desktop, mobile, theater, mini-player, fullscreen, synchronization, and natural-end smoke test a mandatory pre-tag release gate.
+
+### Fixed
+
+- Restored the real YouTube iframe to the full 16:9 player surface after the dedicated third-party mount introduced in 0.12.0 left it at the browser's 150-pixel default height.
+- Made the mini-player genuinely viewport-fixed after the room reveal animation and kept it clear of the mobile bottom navigation and safe area.
+- Added browser regressions that compare the player, mount, and iframe geometry and reject clipped or navigation-overlapping mini-player layouts.
+
 ## [0.12.0] - 2026-09-04
 
 ### Added

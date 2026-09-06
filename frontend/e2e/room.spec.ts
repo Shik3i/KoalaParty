@@ -154,6 +154,20 @@ test('keyboard controls, manual resync, diagnostics download and reconnect stay 
   await page.waitForFunction(
     () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
   );
+  const playerGeometry = await page.evaluate(() => {
+    const container = document.querySelector('.player')!.getBoundingClientRect();
+    const host = document.querySelector('.player-host')!.getBoundingClientRect();
+    const iframe = document.querySelector('.player iframe')!.getBoundingClientRect();
+    return {
+      container: { width: container.width, height: container.height },
+      host: { width: host.width, height: host.height },
+      iframe: { width: iframe.width, height: iframe.height },
+    };
+  });
+  expect(playerGeometry.container.width).toBeGreaterThan(700);
+  expect(playerGeometry.container.height).toBeGreaterThan(390);
+  expect(playerGeometry.host).toEqual(playerGeometry.container);
+  expect(playerGeometry.iframe).toEqual(playerGeometry.container);
   await expect(page.locator('.player iframe')).toHaveAttribute('allow', /picture-in-picture/);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('k');
@@ -257,6 +271,18 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   await expect(owner.getByText(/Perfectly synced|Buffering|s (behind|ahead)/)).toBeVisible();
   await owner.getByRole('button', { name: 'Float mini-player' }).click();
   await expect(owner.locator('.player-wrap')).toHaveClass(/mini-player/);
+  expect(
+    await owner.locator('.player-wrap').evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        position: getComputedStyle(node).position,
+        rightGap: window.innerWidth - rect.right,
+        bottomGap: window.innerHeight - rect.bottom,
+        fullyVisible:
+          rect.top >= 0 && rect.left >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight,
+      };
+    }),
+  ).toEqual({ position: 'fixed', rightGap: 16, bottomGap: 16, fullyVisible: true });
   await owner.getByRole('button', { name: 'Dock player' }).click();
   await member.getByRole('button', { name: 'Play', exact: true }).click();
   await expect(member.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
@@ -357,6 +383,20 @@ test('mobile navigation and room empty states remain usable', async ({ browser }
   await expect(page).toHaveURL(/\/room\/[A-Z2-7]{16}$/);
   await expect(page.getByText('The queue is empty.')).toBeVisible();
   await expect(page.getByRole('option', { name: 'Public' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Float mini-player' }).click();
+  const mobileMiniPlayer = await page.evaluate(() => {
+    const player = document.querySelector('.player-wrap')!.getBoundingClientRect();
+    const navigation = document.querySelector('.site-header nav')!.getBoundingClientRect();
+    return {
+      position: getComputedStyle(document.querySelector('.player-wrap')!).position,
+      gap: navigation.top - player.bottom,
+      fullyVisible: player.top >= 0 && player.left >= 0 && player.right <= innerWidth,
+    };
+  });
+  expect(mobileMiniPlayer.position).toBe('fixed');
+  expect(mobileMiniPlayer.gap).toBeGreaterThanOrEqual(15);
+  expect(mobileMiniPlayer.fullyVisible).toBe(true);
+  await page.getByRole('button', { name: 'Dock player' }).click();
   await page.getByRole('tab', { name: 'People' }).click();
   await expect(page.getByText('(you)')).toBeVisible();
   await context.close();

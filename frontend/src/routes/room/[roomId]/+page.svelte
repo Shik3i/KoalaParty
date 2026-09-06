@@ -1462,7 +1462,9 @@
     max-width: 1500px;
     margin: auto;
     padding: 1.2rem clamp(0.7rem, 2vw, 2rem) 3rem;
-    animation: roomReveal 0.45s ease both;
+    /* `forwards`/`both` retain an identity transform after the reveal. That still
+       creates a containing block and traps the fixed mini-player in this shell. */
+    animation: roomReveal 0.45s ease backwards;
   }
   @keyframes roomReveal {
     from {
@@ -1470,13 +1472,18 @@
       transform: translateY(8px);
     }
   }
-  .mini-player {
+  .player-wrap.mini-player {
     position: fixed;
     right: 1rem;
     bottom: 1rem;
     width: min(420px, calc(100vw - 2rem));
     z-index: 20;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  @media (max-width: 700px) {
+    .player-wrap.mini-player {
+      bottom: calc(4.95rem + env(safe-area-inset-bottom));
+    }
   }
   .sync-diagnostics,
   .reaction-bar {
