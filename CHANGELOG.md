@@ -4,6 +4,22 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.12.3] - 2026-09-07
+
+### Changed
+
+- Removed two YouTube presets that no longer permit embedded playback. Fresh rooms and Quick Add now use only the three videos verified in the real embedded player before release.
+
+### Fixed
+
+- Personalized queue-vote state for every WebSocket recipient, including snapshots broadcast after another viewer votes or background metadata enrichment completes.
+- Immediately restored the authoritative play, pause, seek, or playback-rate state when a native player command failed instead of leaving one viewer locally diverged.
+- Removed stale autoplay prompts when shared playback pauses or ends, and prevented an obsolete prompt from starting locally paused media.
+- Made **Reload player** recover after a failed YouTube API request by removing the failed script and installing a clean callback and script on retry.
+- Turned cross-tab end-report suppression into an expiring lease so another tab advances the queue if the first reporting tab closes mid-request.
+- Kept mobile player-error controls inside the 16:9 surface, made the overlay opaque, and moved error notices above the bottom navigation.
+- Added accurate expanded-state semantics to room settings and assertive announcements for action errors.
+
 ## [0.12.2] - 2026-09-06
 
 ### Changed

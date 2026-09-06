@@ -274,9 +274,7 @@ func (h *hub) broadcast(room string, s snapshot) {
 	}
 	h.mu.RUnlock()
 	for _, c := range clients {
-		personalized := s
-		personalized.Me = c.identity
-		c.enqueue(map[string]any{"type": "snapshot", "payload": personalized})
+		c.enqueue(map[string]any{"type": "snapshot", "payload": s.forIdentity(c.identity)})
 	}
 }
 func (h *hub) broadcastReaction(room, identity, emoji string) {

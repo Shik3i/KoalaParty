@@ -97,6 +97,19 @@ export function automaticEndDelay(snapshot: Pick<Snapshot, 'members' | 'me'>): n
   return rank < 0 ? null : rank * 400;
 }
 
+export const END_REPORT_LEASE_MS = 15_000;
+
+export function remainingEndReportLease(
+  stored: { signature?: string; at?: number } | null,
+  signature: string,
+  now = Date.now(),
+): number {
+  if (stored?.signature !== signature || typeof stored.at !== 'number') return 0;
+  const age = now - stored.at;
+  if (age < 0 || age >= END_REPORT_LEASE_MS) return 0;
+  return END_REPORT_LEASE_MS - age;
+}
+
 export function filterQueue(items: QueueItem[], value: string): QueueItem[] {
   const query = value.trim().toLocaleLowerCase();
   if (!query) return items;

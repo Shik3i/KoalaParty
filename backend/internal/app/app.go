@@ -104,12 +104,14 @@ func Run() error {
 	loginLimiter := newRateLimiter(20, time.Minute, a.trustedProxies)
 	commandLimiter := newRateLimiter(180, time.Minute, a.trustedProxies)
 	registrationLimit := 5
+	roomCreationLimit := 30
 	e2eMode := strings.EqualFold(env("KOALAPARTY_E2E", "false"), "true")
 	if e2eMode {
 		registrationLimit = 100
+		roomCreationLimit = 100
 	}
 	registrationLimiter := newRateLimiter(registrationLimit, time.Hour, a.trustedProxies)
-	roomCreationLimiter := newRateLimiter(30, time.Hour, a.trustedProxies)
+	roomCreationLimiter := newRateLimiter(roomCreationLimit, time.Hour, a.trustedProxies)
 	reportLimiter := newRateLimiter(20, time.Hour, a.trustedProxies)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		info := CurrentBuildInformation()

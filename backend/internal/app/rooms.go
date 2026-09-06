@@ -31,11 +31,12 @@ type media struct {
 	Thumbnail  string `json:"thumbnail"`
 }
 type queueItem struct {
-	ID       string `json:"id"`
-	Position int    `json:"position"`
-	Media    media  `json:"media"`
-	Votes    int    `json:"votes"`
-	Voted    bool   `json:"voted"`
+	ID       string   `json:"id"`
+	Position int      `json:"position"`
+	Media    media    `json:"media"`
+	Votes    int      `json:"votes"`
+	Voted    bool     `json:"voted"`
+	voterIDs []string `json:"-"`
 }
 type member struct {
 	IdentityID    string          `json:"identityId"`
@@ -76,6 +77,28 @@ type snapshot struct {
 	Events             []event     `json:"events"`
 	Revision           int64       `json:"revision"`
 	PublicRoomsEnabled bool        `json:"publicRoomsEnabled"`
+}
+
+func (s snapshot) forIdentity(identity string) snapshot {
+	personalized := s
+	personalized.Me = identity
+	if len(s.Queue) == 0 {
+		return personalized
+	}
+	personalized.Queue = append([]queueItem(nil), s.Queue...)
+	for index := range personalized.Queue {
+		if s.Queue[index].voterIDs == nil {
+			continue
+		}
+		personalized.Queue[index].Voted = false
+		for _, voterID := range s.Queue[index].voterIDs {
+			if voterID == identity {
+				personalized.Queue[index].Voted = true
+				break
+			}
+		}
+	}
+	return personalized
 }
 
 func newID(bytes int) string {
@@ -326,18 +349,28 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 		return s, e
 	}
 	permissionRows.Close()
-	q, e := a.db.QueryContext(ctx, `SELECT q.id,q.position,m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,''),count(v.identity_id),count(CASE WHEN v.identity_id=? THEN 1 END) FROM room_queue_items q JOIN media_items m ON m.id=q.media_id LEFT JOIN queue_votes v ON v.queue_item_id=q.id WHERE q.room_id=? GROUP BY q.id ORDER BY count(v.identity_id) DESC,q.position`, me, id)
+	q, e := a.db.QueryContext(ctx, `SELECT q.id,q.position,m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,''),count(v.identity_id),coalesce(group_concat(v.identity_id, char(31)),'') FROM room_queue_items q JOIN media_items m ON m.id=q.media_id LEFT JOIN queue_votes v ON v.queue_item_id=q.id AND v.room_id=q.room_id WHERE q.room_id=? GROUP BY q.id ORDER BY count(v.identity_id) DESC,q.position`, id)
 	if e != nil {
 		return s, e
 	}
 	for q.Next() {
 		var x queueItem
-		var voted int
-		if e = q.Scan(&x.ID, &x.Position, &x.Media.ID, &x.Media.ProviderID, &x.Media.Title, &x.Media.Thumbnail, &x.Votes, &voted); e != nil {
+		var voterIDs string
+		if e = q.Scan(&x.ID, &x.Position, &x.Media.ID, &x.Media.ProviderID, &x.Media.Title, &x.Media.Thumbnail, &x.Votes, &voterIDs); e != nil {
 			q.Close()
 			return s, e
 		}
-		x.Voted = voted > 0
+		x.voterIDs = []string{}
+		if voterIDs != "" {
+			x.voterIDs = strings.Split(voterIDs, string(rune(31)))
+		}
+		x.Voted = false
+		for _, voterID := range x.voterIDs {
+			if voterID == me {
+				x.Voted = true
+				break
+			}
+		}
 		s.Queue = append(s.Queue, x)
 	}
 	if e = q.Err(); e != nil {

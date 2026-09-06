@@ -6,6 +6,7 @@ import {
   formatActivity,
   parseYouTube,
   participantNameParts,
+  remainingEndReportLease,
   reconnectDelay,
 } from './room';
 
@@ -88,6 +89,13 @@ describe('connection and automatic-end coordination', () => {
         members: [...snapshot.members, member('blocked', 'member', true, false)],
       }),
     ).toBeNull();
+  });
+
+  it('treats the cross-tab end reporter marker as an expiring lease', () => {
+    expect(remainingEndReportLease({ signature: 'media:4', at: 1_000 }, 'media:4', 5_000)).toBe(11_000);
+    expect(remainingEndReportLease({ signature: 'media:4', at: 1_000 }, 'media:4', 16_000)).toBe(0);
+    expect(remainingEndReportLease({ signature: 'other:4', at: 1_000 }, 'media:4', 5_000)).toBe(0);
+    expect(remainingEndReportLease({ signature: 'media:4', at: 6_000 }, 'media:4', 5_000)).toBe(0);
   });
 });
 

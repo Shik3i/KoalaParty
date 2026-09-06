@@ -13,6 +13,7 @@
     formatActivity,
     parseYouTube,
     participantNameParts,
+    remainingEndReportLease,
     reconnectDelay,
     SKIPPED_SPONSOR_CATEGORIES,
     SPONSOR_CATEGORY_LABELS,
@@ -326,7 +327,7 @@
     seekTimer = setTimeout(() => {
       seekTimer = null;
       if (room?.playback.media?.id !== mediaId) return;
-      void command('player.seek', { position }, { silentStale: true, bypassPending: true });
+      void playbackCommand('player.seek', { position });
     }, 300);
   }
   // Segments the room actually skips: only the acted-on categories, and only while the
@@ -674,6 +675,11 @@
       if (managePending) commandPending = false;
     }
   }
+
+  async function playbackCommand(type: string, payload: Record<string, unknown>) {
+    if (!(await command(type, payload, { silentStale: true, bypassPending: true }))) syncRequest += 1;
+  }
+
   function reportEnded(mediaId: string, position: number, duration: number, attempt = 0) {
     if (!room || room.playback.media?.id !== mediaId) return;
     const revision = room.playback.revision;
@@ -690,7 +696,11 @@
           signature?: string;
           at?: number;
         } | null;
-        if (stored?.signature === signature && Date.now() - (stored.at ?? 0) < 15_000) return;
+        const leaseDelay = remainingEndReportLease(stored, signature);
+        if (leaseDelay > 0) {
+          endedReportTimer = setTimeout(() => reportEnded(mediaId, position, duration, attempt), leaseDelay + 25);
+          return;
+        }
         localStorage.setItem(storageKey, JSON.stringify({ signature, at: Date.now() }));
       } catch {
         /* localStorage coordination is best-effort; server revisions remain authoritative */
@@ -877,6 +887,8 @@
           onclick={copyInvite}><LinkSimple size={16} weight="bold" />Copy invite</button
         ><button
           class="secondary"
+          aria-controls="room-settings"
+          aria-expanded={settingsOpen}
           onclick={() => {
             settingsOpen = !settingsOpen;
             if (settingsOpen) loadInvites();
@@ -886,7 +898,7 @@
         >
       </div>
     </header>
-    {#if settingsOpen}<section class="settings panel" aria-label="Room settings">
+    {#if settingsOpen}<section id="room-settings" class="settings panel" aria-label="Room settings">
         <div class="settings-grid">
           <div>
             <h2>Access</h2>
@@ -1016,11 +1028,10 @@
             canControl={can('playback.play_pause')}
             canSeek={can('playback.seek')}
             hasQueue={room.queue.length > 0}
-            onPlay={(pos) => command('player.play', { position: pos }, { silentStale: true, bypassPending: true })}
-            onPause={(pos) => command('player.pause', { position: pos }, { silentStale: true, bypassPending: true })}
+            onPlay={(pos) => playbackCommand('player.play', { position: pos })}
+            onPause={(pos) => playbackCommand('player.pause', { position: pos })}
             onSeek={scheduleSeek}
-            onRate={(newRate, pos) =>
-              command('player.rate', { rate: newRate, position: pos }, { silentStale: true, bypassPending: true })}
+            onRate={(newRate, pos) => playbackCommand('player.rate', { rate: newRate, position: pos })}
             onSponsorSkip={skipSponsor}
             onEnded={reportEnded}
             onSkip={can('queue.skip')
@@ -1185,20 +1196,14 @@
             <button
               type="button"
               class="ghost preset-btn"
-              onclick={() => quickAdd('dQw4w9WgXcQ')}
-              disabled={commandPending || !can('queue.add')}>🍿 Rickroll</button
+              onclick={() => quickAdd('jNQXAC9IVRw')}
+              disabled={commandPending || !can('queue.add')}>🐘 First video</button
             >
             <button
               type="button"
               class="ghost preset-btn"
               onclick={() => quickAdd('M7lc1UVf-VE')}
               disabled={commandPending || !can('queue.add')}>🎵 Player demo</button
-            >
-            <button
-              type="button"
-              class="ghost preset-btn"
-              onclick={() => quickAdd('9bZkp7q19f0')}
-              disabled={commandPending || !can('queue.add')}>🌊 Music video</button
             >
             <button
               type="button"
@@ -1397,8 +1402,8 @@
     </section>
     {#if notice}<div
         class="status status--{noticeKind}"
-        role="status"
-        aria-live="polite"
+        role={noticeKind === 'error' ? 'alert' : 'status'}
+        aria-live={noticeKind === 'error' ? 'assertive' : 'polite'}
         transition:fly={{ y: 12, duration: 220 }}
       >
         {#if noticeKind === 'success'}<CheckCircle
@@ -2038,6 +2043,12 @@
   .status--error {
     border-color: color-mix(in srgb, var(--danger) 55%, var(--border-subtle));
     color: var(--danger);
+  }
+  @media (max-width: 700px) {
+    .status {
+      bottom: calc(4.95rem + env(safe-area-inset-bottom));
+      z-index: 55;
+    }
   }
   .spinner {
     width: 2.2rem;

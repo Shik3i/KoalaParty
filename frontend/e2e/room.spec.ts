@@ -9,9 +9,11 @@ type FakePlayerHarness = {
   muteCalls: number;
   muted: boolean;
   currentTime: number;
+  getPlayerState: () => number;
   finish: () => void;
   blockAutoplay: () => void;
   allowAutoplay: () => void;
+  fail: (code: number) => void;
 };
 
 const E2E_VIDEO_ID = 'idempo12345';
@@ -62,6 +64,8 @@ const fakeYouTubeAPI = String.raw`
         this.muteCalls = 0;
         this.muted = false;
         this.autoplayDenied = false;
+        this.freezeAtWrappedEnd = false;
+        this.lastTick = Date.now();
         this.iframe = document.createElement('iframe');
         mountPoint.replaceWith(this.iframe);
         window.__koalaFakePlayer = this;
@@ -69,7 +73,9 @@ const fakeYouTubeAPI = String.raw`
       }
       loadVideoById(request) {
         this.videoId = request.videoId;
-        this.currentTime = request.startSeconds >= this.duration ? 1 : request.startSeconds;
+        this.freezeAtWrappedEnd = request.startSeconds >= this.duration;
+        this.currentTime = this.freezeAtWrappedEnd ? 1 : request.startSeconds;
+        this.lastTick = Date.now();
       }
       cueVideoById(request) {
         this.loadVideoById(request);
@@ -77,7 +83,14 @@ const fakeYouTubeAPI = String.raw`
       getIframe() { return this.iframe; }
       getVideoData() { return { video_id: this.videoId }; }
       getPlayerState() { return this.state; }
-      getCurrentTime() { return this.currentTime; }
+      getCurrentTime() {
+        if (this.state === 1 && !this.freezeAtWrappedEnd) {
+          const now = Date.now();
+          this.currentTime += (now - this.lastTick) / 1000;
+          this.lastTick = now;
+        }
+        return this.currentTime;
+      }
       getDuration() { return this.duration; }
       getPlaybackRate() { return 1; }
       setPlaybackRate() {}
@@ -88,14 +101,20 @@ const fakeYouTubeAPI = String.raw`
           return;
         }
         this.playCalls += 1;
+        this.lastTick = Date.now();
         this.state = 1;
         this.events.onStateChange({ data: 1 });
       }
       pauseVideo() {
+        this.getCurrentTime();
         this.state = 2;
         this.events.onStateChange({ data: 2 });
       }
-      seekTo(position) { this.currentTime = position >= this.duration ? 1 : position; }
+      seekTo(position) {
+        this.freezeAtWrappedEnd = position >= this.duration;
+        this.currentTime = this.freezeAtWrappedEnd ? 1 : position;
+        this.lastTick = Date.now();
+      }
       mute() { this.muteCalls += 1; this.muted = true; }
       unMute() { this.muted = false; }
       setVolume() {}
@@ -116,6 +135,7 @@ const fakeYouTubeAPI = String.raw`
         this.events.onAutoplayBlocked();
       }
       allowAutoplay() { this.autoplayDenied = false; }
+      fail(code) { this.events.onError({ data: code }); }
     }
     window.YT = { Player: FakePlayer };
     window.onYouTubeIframeAPIReady?.();
@@ -233,6 +253,20 @@ test('an autoplay block never mutes media and offers an explicit sound-preservin
       return { muteCalls: player.muteCalls, muted: player.muted };
     }),
   ).toEqual({ muteCalls: 0, muted: false });
+  const roomId = page.url().split('/').at(-1)!;
+  const playCallsBeforePause = await page.evaluate(
+    () => (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.playCalls,
+  );
+  expect((await command(page, roomId, 'player.pause', { position: 0 })).status).toBe(200);
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Autoplay blocked — play with sound' })).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.playCalls,
+    ),
+  ).toBe(playCallsBeforePause);
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Autoplay blocked — play with sound' })).toBeVisible();
   await page.evaluate(() =>
     (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.allowAutoplay(),
   );
@@ -244,6 +278,88 @@ test('an autoplay block never mutes media and offers an explicit sound-preservin
       return { muteCalls: player.muteCalls, muted: player.muted };
     }),
   ).toEqual({ muteCalls: 0, muted: false });
+});
+
+test('a rejected native playback command immediately restores the authoritative player state', async ({ page }) => {
+  await page.route('**/iframe_api', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
+  );
+  await page.goto('/');
+  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await page.waitForFunction(
+    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
+  );
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  await page.waitForFunction(
+    () => (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.getPlayerState() === 1,
+  );
+  await page.waitForTimeout(3_200);
+
+  let rejected = false;
+  await page.route(/\/api\/rooms\/[^/]+\/commands$/, async (route) => {
+    const request = route.request();
+    if (!rejected && request.method() === 'POST') {
+      rejected = true;
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'forced_failure', message: 'Playback command failed.' } }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+  const playCallsBeforeFailure = await page.evaluate(
+    () => (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.playCalls,
+  );
+  await page.evaluate(() =>
+    (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.pauseVideo(),
+  );
+  await page.waitForFunction(
+    ({ playCalls }) => {
+      const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
+      return player.playCalls > playCalls && player.getPlayerState() === 1;
+    },
+    { playCalls: playCallsBeforeFailure },
+  );
+  expect(rejected).toBe(true);
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+});
+
+test('mobile player errors and notices do not overlap their controls or bottom navigation', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route('**/iframe_api', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
+  );
+  await page.goto('/');
+  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await page.waitForFunction(
+    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
+  );
+  await page.evaluate(() => (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.fail(150));
+  await expect(page.locator('.player-error')).toBeVisible();
+  const overlayLayout = await page.locator('.player-error').evaluate((overlay) => {
+    const bounds = overlay.getBoundingClientRect();
+    const actions = overlay.querySelector('.player-error-actions')!.getBoundingClientRect();
+    return {
+      opaque: !getComputedStyle(overlay).backgroundColor.startsWith('rgba'),
+      actionsInside: actions.top >= bounds.top && actions.bottom <= bounds.bottom,
+      helperHidden: getComputedStyle(overlay.querySelector('small')!).display === 'none',
+    };
+  });
+  expect(overlayLayout).toEqual({ opaque: true, actionsInside: true, helperHidden: true });
+
+  await page.getByLabel('YouTube URL').fill('https://example.com/video');
+  await page.getByRole('button', { name: 'Play now' }).click();
+  const notice = page.locator('.status--error');
+  await expect(notice).toHaveAttribute('role', 'alert');
+  const fixedLayout = await page.evaluate(() => {
+    const toast = document.querySelector<HTMLElement>('.status')!.getBoundingClientRect();
+    const navigation = document.querySelector<HTMLElement>('.site-header nav')!.getBoundingClientRect();
+    return { toastBottom: Math.round(toast.bottom), navigationTop: Math.round(navigation.top) };
+  });
+  expect(fixedLayout.toastBottom).toBeLessThanOrEqual(fixedLayout.navigationTop);
 });
 
 test('reload at the finished server position advances instead of looping the first second', async ({ page }) => {
@@ -355,6 +471,11 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   const ownerContext = await browser.newContext();
   const memberContext = await browser.newContext();
   const thirdContext = await browser.newContext();
+  for (const context of [ownerContext, memberContext, thirdContext]) {
+    await context.route('**/iframe_api', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
+    );
+  }
   const owner = await ownerContext.newPage();
   await owner.goto('/');
   await owner.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
@@ -395,8 +516,15 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   await expect(owner.locator('.queue li')).toHaveCount(0);
   const playbackSpeed = owner.getByLabel('Playback speed');
   await expect(playbackSpeed).toBeVisible();
+  await expect(owner.getByRole('button', { name: '🐘 First video' })).toBeVisible();
   await expect(owner.getByRole('button', { name: '🎵 Player demo' })).toBeVisible();
-  await expect(owner.getByRole('button', { name: '🌊 Music video' })).toBeVisible();
+  const settingsButton = owner.getByRole('button', { name: 'Room settings' });
+  await expect(settingsButton).toHaveAttribute('aria-expanded', 'false');
+  await settingsButton.click();
+  const closeSettingsButton = owner.getByRole('button', { name: 'Close settings' });
+  await expect(closeSettingsButton).toHaveAttribute('aria-expanded', 'true');
+  await expect(owner.locator('#room-settings')).toBeVisible();
+  await closeSettingsButton.click();
   const playbackSpeedBox = await playbackSpeed.evaluate((node) => {
     const rect = node.getBoundingClientRect();
     return { width: rect.width, viewportWidth: window.innerWidth };
@@ -408,6 +536,22 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   await expect(member.locator('.room-header h1')).toBeVisible();
   await expect(owner.locator('.members li')).toHaveCount(2);
   await expect(member.locator('.members li')).toHaveCount(2);
+  await owner.getByLabel('YouTube URL').fill(`https://youtu.be/${E2E_QUEUE_VIDEO_ID}`);
+  await owner.getByRole('button', { name: 'Add to queue' }).click();
+  await expect(member.locator('.queue li')).toHaveCount(1);
+  const ownerVote = owner.locator('.queue .vote');
+  const memberVote = member.locator('.queue .vote');
+  await ownerVote.click();
+  await expect(ownerVote).toHaveClass(/active/);
+  await expect(memberVote).not.toHaveClass(/active/);
+  await expect(ownerVote).toContainText('1');
+  await expect(memberVote).toContainText('1');
+  await memberVote.click();
+  await expect(ownerVote).toHaveClass(/active/);
+  await expect(memberVote).toHaveClass(/active/);
+  await expect(ownerVote).toContainText('2');
+  await owner.locator('.queue .icon').click();
+  await expect(member.locator('.queue li')).toHaveCount(0);
   await member.getByRole('button', { name: '❤️' }).click();
   await expect(owner.locator('.reaction-overlay').getByText('❤️')).toBeVisible();
   await expect(owner.getByText(/Perfectly synced|Buffering|s (behind|ahead)/)).toBeVisible();

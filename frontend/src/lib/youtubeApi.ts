@@ -13,17 +13,11 @@ export function loadYouTubeAPI(): Promise<void> {
 
   apiPromise = new Promise<void>((resolve, reject) => {
     let settled = false;
-    const finish = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timeout);
-      if (error) reject(error);
-      else if (w.YT?.Player) resolve();
-      else reject(new Error('YouTube player API loaded without a player constructor.'));
-    };
-    const timeout = window.setTimeout(() => finish(new Error('YouTube player loading timed out.')), 12_000);
+    let script = document.querySelector<HTMLScriptElement>('script[src*="youtube.com/iframe_api"]');
     const previous = w.onYouTubeIframeAPIReady;
-    w.onYouTubeIframeAPIReady = () => {
+    let timeout = 0;
+    const onError = () => finish(new Error('YouTube player could not be loaded.'));
+    const ready = () => {
       finish();
       try {
         previous?.();
@@ -31,16 +25,29 @@ export function loadYouTubeAPI(): Promise<void> {
         // A consumer callback must not break the shared loader.
       }
     };
-    let script = document.querySelector<HTMLScriptElement>('script[src*="youtube.com/iframe_api"]');
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      script?.removeEventListener('error', onError);
+      if (w.onYouTubeIframeAPIReady === ready) w.onYouTubeIframeAPIReady = previous;
+      const failure =
+        error ?? (w.YT?.Player ? null : new Error('YouTube player API loaded without a player constructor.'));
+      if (failure) {
+        if (!w.YT?.Player) script?.remove();
+        reject(failure);
+      } else resolve();
+    };
+    timeout = window.setTimeout(() => finish(new Error('YouTube player loading timed out.')), 12_000);
+    w.onYouTubeIframeAPIReady = ready;
+    const created = !script;
     if (!script) {
       script = document.createElement('script');
       script.src = 'https://www.youtube.com/iframe_api';
       script.async = true;
-      script.addEventListener('error', () => finish(new Error('YouTube player could not be loaded.')), { once: true });
-      document.head.appendChild(script);
-    } else {
-      script.addEventListener('error', () => finish(new Error('YouTube player could not be loaded.')), { once: true });
     }
+    script.addEventListener('error', onError, { once: true });
+    if (created) document.head.appendChild(script);
   });
 
   const pending = apiPromise;

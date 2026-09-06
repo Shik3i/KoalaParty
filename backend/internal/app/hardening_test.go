@@ -126,13 +126,21 @@ func TestHubEnforcesActiveRoomAndConnectionLimits(t *testing.T) {
 	if err := h.tryAdd("room", testClient("overflow", "overflow", "198.51.100.1")); err == nil || err.Error() != "room_full" {
 		t.Fatalf("room capacity result=%v, want room_full", err)
 	}
-	h.broadcast("room", snapshot{Revision: 42})
+	h.broadcast("room", snapshot{
+		Revision: 42,
+		Queue: []queueItem{{
+			ID:       "queue-item",
+			Votes:    1,
+			Voted:    true,
+			voterIDs: []string{"identity-0"},
+		}},
+	})
 	for index, c := range clients {
 		select {
 		case raw := <-c.send:
 			message, ok := raw.(map[string]any)
 			payload, payloadOK := message["payload"].(snapshot)
-			if !ok || !payloadOK || payload.Revision != 42 || payload.Me != c.identity {
+			if !ok || !payloadOK || payload.Revision != 42 || payload.Me != c.identity || payload.Queue[0].Voted != (index == 0) {
 				t.Fatalf("client %d received invalid personalized snapshot: %#v", index, raw)
 			}
 		default:

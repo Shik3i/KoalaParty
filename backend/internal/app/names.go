@@ -30,9 +30,8 @@ var (
 // starts with one of these cued so it is never a blank player. The title is a
 // placeholder; enrichTitle replaces it with the real one.
 var presetVideos = []struct{ ID, Title string }{
-	{"dQw4w9WgXcQ", "Rick Astley - Never Gonna Give You Up"},
+	{"jNQXAC9IVRw", "Me at the zoo"},
 	{"M7lc1UVf-VE", "YouTube Developers Live: Embedded Web Player Customization"},
-	{"9bZkp7q19f0", "PSY - GANGNAM STYLE"},
 	{"aqz-KE-bpKQ", "Big Buck Bunny"},
 }
 

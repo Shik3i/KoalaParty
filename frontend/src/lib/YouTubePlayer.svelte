@@ -166,6 +166,10 @@
   // Ask the player to start, then verify it actually did. Autoplay retries always
   // preserve sound; a browser rejection requires an explicit viewer gesture.
   function requestPlay() {
+    if (status !== 'playing' || currentMediaEnded()) {
+      autoplayBlocked = false;
+      return;
+    }
     // Starting playback is our own programmatic action. Guard the resulting state
     // changes so a blocked autoplay (reported as PAUSED) is not relayed to the room
     // as a real pause — otherwise pressing play on an already-loaded video would stop
@@ -317,6 +321,7 @@
   }
   function resumeAutoplay() {
     autoplayBlocked = false;
+    if (status !== 'playing' || currentMediaEnded()) return;
     emitDiagnostic('autoplay_gesture');
     requestPlay();
   }
@@ -394,7 +399,7 @@
           onAutoplayBlocked: () => {
             if (generation !== playerGeneration || disposed) return;
             emitDiagnostic('autoplay_blocked');
-            autoplayBlocked = true;
+            autoplayBlocked = status === 'playing' && !currentMediaEnded();
           },
           onStateChange: (e: any) => {
             if (generation === playerGeneration && !disposed) handleStateChange(e.data);
@@ -800,6 +805,7 @@
     }
     if (status === 'playing') recoverPlayback('authoritative_sync');
     else {
+      autoplayBlocked = false;
       const state = player.getPlayerState?.();
       if (state !== PAUSED && state !== PLAYER_STATE.ENDED) player.pauseVideo?.();
     }
@@ -898,7 +904,7 @@
     place-content: center;
     text-align: center;
     color: #f3d7a1;
-    background: rgba(5, 8, 6, 0.92);
+    background: var(--player-background);
     padding: 1rem;
     z-index: 2;
   }
@@ -917,6 +923,24 @@
     gap: 0.6rem;
     margin-top: 0.9rem;
     flex-wrap: wrap;
+  }
+  @media (max-width: 500px) {
+    .player-error {
+      gap: 0.5rem;
+      padding: 0.65rem;
+    }
+    .player-error > span,
+    .player-error small {
+      display: none;
+    }
+    .player-error p,
+    .player-error-actions {
+      margin: 0;
+    }
+    .player-error p {
+      font-size: 0.9rem;
+      line-height: 1.25;
+    }
   }
   .empty span {
     font-size: 2.4rem;
