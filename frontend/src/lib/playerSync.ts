@@ -30,8 +30,8 @@ export interface StateChangeInput {
 // component so the guard / phantom-gesture logic is unit-testable in isolation.
 //
 // The central rule: any state change that happens while `guarded` is true is the
-// echo of our OWN programmatic control — loading a video, the muted-autoplay
-// fallback, a correcting seek, or a requested play — and must never be relayed to
+// echo of our OWN programmatic control — loading a video, an autoplay retry, a
+// correcting seek, or a requested play — and must never be relayed to
 // the server. In particular a browser that blocks autoplay reports the video as
 // PAUSED; without the guard a passive-but-controlling viewer would forward that as a
 // real pause and stop the video for everyone in the room. ENDED is handled more
@@ -93,13 +93,46 @@ export function isStableTimelineState(state: number): boolean {
 // iframe. Never call playVideo for an iframe that is already playing, buffering,
 // or locally ended: replaying ENDED while the conditional queue skip is in flight
 // can leave detached fullscreen playback running after the room becomes empty.
-export function shouldRecoverPlayback(serverStatus: string, hasVideo: boolean, state: number | null | undefined) {
+export function shouldRecoverPlayback(
+  serverStatus: string,
+  hasVideo: boolean,
+  state: number | null | undefined,
+  currentMediaEnded = state === PLAYER_STATE.ENDED,
+) {
   return (
     serverStatus === 'playing' &&
     hasVideo &&
+    !currentMediaEnded &&
     state !== PLAYER_STATE.PLAYING &&
-    state !== PLAYER_STATE.BUFFERING &&
-    state !== PLAYER_STATE.ENDED
+    state !== PLAYER_STATE.BUFFERING
+  );
+}
+
+// A room can be reloaded after YouTube reached the end but before the terminal
+// report reached the server. The server clock then remains at/past the duration,
+// while YouTube wraps a load at that position back to the beginning. Recognize
+// only that large end-to-start discontinuity; ordinary near-end playback and
+// user seeks are handled elsewhere.
+export function isWrappedEndedPlayback(
+  serverStatus: string,
+  currentTime: number,
+  expectedTime: number,
+  duration: number,
+): boolean {
+  if (
+    serverStatus !== 'playing' ||
+    !Number.isFinite(currentTime) ||
+    !Number.isFinite(expectedTime) ||
+    !Number.isFinite(duration) ||
+    duration <= 0
+  )
+    return false;
+  const beginningWindow = Math.max(2, Math.min(10, duration * 0.02));
+  return (
+    expectedTime >= duration &&
+    currentTime >= 0 &&
+    currentTime <= beginningWindow &&
+    expectedTime - currentTime >= Math.min(30, duration * 0.5)
   );
 }
 

@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Play, Warning, Hourglass, SkipForward, SpeakerSimpleSlash } from 'phosphor-svelte';
+  import { Play, Warning, Hourglass, SkipForward } from 'phosphor-svelte';
   import {
     isCurrentVideoError,
     isLocalTimelineJump,
     isRetryablePlayerError,
     isStableTimelineState,
     isUnboundedTimeline,
+    isWrappedEndedPlayback,
     normalizedDuration,
     PLAYER_STATE,
     playerErrorMessage,
@@ -99,10 +100,9 @@
   let previousTimelineState: number | null = null;
   let timelineRecoveryUntil = 0;
   let monitor: ReturnType<typeof setTimeout> | null = null;
-  // Browsers block autoplay WITH SOUND until the tab has a user gesture, so a
-  // passive viewer would otherwise sit on a paused video when someone else presses
-  // play. We detect the blocked play, fall back to muted autoplay (always allowed),
-  // and surface a one-tap unmute — so the video starts for everyone immediately.
+  // Browsers can block autoplay with sound until the tab has a user gesture. Never
+  // work around that by muting media: retry with sound, then ask for one explicit
+  // play gesture if the browser still refuses it.
   let autoplayTimer: ReturnType<typeof setTimeout> | null = null;
   let readyTimer: ReturnType<typeof setTimeout> | null = null;
   let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
@@ -113,7 +113,7 @@
   let retryCount = 0;
   let loadToken = 0;
   let playerGeneration = 0;
-  let mutedForAutoplay = $state(false);
+  let autoplayBlocked = $state(false);
   let correctedAt: number | null = null;
   let endedMediaId: string | null = null;
   let handledSyncRequest = 0;
@@ -153,7 +153,7 @@
   }
   function guard(ms = 1200) {
     // Never shorten an existing, longer guard: a short guard (e.g. applying the rate
-    // or the muted-autoplay fallback) must not cut the 3s video-load window short.
+    // or retrying autoplay) must not cut the 3s video-load window short.
     guardUntil = Math.max(guardUntil, Date.now() + ms);
   }
   // Where the media should be right now according to the server. While playing the
@@ -163,8 +163,8 @@
     return Math.max(0, position + ((Date.now() - positionAt) / 1000) * (rate || 1));
   }
 
-  // Ask the player to start, then verify it actually did. If the browser blocked
-  // autoplay-with-sound, retry muted so playback still begins in sync everywhere.
+  // Ask the player to start, then verify it actually did. Autoplay retries always
+  // preserve sound; a browser rejection requires an explicit viewer gesture.
   function requestPlay() {
     // Starting playback is our own programmatic action. Guard the resulting state
     // changes so a blocked autoplay (reported as PAUSED) is not relayed to the room
@@ -176,13 +176,26 @@
     scheduleStartWatchdog('play_request');
   }
 
+  function currentMediaEnded(): boolean {
+    return !!lastMediaId && endedMediaId === lastMediaId;
+  }
+
+  function reportNaturalEnd(endPosition: number, duration: number, event = 'ended') {
+    if (!lastMediaId || endedMediaId === lastMediaId) return;
+    endedMediaId = lastMediaId;
+    autoplayBlocked = false;
+    emitDiagnostic(event);
+    clearRecoveryTimers();
+    onEnded(lastMediaId, endPosition, duration);
+  }
+
   function recoverPlayback(reason: string) {
     const state = player?.getPlayerState?.();
     if (Date.now() < localControlUntil) {
       emitDiagnostic('recovery_skipped', { reason, state: state ?? null, localCommandPending: true });
       return;
     }
-    if (!shouldRecoverPlayback(status, !!lastVideo, state)) {
+    if (!shouldRecoverPlayback(status, !!lastVideo, state, currentMediaEnded())) {
       emitDiagnostic('recovery_skipped', { reason, state: state ?? null });
       return;
     }
@@ -192,7 +205,7 @@
 
   function forceResync(reason: string) {
     if (!player || !ready || !lastVideo) return;
-    if (player.getPlayerState?.() === PLAYER_STATE.ENDED || endedMediaId === lastMediaId) {
+    if (currentMediaEnded()) {
       emitDiagnostic('recovery_skipped', { reason, state: PLAYER_STATE.ENDED });
       return;
     }
@@ -244,37 +257,37 @@
     }, START_TIMEOUT_MS);
   }
 
-  function startMutedAutoplay(reason: string) {
-    if (!player || status !== 'playing') return;
-    if (player.getPlayerState?.() === PLAYER_STATE.ENDED) return;
-    guard();
-    player.mute?.();
-    mutedForAutoplay = true;
-    emitDiagnostic('autoplay_fallback', { reason });
-    player.playVideo?.();
-  }
-
   function scheduleAutoplayCheck() {
     if (autoplayTimer) clearTimeout(autoplayTimer);
     const generation = ++autoplayGeneration;
     // A single snapshot is fragile: a slow network shows BUFFERING before PLAYING,
-    // while a blocked autoplay stays UNSTARTED/CUED/PAUSED. Poll a few times so we
-    // only fall back to muted playback once it is clear the sound play never took.
+    // while a blocked autoplay stays UNSTARTED/CUED/PAUSED. Poll a few times and
+    // retry only with sound; KoalaParty must never mute the viewer's media.
     const check = (attempt: number) => {
       autoplayTimer = null;
       if (disposed || generation !== autoplayGeneration || !player || status !== 'playing') return;
       const state = player.getPlayerState?.();
-      if (state === PLAYING) return; // playing (with or without sound) — nothing to do
+      if (state === PLAYING) {
+        autoplayBlocked = false;
+        return;
+      }
       if (state === BUFFERING && attempt < 3) {
         autoplayTimer = setTimeout(() => check(attempt + 1), 500);
         return;
       }
-      // Blocked (or stuck buffering): muted autoplay is always allowed, so start it
-      // muted and surface a one-tap unmute, then confirm the muted play took. Re-arm
-      // the guard so the resulting state changes are recognised as our own and never
-      // relayed to the room, even when a slow network resolves them late.
-      startMutedAutoplay('autoplay_check');
-      if (attempt < 3) autoplayTimer = setTimeout(() => check(attempt + 1), 600);
+      // loadVideoById can briefly retain ENDED/CUED/PAUSED from the previous media.
+      // Retry the new item explicitly, but never revive the media that truly ended.
+      if (attempt < 3 && !currentMediaEnded()) {
+        guard();
+        emitDiagnostic('autoplay_retry_unmuted', { state: state ?? null });
+        player.playVideo?.();
+        autoplayTimer = setTimeout(() => check(attempt + 1), 600);
+        return;
+      }
+      if (!currentMediaEnded()) {
+        autoplayBlocked = true;
+        emitDiagnostic('autoplay_requires_gesture', { state: state ?? null });
+      }
     };
     autoplayTimer = setTimeout(() => check(0), 450);
   }
@@ -302,10 +315,10 @@
       player.cueVideoById(request);
     }
   }
-  function unmute() {
-    player?.unMute?.();
-    player?.setVolume?.(100);
-    mutedForAutoplay = false;
+  function resumeAutoplay() {
+    autoplayBlocked = false;
+    emitDiagnostic('autoplay_gesture');
+    requestPlay();
   }
   // Bring the player's playback speed in line with the authoritative rate. Guarded so
   // the resulting onPlaybackRateChange is recognised as our own and not relayed back.
@@ -381,7 +394,7 @@
           onAutoplayBlocked: () => {
             if (generation !== playerGeneration || disposed) return;
             emitDiagnostic('autoplay_blocked');
-            startMutedAutoplay('youtube_event');
+            autoplayBlocked = true;
           },
           onStateChange: (e: any) => {
             if (generation === playerGeneration && !disposed) handleStateChange(e.data);
@@ -444,6 +457,7 @@
       confirmedVideo = lastVideo;
     }
     if (state === PLAYING) {
+      autoplayBlocked = false;
       playerError = '';
       playerErrorCode = null;
       retryCount = 0;
@@ -470,12 +484,7 @@
     });
     switch (action) {
       case 'ended':
-        emitDiagnostic('ended');
-        clearRecoveryTimers();
-        if (lastMediaId && endedMediaId !== lastMediaId) {
-          endedMediaId = lastMediaId;
-          onEnded(lastMediaId, currentTime(), normalizedDuration(player?.getDuration?.() ?? 0));
-        }
+        reportNaturalEnd(currentTime(), normalizedDuration(player?.getDuration?.() ?? 0));
         return;
       case 'emit-play':
         localControlUntil = Date.now() + 4000;
@@ -568,6 +577,7 @@
       reportedDuration = duration;
       onDuration(duration);
     }
+    if (currentMediaEnded()) return;
     // Live streams expose an absolute timeline (for example several million
     // seconds since the stream began), not the room-relative VOD position. A
     // drift correction against that value seeks the live stream back to 0 every
@@ -630,6 +640,12 @@
     if (recovering) return;
     if (now < localSeekUntil || (state !== PLAYING && state !== PAUSED)) return;
     const expected = expectedPosition();
+    if (isWrappedEndedPlayback(status, t, expected, duration)) {
+      guard();
+      player.pauseVideo?.();
+      reportNaturalEnd(duration, duration, 'ended_after_reload');
+      return;
+    }
     const drift = t - expected;
     onDiagnostics({
       drift,
@@ -698,7 +714,7 @@
         stopMonitor();
         loadToken += 1;
         playerGeneration += 1;
-        mutedForAutoplay = false;
+        autoplayBlocked = false;
         retryCount = 0;
         playerError = '';
         playerErrorCode = null;
@@ -743,7 +759,7 @@
     const target = Math.max(0, expectedPosition());
     if (lastVideo !== videoId) {
       clearRecoveryTimers();
-      mutedForAutoplay = false;
+      autoplayBlocked = false;
       retryCount = 0;
       playerError = '';
       playerErrorCode = null;
@@ -810,8 +826,8 @@
 
 <div class="player">
   <div class="player-host" bind:this={host}></div>
-  {#if mutedForAutoplay && !playerError}<button class="unmute" onclick={unmute}
-      ><SpeakerSimpleSlash size={18} weight="fill" /><span>Muted — tap for sound</span></button
+  {#if autoplayBlocked && !playerError}<button class="autoplay-prompt" onclick={resumeAutoplay}
+      ><Play size={18} weight="fill" /><span>Autoplay blocked — play with sound</span></button
     >{/if}
   {#if playerError}<div class="player-error" role="alert">
       <span><Warning size={38} weight="fill" /></span>
@@ -855,7 +871,7 @@
     height: 100%;
     border: 0;
   }
-  .unmute {
+  .autoplay-prompt {
     position: absolute;
     left: 50%;
     bottom: 0.9rem;
@@ -864,7 +880,7 @@
     font-size: 0.85rem;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   }
-  .unmute:hover {
+  .autoplay-prompt:hover {
     transform: translateX(-50%) translateY(-1px);
   }
   .empty {

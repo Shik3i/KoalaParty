@@ -26,13 +26,14 @@ Run this against the exact production build in an isolated browser before creati
 3. At desktop and `390 × 844`, confirm the player mount and iframe exactly fill the 16:9 player and the document has no horizontal overflow.
 4. Confirm theater mode keeps the iframe equal to the enlarged player. Float the mini-player on desktop and mobile; it must remain fully visible and must not overlap the mobile bottom navigation.
 5. Enter and exit the real YouTube fullscreen control. Confirm the iframe fills the viewport in fullscreen, returns to the player bounds afterward, and playback resynchronizes.
-6. Start the 19-second `https://www.youtube.com/watch?v=jNQXAC9IVRw`, enter fullscreen, and let it end naturally. Confirm fullscreen closes, the iframe is removed, the player shows the empty state, and the room records `finished the video`.
-7. Queue `https://www.youtube.com/watch?v=aqz-KE-bpKQ`, then use **Skip next**. Confirm queue advance, elapsed-position preservation, reload recovery, and reconnect after a brief server restart.
-8. Optionally try an unavailable or embed-disabled video to confirm the embedded player's error and retry/skip state.
+6. Start the 19-second `https://www.youtube.com/watch?v=jNQXAC9IVRw`, queue another embeddable video, and let the first video end naturally. Confirm the queued video becomes current and starts automatically with sound in both tabs. Repeat with an empty queue in fullscreen; confirm fullscreen closes, the iframe is removed, the player shows the empty state, and the room records `finished the video`.
+7. Reload while the shared clock is at the completed video's duration. Confirm the old video does not loop between its end and the first second; it must submit one terminal report and start the next queued video with sound.
+8. Queue `https://www.youtube.com/watch?v=aqz-KE-bpKQ`, then use **Skip next**. Confirm queue advance, elapsed-position preservation, reload recovery, and reconnect after a brief server restart.
+9. Optionally try an unavailable or embed-disabled video to confirm the embedded player's error and retry/skip state.
 
 ## Playback failure matrix
 
-- Open two rooms/tabs with autoplay blocked or sound permissions denied: the room must continue muted and show the one-tap unmute action, without broadcasting a phantom pause.
+- Open two rooms/tabs with autoplay blocked or sound permissions denied: KoalaParty must never mute either player. The blocked tab must show the one-tap **Autoplay blocked — play with sound** action without broadcasting a phantom pause.
 - Replace a video while the previous iframe is buffering: a late error or `ENDED` callback must not skip or cover the replacement.
 - Use an unavailable, private, or embed-disabled video: the error stays attached to that media item; it is never auto-skipped. `Try again` is bounded, while `Skip this video` explicitly discards it.
 - Hide the tab, go offline, restore connectivity, and return to the tab while a room is playing: the client records local lifecycle events and re-requests playback after recovery.

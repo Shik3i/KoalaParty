@@ -6,8 +6,12 @@ type FakePlayerHarness = {
   playCalls: number;
   stopCalls: number;
   destroyCalls: number;
+  muteCalls: number;
+  muted: boolean;
   currentTime: number;
   finish: () => void;
+  blockAutoplay: () => void;
+  allowAutoplay: () => void;
 };
 
 const E2E_VIDEO_ID = 'idempo12345';
@@ -55,6 +59,9 @@ const fakeYouTubeAPI = String.raw`
         this.playCalls = 0;
         this.stopCalls = 0;
         this.destroyCalls = 0;
+        this.muteCalls = 0;
+        this.muted = false;
+        this.autoplayDenied = false;
         this.iframe = document.createElement('iframe');
         mountPoint.replaceWith(this.iframe);
         window.__koalaFakePlayer = this;
@@ -62,7 +69,7 @@ const fakeYouTubeAPI = String.raw`
       }
       loadVideoById(request) {
         this.videoId = request.videoId;
-        this.currentTime = request.startSeconds;
+        this.currentTime = request.startSeconds >= this.duration ? 1 : request.startSeconds;
       }
       cueVideoById(request) {
         this.loadVideoById(request);
@@ -75,6 +82,11 @@ const fakeYouTubeAPI = String.raw`
       getPlaybackRate() { return 1; }
       setPlaybackRate() {}
       playVideo() {
+        if (this.autoplayDenied) {
+          this.state = 2;
+          this.events.onAutoplayBlocked();
+          return;
+        }
         this.playCalls += 1;
         this.state = 1;
         this.events.onStateChange({ data: 1 });
@@ -83,9 +95,9 @@ const fakeYouTubeAPI = String.raw`
         this.state = 2;
         this.events.onStateChange({ data: 2 });
       }
-      seekTo(position) { this.currentTime = position; }
-      mute() {}
-      unMute() {}
+      seekTo(position) { this.currentTime = position >= this.duration ? 1 : position; }
+      mute() { this.muteCalls += 1; this.muted = true; }
+      unMute() { this.muted = false; }
       setVolume() {}
       unloadModule() {}
       stopVideo() { this.stopCalls += 1; }
@@ -98,6 +110,12 @@ const fakeYouTubeAPI = String.raw`
         this.state = 0;
         this.events.onStateChange({ data: 0 });
       }
+      blockAutoplay() {
+        this.autoplayDenied = true;
+        this.state = 2;
+        this.events.onAutoplayBlocked();
+      }
+      allowAutoplay() { this.autoplayDenied = false; }
     }
     window.YT = { Player: FakePlayer };
     window.onYouTubeIframeAPIReady?.();
@@ -141,6 +159,130 @@ test('ended fullscreen playback is not restarted and its iframe is torn down', a
       };
     }),
   ).toEqual({ playCalls: playCallsAtEnd, stopCalls: 1, destroyCalls: 1, iframeCount: 0 });
+});
+
+test('the next queued video starts when the iframe briefly retains the previous ENDED state', async ({ page }) => {
+  await page.route('**/iframe_api', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
+  );
+  await page.goto('/');
+  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await page.waitForFunction(
+    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
+  );
+  await page.getByLabel('YouTube URL').fill(`https://youtu.be/${E2E_QUEUE_VIDEO_ID}`);
+  await page.getByRole('button', { name: 'Add to queue' }).click();
+  await expect(page.locator('.queue li')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  await page.waitForFunction(
+    () => (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.playCalls > 0,
+  );
+
+  const automaticAdvance = page.waitForResponse((response) => {
+    if (!response.url().endsWith('/commands') || response.request().method() !== 'POST') return false;
+    return response.request().postDataJSON().type === 'playback.ended';
+  });
+  const playCallsBeforeEnd = await page.evaluate(() => {
+    const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
+    player.finish();
+    return player.playCalls;
+  });
+
+  expect((await automaticAdvance).status()).toBe(200);
+  await expect(page.locator('.queue li')).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
+        return {
+          videoId: player.videoId,
+          playCalls: player.playCalls,
+          muteCalls: player.muteCalls,
+          muted: player.muted,
+        };
+      }),
+    )
+    .toEqual({
+      videoId: E2E_QUEUE_VIDEO_ID,
+      playCalls: playCallsBeforeEnd + 1,
+      muteCalls: 0,
+      muted: false,
+    });
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+});
+
+test('an autoplay block never mutes media and offers an explicit sound-preserving retry', async ({ page }) => {
+  await page.route('**/iframe_api', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
+  );
+  await page.goto('/');
+  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await page.waitForFunction(
+    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
+  );
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  await page.evaluate(() =>
+    (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.blockAutoplay(),
+  );
+  await expect(page.getByRole('button', { name: 'Autoplay blocked — play with sound' })).toBeVisible();
+  expect(
+    await page.evaluate(() => {
+      const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
+      return { muteCalls: player.muteCalls, muted: player.muted };
+    }),
+  ).toEqual({ muteCalls: 0, muted: false });
+  await page.evaluate(() =>
+    (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.allowAutoplay(),
+  );
+  await page.getByRole('button', { name: 'Autoplay blocked — play with sound' }).click({ force: true });
+  await expect(page.getByRole('button', { name: 'Autoplay blocked — play with sound' })).toHaveCount(0);
+  expect(
+    await page.evaluate(() => {
+      const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
+      return { muteCalls: player.muteCalls, muted: player.muted };
+    }),
+  ).toEqual({ muteCalls: 0, muted: false });
+});
+
+test('reload at the finished server position advances instead of looping the first second', async ({ page }) => {
+  await page.route('**/iframe_api', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
+  );
+  await page.goto('/');
+  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await page.waitForFunction(
+    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
+  );
+  const roomId = page.url().split('/').at(-1)!;
+  await page.getByLabel('YouTube URL').fill(`https://youtu.be/${E2E_QUEUE_VIDEO_ID}`);
+  await page.getByRole('button', { name: 'Add to queue' }).click();
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  expect((await command(page, roomId, 'player.seek', { position: 100 })).status).toBe(200);
+
+  const recoveredEnd = page.waitForResponse((response) => {
+    if (!response.url().endsWith('/commands') || response.request().method() !== 'POST') return false;
+    const body = response.request().postDataJSON();
+    return body.type === 'playback.ended' && body.payload.position === 100 && body.payload.duration === 100;
+  });
+  await page.reload();
+  expect((await recoveredEnd).status()).toBe(200);
+  await expect(page.locator('.queue li')).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
+        return { videoId: player.videoId, playing: player.playCalls > 0 };
+      }),
+    )
+    .toEqual({ videoId: E2E_QUEUE_VIDEO_ID, playing: true });
+  expect(
+    await page.evaluate(
+      () => (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.currentTime,
+    ),
+  ).toBeLessThan(10);
 });
 
 test('keyboard controls, manual resync, diagnostics download and reconnect stay usable', async ({ browser }) => {

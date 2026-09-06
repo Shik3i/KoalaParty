@@ -6,6 +6,7 @@ import {
   isStableTimelineState,
   isRetryablePlayerError,
   isUnboundedTimeline,
+  isWrappedEndedPlayback,
   normalizedDuration,
   playerErrorMessage,
   shouldReanchorPlayback,
@@ -95,6 +96,22 @@ describe('stateChangeAction', () => {
 describe('playback recovery', () => {
   it.each([PLAYING, BUFFERING, ENDED])('does not restart state %s after a presentation transition', (state) => {
     expect(shouldRecoverPlayback('playing', true, state)).toBe(false);
+  });
+
+  it('recognizes an ended server clock that YouTube wrapped to the beginning after reload', () => {
+    expect(isWrappedEndedPlayback('playing', 1.2, 100.4, 100)).toBe(true);
+    expect(isWrappedEndedPlayback('playing', 3, 635, 635)).toBe(true);
+  });
+
+  it('does not confuse ordinary playback, a local seek or a paused room with a wrapped end', () => {
+    expect(isWrappedEndedPlayback('playing', 98, 100, 100)).toBe(false);
+    expect(isWrappedEndedPlayback('playing', 1, 30, 100)).toBe(false);
+    expect(isWrappedEndedPlayback('paused', 1, 100, 100)).toBe(false);
+  });
+
+  it('recovers a stale ENDED state after the room has advanced to another media item', () => {
+    expect(shouldRecoverPlayback('playing', true, ENDED, false)).toBe(true);
+    expect(shouldRecoverPlayback('playing', true, ENDED, true)).toBe(false);
   });
 
   it('wakes a paused or cued iframe only while the room is still playing that media', () => {

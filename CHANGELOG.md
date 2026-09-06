@@ -4,6 +4,18 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-09-06
+
+### Changed
+
+- Removed KoalaParty's muted-autoplay fallback. Queue transitions now retry only with sound; when the browser itself blocks autoplay, the player requests an explicit sound-preserving play gesture instead of muting media.
+
+### Fixed
+
+- Fixed queued videos sometimes remaining stopped when YouTube briefly retained the previous video's `ENDED` state during the media handoff.
+- Stopped room reloads at an already-finished server position from seeking between the end and the first second; the client now submits one validated terminal report and advances the queue.
+- Added deterministic end-to-next-video coverage that keeps the old iframe state at `ENDED`, plus the real two-video isolated-browser release gate.
+
 ## [0.12.1] - 2026-09-06
 
 ### Changed
