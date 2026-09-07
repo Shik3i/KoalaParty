@@ -4,6 +4,8 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.12.4] - 2026-09-07
+
 ### Security
 
 - Revoked existing room access after visibility changes, invitation removal, and friendship removal or blocking. Commands, WebSocket snapshots, room libraries, and previews now enforce current eligibility; admin roles do not bypass private or friends-only access.
