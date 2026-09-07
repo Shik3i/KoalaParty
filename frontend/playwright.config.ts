@@ -11,7 +11,7 @@ export default defineConfig({
   timeout: 45_000,
   fullyParallel: false,
   workers: 1,
-  retries: process.env.CI ? 1 : 0,
+  retries: 0,
   globalTeardown: './e2e/global-teardown.mjs',
   use: { baseURL: 'http://127.0.0.1:4187', trace: 'retain-on-failure' },
   projects: [

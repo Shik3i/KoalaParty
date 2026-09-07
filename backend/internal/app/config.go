@@ -23,6 +23,7 @@ type config struct {
 	roomMaxIdle       time.Duration
 	publicRooms       bool
 	production        bool
+	e2e               bool
 	youtubeMetadata   bool
 	sponsorBlock      bool
 	settingOverrides  map[string]bool
@@ -32,6 +33,13 @@ func loadConfig() (config, error) {
 	production, err := parseBool("KOALAPARTY_PRODUCTION", false)
 	if err != nil {
 		return config{}, err
+	}
+	e2e, err := parseBool("KOALAPARTY_E2E", false)
+	if err != nil {
+		return config{}, err
+	}
+	if production && e2e {
+		return config{}, fmt.Errorf("KOALAPARTY_E2E must be false in production")
 	}
 	cookieSecure, err := parseBool("KOALAPARTY_COOKIE_SECURE", production)
 	if err != nil {
@@ -57,6 +65,7 @@ func loadConfig() (config, error) {
 		trustedOrigins:   map[string]bool{},
 		publicRooms:      publicRooms,
 		production:       production,
+		e2e:              e2e,
 		youtubeMetadata:  youtubeMetadata,
 		sponsorBlock:     sponsorBlock,
 		settingOverrides: map[string]bool{},

@@ -77,6 +77,7 @@ type snapshot struct {
 	Events             []event     `json:"events"`
 	Revision           int64       `json:"revision"`
 	PublicRoomsEnabled bool        `json:"publicRoomsEnabled"`
+	allowedIdentities  map[string]bool
 }
 
 func (s snapshot) forIdentity(identity string) snapshot {
@@ -183,11 +184,11 @@ func (a *application) roomPreviews(w http.ResponseWriter, r *http.Request, p pri
 		var title, thumbnail, status, updatedAt string
 		var position, playbackRate float64
 		err := a.db.QueryRowContext(r.Context(), `SELECT coalesce(m.title,''),coalesce(m.thumbnail_url,''),p.status,p.position_seconds,p.playback_rate,p.updated_at
-			FROM rooms r JOIN playback_states p ON p.room_id=r.id LEFT JOIN media_items m ON m.id=p.current_media_id
+			FROM rooms r JOIN identities i ON i.id=? JOIN playback_states p ON p.room_id=r.id LEFT JOIN media_items m ON m.id=p.current_media_id
 			WHERE r.id=? AND r.deleted_at IS NULL AND EXISTS (
 				SELECT 1 FROM room_members rm JOIN identities i ON i.id=rm.identity_id
 				WHERE rm.room_id=r.id AND (i.id=? OR (i.account_id IS NOT NULL AND i.account_id=?))
-			)`, id, p.IdentityID, p.AccountID).Scan(&title, &thumbnail, &status, &position, &playbackRate, &updatedAt)
+			) AND `+roomAccessSQL, p.IdentityID, id, p.IdentityID, p.AccountID).Scan(&title, &thumbnail, &status, &position, &playbackRate, &updatedAt)
 		if err != nil {
 			continue
 		}
@@ -297,22 +298,30 @@ func (a *application) joinAndSnapshot(ctx context.Context, id string, p principa
 }
 func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, error) {
 	s := snapshot{ID: id, Label: roomLabel(id), Me: me, Members: []member{}, Queue: []queueItem{}, History: []media{}, Events: []event{}, PublicRoomsEnabled: a.getPublicRooms()}
-	if e := a.db.QueryRowContext(ctx, "SELECT visibility,revision,queue_loop,sponsorblock_enabled FROM rooms WHERE id=?", id).Scan(&s.Visibility, &s.Revision, &s.QueueLoop, &s.SponsorBlock); e != nil {
+	tx, e := a.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if e != nil {
 		return s, e
 	}
-	rows, e := a.db.QueryContext(ctx, "SELECT i.id,i.display_name,m.role,i.account_id FROM room_members m JOIN identities i ON i.id=m.identity_id WHERE m.room_id=? ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,i.display_name", id)
+	defer tx.Rollback()
+	s.allowedIdentities = map[string]bool{}
+	if e := tx.QueryRowContext(ctx, "SELECT visibility,revision,queue_loop,sponsorblock_enabled FROM rooms WHERE id=?", id).Scan(&s.Visibility, &s.Revision, &s.QueueLoop, &s.SponsorBlock); e != nil {
+		return s, e
+	}
+	rows, e := tx.QueryContext(ctx, "SELECT i.id,i.display_name,m.role,i.account_id,"+roomAccessSQL+" FROM room_members m JOIN identities i ON i.id=m.identity_id JOIN rooms r ON r.id=m.room_id WHERE m.room_id=? ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,i.display_name", id)
 	if e != nil {
 		return s, e
 	}
 	for rows.Next() {
 		var m member
 		var account sql.NullString
+		var eligible bool
 		m.Permissions = map[string]bool{}
-		if e = rows.Scan(&m.IdentityID, &m.DisplayName, &m.Role, &account); e != nil {
+		if e = rows.Scan(&m.IdentityID, &m.DisplayName, &m.Role, &account, &eligible); e != nil {
 			rows.Close()
 			return s, e
 		}
 		m.AccountLinked = account.Valid
+		s.allowedIdentities[m.IdentityID] = eligible
 		for _, c := range memberCapabilities {
 			m.Permissions[c] = true
 		}
@@ -329,7 +338,7 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 		memberIndex[s.Members[i].IdentityID] = i
 		s.Members[i].Active = activeIdentities[s.Members[i].IdentityID]
 	}
-	permissionRows, queryErr := a.db.QueryContext(ctx, "SELECT identity_id,permission,allowed FROM room_permissions WHERE room_id=?", id)
+	permissionRows, queryErr := tx.QueryContext(ctx, "SELECT identity_id,permission,allowed FROM room_permissions WHERE room_id=?", id)
 	if queryErr != nil {
 		return s, queryErr
 	}
@@ -349,7 +358,7 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 		return s, e
 	}
 	permissionRows.Close()
-	q, e := a.db.QueryContext(ctx, `SELECT q.id,q.position,m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,''),count(v.identity_id),coalesce(group_concat(v.identity_id, char(31)),'') FROM room_queue_items q JOIN media_items m ON m.id=q.media_id LEFT JOIN queue_votes v ON v.queue_item_id=q.id AND v.room_id=q.room_id WHERE q.room_id=? GROUP BY q.id ORDER BY count(v.identity_id) DESC,q.position`, id)
+	q, e := tx.QueryContext(ctx, `SELECT q.id,q.position,m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,''),count(v.identity_id),coalesce(group_concat(v.identity_id, char(31)),'') FROM room_queue_items q JOIN media_items m ON m.id=q.media_id LEFT JOIN queue_votes v ON v.queue_item_id=q.id AND v.room_id=q.room_id WHERE q.room_id=? GROUP BY q.id ORDER BY count(v.identity_id) DESC,q.position`, id)
 	if e != nil {
 		return s, e
 	}
@@ -378,7 +387,7 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 		return s, e
 	}
 	q.Close()
-	historyRows, e := a.db.QueryContext(ctx, `SELECT m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,'') FROM room_history h JOIN media_items m ON m.id=h.media_id WHERE h.room_id=? ORDER BY h.played_at DESC LIMIT 20`, id)
+	historyRows, e := tx.QueryContext(ctx, `SELECT m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,'') FROM room_history h JOIN media_items m ON m.id=h.media_id WHERE h.room_id=? ORDER BY h.played_at DESC LIMIT 20`, id)
 	if e != nil {
 		return s, e
 	}
@@ -396,7 +405,7 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 	}
 	historyRows.Close()
 	var mid, title, thumb, provider sql.NullString
-	if e = a.db.QueryRowContext(ctx, `SELECT p.status,p.position_seconds,p.playback_rate,p.revision,p.updated_at,m.id,m.provider_media_id,m.title,m.thumbnail_url FROM playback_states p LEFT JOIN media_items m ON m.id=p.current_media_id WHERE p.room_id=?`, id).Scan(&s.Playback.Status, &s.Playback.Position, &s.Playback.Rate, &s.Playback.Revision, &s.Playback.UpdatedAt, &mid, &provider, &title, &thumb); e != nil {
+	if e = tx.QueryRowContext(ctx, `SELECT p.status,p.position_seconds,p.playback_rate,p.revision,p.updated_at,m.id,m.provider_media_id,m.title,m.thumbnail_url FROM playback_states p LEFT JOIN media_items m ON m.id=p.current_media_id WHERE p.room_id=?`, id).Scan(&s.Playback.Status, &s.Playback.Position, &s.Playback.Rate, &s.Playback.Revision, &s.Playback.UpdatedAt, &mid, &provider, &title, &thumb); e != nil {
 		return s, e
 	}
 	// Always emit an array, never null: a nil slice would marshal to JSON null and
@@ -420,7 +429,7 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 			s.Playback.Position += time.Since(updated.UTC()).Seconds() * s.Playback.Rate
 		}
 	}
-	er, e := a.db.QueryContext(ctx, `SELECT e.id,coalesce(e.actor_identity_id,''),coalesce(i.display_name,''),e.event_type,e.payload_json,e.created_at FROM room_events e LEFT JOIN identities i ON i.id=e.actor_identity_id WHERE e.room_id=? ORDER BY e.created_at DESC LIMIT 200`, id)
+	er, e := tx.QueryContext(ctx, `SELECT e.id,coalesce(e.actor_identity_id,''),coalesce(i.display_name,''),e.event_type,e.payload_json,e.created_at FROM room_events e LEFT JOIN identities i ON i.id=e.actor_identity_id WHERE e.room_id=? ORDER BY e.created_at DESC LIMIT 200`, id)
 	if e != nil {
 		return s, e
 	}
@@ -443,5 +452,5 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 	}
 	er.Close()
 	sort.Slice(s.Events, func(i, j int) bool { return s.Events[i].CreatedAt < s.Events[j].CreatedAt })
-	return s, nil
+	return s, tx.Commit()
 }

@@ -11,7 +11,7 @@ type FakePlayerHarness = {
   currentTime: number;
   getPlayerState: () => number;
   finish: () => void;
-  blockAutoplay: () => void;
+  blockAutoplay: (state?: number) => void;
   allowAutoplay: () => void;
   fail: (code: number) => void;
 };
@@ -64,6 +64,7 @@ const fakeYouTubeAPI = String.raw`
         this.muteCalls = 0;
         this.muted = false;
         this.autoplayDenied = false;
+        this.blockedState = 2;
         this.freezeAtWrappedEnd = false;
         this.lastTick = Date.now();
         this.iframe = document.createElement('iframe');
@@ -96,14 +97,14 @@ const fakeYouTubeAPI = String.raw`
       setPlaybackRate() {}
       playVideo() {
         if (this.autoplayDenied) {
-          this.state = 2;
+          this.state = this.blockedState;
           this.events.onAutoplayBlocked();
           return;
         }
         this.playCalls += 1;
         this.lastTick = Date.now();
-        this.state = 1;
-        this.events.onStateChange({ data: 1 });
+        this.state = this.freezeAtWrappedEnd && window.__koalaWrappedState === 3 ? 3 : 1;
+        this.events.onStateChange({ data: this.state });
       }
       pauseVideo() {
         this.getCurrentTime();
@@ -114,6 +115,14 @@ const fakeYouTubeAPI = String.raw`
         this.freezeAtWrappedEnd = position >= this.duration;
         this.currentTime = this.freezeAtWrappedEnd ? 1 : position;
         this.lastTick = Date.now();
+        if (this.freezeAtWrappedEnd && window.__koalaWrappedState === 'seek-feedback') {
+          this.state = 3;
+          this.events.onStateChange({ data: 3 });
+          setTimeout(() => {
+            this.state = 1;
+            this.events.onStateChange({ data: 1 });
+          }, 50);
+        }
       }
       mute() { this.muteCalls += 1; this.muted = true; }
       unMute() { this.muted = false; }
@@ -129,9 +138,10 @@ const fakeYouTubeAPI = String.raw`
         this.state = 0;
         this.events.onStateChange({ data: 0 });
       }
-      blockAutoplay() {
+      blockAutoplay(state = 2) {
         this.autoplayDenied = true;
-        this.state = 2;
+        this.blockedState = state;
+        this.state = state;
         this.events.onAutoplayBlocked();
       }
       allowAutoplay() { this.autoplayDenied = false; }
@@ -280,6 +290,48 @@ test('an autoplay block never mutes media and offers an explicit sound-preservin
   ).toEqual({ muteCalls: 0, muted: false });
 });
 
+test('the startup watchdog preserves an unstarted autoplay gesture until the viewer plays', async ({ page }) => {
+  await page.route('**/iframe_api', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
+  );
+  await page.goto('/');
+  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await page.waitForFunction(
+    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
+  );
+  await page.clock.install();
+  await page.evaluate(() =>
+    (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.blockAutoplay(-1),
+  );
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  await page.clock.runFor(21_000);
+  await expect(page.getByRole('button', { name: 'Autoplay blocked — play with sound' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again', exact: true })).toHaveCount(0);
+  await page.evaluate(() =>
+    (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.allowAutoplay(),
+  );
+  await page
+    .getByRole('button', { name: 'Autoplay blocked — play with sound' })
+    .evaluate((button) => button.scrollIntoView({ block: 'start' }));
+  await expect
+    .poll(() =>
+      page.locator('.autoplay-prompt').evaluate((button) => {
+        const header = document.querySelector('.site-header')!.getBoundingClientRect();
+        return button.getBoundingClientRect().top >= header.bottom;
+      }),
+    )
+    .toBe(true);
+  await page.getByRole('button', { name: 'Autoplay blocked — play with sound' }).click();
+  await expect(page.getByRole('button', { name: 'Autoplay blocked — play with sound' })).toHaveCount(0);
+  expect(
+    await page.evaluate(() => {
+      const p = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
+      return { state: p.getPlayerState(), muted: p.muted, muteCalls: p.muteCalls };
+    }),
+  ).toEqual({ state: 1, muted: false, muteCalls: 0 });
+});
+
 test('a rejected native playback command immediately restores the authoritative player state', async ({ page }) => {
   await page.route('**/iframe_api', (route) =>
     route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
@@ -362,44 +414,49 @@ test('mobile player errors and notices do not overlap their controls or bottom n
   expect(fixedLayout.toastBottom).toBeLessThanOrEqual(fixedLayout.navigationTop);
 });
 
-test('reload at the finished server position advances instead of looping the first second', async ({ page }) => {
-  await page.route('**/iframe_api', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
-  );
-  await page.goto('/');
-  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
-  await page.waitForFunction(
-    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
-  );
-  const roomId = page.url().split('/').at(-1)!;
-  await page.getByLabel('YouTube URL').fill(`https://youtu.be/${E2E_QUEUE_VIDEO_ID}`);
-  await page.getByRole('button', { name: 'Add to queue' }).click();
-  await page.getByRole('button', { name: 'Play', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
-  expect((await command(page, roomId, 'player.seek', { position: 100 })).status).toBe(200);
+for (const reloadState of [1, 3, 'seek-feedback']) {
+  test(`reload at the finished server position advances from state ${reloadState} instead of looping`, async ({
+    page,
+  }) => {
+    await page.addInitScript(`window.__koalaWrappedState = ${JSON.stringify(reloadState)}`);
+    await page.route('**/iframe_api', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
+    );
+    await page.goto('/');
+    await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+    await page.waitForFunction(
+      () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
+    );
+    const roomId = page.url().split('/').at(-1)!;
+    await page.getByLabel('YouTube URL').fill(`https://youtu.be/${E2E_QUEUE_VIDEO_ID}`);
+    await page.getByRole('button', { name: 'Add to queue' }).click();
+    await page.getByRole('button', { name: 'Play', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+    expect((await command(page, roomId, 'player.seek', { position: 100 })).status).toBe(200);
 
-  const recoveredEnd = page.waitForResponse((response) => {
-    if (!response.url().endsWith('/commands') || response.request().method() !== 'POST') return false;
-    const body = response.request().postDataJSON();
-    return body.type === 'playback.ended' && body.payload.position === 100 && body.payload.duration === 100;
+    const recoveredEnd = page.waitForResponse((response) => {
+      if (!response.url().endsWith('/commands') || response.request().method() !== 'POST') return false;
+      const body = response.request().postDataJSON();
+      return body.type === 'playback.ended' && body.payload.position === 100 && body.payload.duration === 100;
+    });
+    await page.reload();
+    expect((await recoveredEnd).status()).toBe(200);
+    await expect(page.locator('.queue li')).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
+          return { videoId: player.videoId, playing: player.playCalls > 0 };
+        }),
+      )
+      .toEqual({ videoId: E2E_QUEUE_VIDEO_ID, playing: true });
+    expect(
+      await page.evaluate(
+        () => (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.currentTime,
+      ),
+    ).toBeLessThan(10);
   });
-  await page.reload();
-  expect((await recoveredEnd).status()).toBe(200);
-  await expect(page.locator('.queue li')).toHaveCount(0);
-  await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
-        return { videoId: player.videoId, playing: player.playCalls > 0 };
-      }),
-    )
-    .toEqual({ videoId: E2E_QUEUE_VIDEO_ID, playing: true });
-  expect(
-    await page.evaluate(
-      () => (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.currentTime,
-    ),
-  ).toBeLessThan(10);
-});
+}
 
 test('keyboard controls, manual resync, diagnostics download and reconnect stay usable', async ({ browser }) => {
   const context = await browser.newContext({ acceptDownloads: true });
@@ -467,7 +524,7 @@ test('legacy anonymous koala names keep their animal badge', async ({ page }) =>
   await expect(participant.locator('.avatar')).toContainText('🐨');
 });
 
-test('anonymous room synchronization and authoritative permissions', async ({ browser }) => {
+test('anonymous room persistence, shared sessions, idempotency and settings', async ({ browser }) => {
   const ownerContext = await browser.newContext();
   const memberContext = await browser.newContext();
   const thirdContext = await browser.newContext();
@@ -531,6 +588,22 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
   });
   expect(playbackSpeedBox.width).toBeGreaterThan(120);
   expect(playbackSpeedBox.width).toBeLessThan(240);
+  await Promise.all([ownerContext.close(), memberContext.close(), thirdContext.close()]);
+});
+
+test('personalized queue votes, mini-player and advancing pause positions', async ({ browser }) => {
+  const ownerContext = await browser.newContext();
+  const memberContext = await browser.newContext();
+  for (const context of [ownerContext, memberContext]) {
+    await context.route('**/iframe_api', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
+    );
+  }
+  const owner = await ownerContext.newPage();
+  await owner.goto('/');
+  await owner.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await expect(owner).toHaveURL(/\/room\/([A-Z2-7]{16})$/);
+  const roomId = owner.url().split('/').at(-1)!;
   const member = await memberContext.newPage();
   await member.goto(`/room/${roomId}`);
   await expect(member.locator('.room-header h1')).toBeVisible();
@@ -580,6 +653,26 @@ test('anonymous room synchronization and authoritative permissions', async ({ br
     return snapshot.playback.position as number;
   }, roomId);
   expect(pausedPosition).toBeGreaterThan(0.8);
+  await Promise.all([ownerContext.close(), memberContext.close()]);
+});
+
+test('authoritative permissions, owner protection and ban survive reload', async ({ browser }) => {
+  const ownerContext = await browser.newContext();
+  const memberContext = await browser.newContext();
+  const thirdContext = await browser.newContext();
+  for (const context of [ownerContext, memberContext, thirdContext]) {
+    await context.route('**/iframe_api', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
+    );
+  }
+  const owner = await ownerContext.newPage();
+  await owner.goto('/');
+  await owner.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await expect(owner).toHaveURL(/\/room\/([A-Z2-7]{16})$/);
+  const roomId = owner.url().split('/').at(-1)!;
+  const member = await memberContext.newPage();
+  await member.goto(`/room/${roomId}`);
+  await expect(member.locator('.room-header h1')).toBeVisible();
   await member.getByRole('button', { name: 'Play', exact: true }).click();
   await expect(member.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
   // Use a video outside the random initial-preset pool so duplicate rejection
@@ -688,14 +781,11 @@ test('mobile navigation and room empty states remain usable', async ({ browser }
   await context.close();
 });
 
-test('account room library, private invitations, transfer, sessions and deletion work end to end', async ({
-  browser,
-}) => {
+test('account room library, private invitations, transfer and room deletion work end to end', async ({ browser }) => {
   const suffix = `${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
   const ownerName = `owner_${suffix}`;
   const memberName = `member_${suffix}`;
   const password = 'very-secure-password';
-  const newPassword = 'an-even-better-password';
   const ownerContext = await browser.newContext();
   const memberContext = await browser.newContext();
   const owner = await ownerContext.newPage();
@@ -747,6 +837,21 @@ test('account room library, private invitations, transfer, sessions and deletion
   await member.getByRole('alertdialog').getByRole('button', { name: 'Delete room' }).click();
   await expect(member).toHaveURL(/\/rooms$/);
 
+  await ownerContext.close();
+  await memberContext.close();
+});
+
+test('account profile, password and deletion work end to end', async ({ browser }) => {
+  const ownerContext = await browser.newContext();
+  const owner = await ownerContext.newPage();
+  const password = 'a-good-test-password';
+  const newPassword = 'an-even-better-password';
+  await owner.goto('/register');
+  await owner.getByLabel('Username').fill(`profile_${randomUUID().slice(0, 8)}`);
+  await owner.getByLabel('Password').fill(password);
+  await owner.getByRole('button', { name: 'Create account' }).click();
+  await expect(owner).toHaveURL(/\/account$/);
+
   await owner.goto('/account');
   await owner.getByLabel('Display name').fill('Polished Koala');
   await owner.getByRole('button', { name: 'Save profile' }).click();
@@ -761,5 +866,4 @@ test('account room library, private invitations, transfer, sessions and deletion
   await expect(owner).toHaveURL(/\/$/);
 
   await ownerContext.close();
-  await memberContext.close();
 });

@@ -12,7 +12,7 @@ html {
   font-family: var(--font-sans);
   background: var(--surface-page);
   color: var(--text-primary);
-  scroll-behavior: smooth;
+  scroll-padding-top: 92px;
 }
 body {
   margin: 0;

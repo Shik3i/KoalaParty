@@ -64,20 +64,7 @@ var errStale = errors.New("stale revision")
 var errNoActiveMedia = errors.New("invalid player command without active media")
 
 func (a *application) roleAndAllowed(room, identity, cap string) (string, bool) {
-	var role string
-	if a.db.QueryRow("SELECT m.role FROM room_members m JOIN rooms r ON r.id=m.room_id WHERE m.room_id=? AND m.identity_id=? AND r.deleted_at IS NULL", room, identity).Scan(&role) != nil {
-		return "", false
-	}
-	if role == "owner" || role == "admin" {
-		return role, true
-	}
-	allowed := true
-	var override bool
-	e := a.db.QueryRow("SELECT allowed FROM room_permissions WHERE room_id=? AND identity_id=? AND permission=?", room, identity, cap).Scan(&override)
-	if e == nil {
-		allowed = override
-	}
-	return role, allowed
+	return roleAndAllowed(context.Background(), a.db, room, identity, cap)
 }
 func capFor(t string) string {
 	switch t {
@@ -123,12 +110,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		return snapshot{}, errors.New("invalid request ID")
 	}
 	cap := capFor(c.Type)
-	role, allowed := a.roleAndAllowed(room, p.IdentityID, cap)
-	if cap == "" || !allowed {
-		return snapshot{}, errDenied
-	}
-	management := strings.HasPrefix(cap, "members.") || strings.HasPrefix(cap, "room.")
-	if management && role == "member" {
+	if cap == "" {
 		return snapshot{}, errDenied
 	}
 	// A queued video is stored immediately with a placeholder title so the add is
@@ -175,6 +157,11 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		return snapshot{}, e
 	}
 	defer tx.Rollback()
+	role, allowed := roleAndAllowed(ctx, tx, room, p.IdentityID, cap)
+	management := strings.HasPrefix(cap, "members.") || strings.HasPrefix(cap, "room.")
+	if !allowed || (management && role == "member") {
+		return snapshot{}, errDenied
+	}
 	var current int64
 	if e = tx.QueryRow("SELECT revision FROM rooms WHERE id=? AND deleted_at IS NULL", room).Scan(&current); e != nil {
 		return snapshot{}, errDenied
@@ -532,10 +519,12 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			if !a.getPublicRooms() {
 				return snapshot{}, errors.New("public rooms are disabled")
 			}
+		}
+		if in.Visibility != "unlisted" {
 			var ownerAccount sql.NullString
 			_ = tx.QueryRow("SELECT i.account_id FROM rooms r JOIN identities i ON i.id=r.owner_identity_id WHERE r.id=?", room).Scan(&ownerAccount)
 			if !ownerAccount.Valid {
-				return snapshot{}, errors.New("public rooms require an account owner")
+				return snapshot{}, errors.New(in.Visibility + " rooms require an account owner")
 			}
 		}
 		_, e = tx.Exec("UPDATE rooms SET visibility=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", in.Visibility, room)
@@ -571,6 +560,14 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		var targetAccount sql.NullString
 		if e = tx.QueryRow(`SELECT i.account_id FROM room_members m JOIN identities i ON i.id=m.identity_id WHERE m.room_id=? AND m.identity_id=?`, room, in.IdentityID).Scan(&targetAccount); e != nil || !targetAccount.Valid {
 			return snapshot{}, errors.New("new owner must be an account-linked room member")
+		}
+		// Transfer retains the former owner as admin. Preserve their private-room
+		// eligibility once ownership no longer supplies it implicitly.
+		if _, e = tx.Exec(`INSERT INTO room_invites(id,room_id,account_id,created_by_identity_id)
+			SELECT ?,r.id,i.account_id,? FROM rooms r JOIN identities i ON i.id=r.owner_identity_id
+			WHERE r.id=? AND r.visibility='private' AND i.account_id IS NOT NULL
+			ON CONFLICT(room_id,account_id) DO NOTHING`, newID(10), p.IdentityID, room); e != nil {
+			return snapshot{}, e
 		}
 		if _, e = tx.Exec("UPDATE room_members SET role='admin' WHERE room_id=? AND identity_id=?", room, p.IdentityID); e == nil {
 			_, e = tx.Exec("UPDATE room_members SET role='owner' WHERE room_id=? AND identity_id=?", room, in.IdentityID)

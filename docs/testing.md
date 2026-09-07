@@ -7,7 +7,7 @@ Exact commands:
 ```sh
 cd backend && go vet ./... && go test -race -count=1 ./...
 cd frontend && npm run lint && npm run check && npm test -- --run && npm run build
-cd frontend && npx playwright install chromium && npm run test:e2e
+cd frontend && npx playwright install chromium firefox webkit && npm run test:e2e
 node --test scripts/*.test.mjs
 node scripts/verify-release.mjs v0.2.0
 docker compose build

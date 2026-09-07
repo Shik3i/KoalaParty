@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"sync"
 	"time"
@@ -195,8 +194,8 @@ func (a *application) enrichSegments(room, videoID string) {
 	// A panic in a bare goroutine would crash the whole process, unlike one inside an
 	// HTTP handler; never let background work take the server down.
 	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, `{"level":"error","message":"enrichSegments panic","room":%q,"error":"%v"}`+"\n", room, r)
+		if recover() != nil {
+			loggerWithWriter(a.logger).Error("enrichSegments panic", "room_hash", shortHash(room))
 		}
 	}()
 	if a.segments == nil || a.segments.has(videoID) {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { Play, Warning, Hourglass, SkipForward } from 'phosphor-svelte';
   import {
     isCurrentVideoError,
@@ -116,6 +116,8 @@
   let autoplayBlocked = $state(false);
   let correctedAt: number | null = null;
   let endedMediaId: string | null = null;
+  let initialLoadPosition: number | null = null;
+  let initialLoadRevision = 0;
   let handledSyncRequest = 0;
 
   function emitDiagnostic(event: string, details: Record<string, string | number | boolean | null> = {}) {
@@ -250,7 +252,7 @@
       )
         return;
       const state = player.getPlayerState?.();
-      if (state === PLAYING || state === PAUSED) return;
+      if (state === PLAYING || state === PAUSED || autoplayBlocked) return;
       emitDiagnostic('stalled', { reason, state: state ?? null });
       if (retryCount < 1) {
         retryCurrentVideo('start_watchdog');
@@ -311,6 +313,8 @@
     guard(3000);
     emitDiagnostic('retry', { reason, retryCount });
     const request = { videoId: lastVideo, startSeconds: Math.max(0, expectedPosition()) };
+    initialLoadPosition = request.startSeconds;
+    initialLoadRevision = playbackRevision;
     if (status === 'playing') {
       player.loadVideoById(request);
       scheduleAutoplayCheck();
@@ -603,6 +607,23 @@
       }
       return;
     }
+    // A load beyond the end can stay BUFFERING at zero indefinitely. The
+    // requested load anchor (not an ordinary seek) and matching metadata let
+    // us finish it before waiting for a stable timeline that never arrives.
+    if (
+      initialLoadPosition !== null &&
+      player.getVideoData?.()?.video_id === lastVideo &&
+      isWrappedEndedPlayback(status, t, initialLoadPosition, duration)
+    ) {
+      initialLoadPosition = null;
+      guard();
+      player.pauseVideo?.();
+      reportNaturalEnd(duration, duration, 'ended_after_reload');
+      return;
+    }
+    if (isStableTimelineState(state) && duration > 0 && player.getVideoData?.()?.video_id === lastVideo) {
+      initialLoadPosition = null;
+    }
     const playing = state === PLAYING;
     // SponsorBlock: while playing, jump over any segment the current time falls in.
     // Only viewers who may seek emit the skip; everyone else follows the broadcast
@@ -731,6 +752,7 @@
         lastMediaId = null;
         confirmedVideo = null;
         endedMediaId = null;
+        initialLoadPosition = null;
         previousTimelineState = null;
         timelineRecoveryUntil = 0;
         playerState = null;
@@ -782,6 +804,8 @@
       timelineRecoveryUntil = 0;
       guard(3000);
       const request = { videoId, startSeconds: target };
+      initialLoadPosition = target;
+      initialLoadRevision = playbackRevision;
       if (status === 'playing') {
         player.loadVideoById(request);
         scheduleAutoplayCheck();
@@ -795,6 +819,7 @@
       return;
     }
     // A confirmed change arrived: stop suppressing correction and realign now.
+    if (playbackRevision !== initialLoadRevision) initialLoadPosition = null;
     localSeekUntil = 0;
     applyRate();
     if (Math.abs(currentTime() - target) > DRIFT_MAX) {
@@ -815,12 +840,17 @@
     playerError = '';
   });
   $effect(() => {
+    ready;
     videoId;
+    mediaId;
+    playbackRevision;
     status;
     position;
     positionAt;
     rate;
-    sync();
+    // Diagnostics and local iframe state read inside sync must not turn a
+    // YouTube callback into another authoritative seek.
+    untrack(sync);
   });
   $effect(() => {
     if (syncRequest > handledSyncRequest) {

@@ -13,15 +13,12 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
 )
 
 type requestIDContextKey struct{}
-
-var roomPathPattern = regexp.MustCompile(`/rooms/[A-Z2-7]{16}`)
 
 type runtimeMetrics struct {
 	httpRequests       atomic.Uint64
@@ -115,13 +112,6 @@ func requestIDFromContext(ctx context.Context) string {
 	return ""
 }
 
-func safeRoute(path string) string {
-	if path == "" {
-		return "/"
-	}
-	return roomPathPattern.ReplaceAllString(path, "/rooms/:roomId")
-}
-
 func shortHash(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:6])
@@ -200,7 +190,7 @@ func requestLogging(logger *slog.Logger, metrics *runtimeMetrics, next http.Hand
 		logger.LogAttrs(r.Context(), level, "http request",
 			slog.String("request_id", id),
 			slog.String("method", r.Method),
-			slog.String("route", safeRoute(r.URL.Path)),
+			slog.String("route", r.Pattern),
 			slog.Int("status", status),
 			slog.Int("bytes", recorder.bytes),
 			slog.Int64("duration_ms", time.Since(started).Milliseconds()),

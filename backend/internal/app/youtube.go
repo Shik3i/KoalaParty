@@ -3,11 +3,9 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 )
@@ -41,8 +39,8 @@ func (a *application) enrichTitle(room, mediaID, videoID string) {
 	// entire process (unlike a panic inside an HTTP handler, which net/http
 	// recovers per-request). Never let background work take the server down.
 	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, `{"level":"error","message":"enrichTitle panic","room":%q,"error":"%v"}`+"\n", room, r)
+		if recover() != nil {
+			loggerWithWriter(a.logger).Error("enrichTitle panic", "room_hash", shortHash(room))
 		}
 	}()
 	if a.fetchTitle == nil {

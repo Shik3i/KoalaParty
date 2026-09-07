@@ -4,6 +4,29 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+### Security
+
+- Revoked existing room access after visibility changes, invitation removal, and friendship removal or blocking. Commands, WebSocket snapshots, room libraries, and previews now enforce current eligibility; admin roles do not bypass private or friends-only access.
+- Read command capabilities inside the command transaction, preventing a concurrent permission change from being bypassed by a stale authorization check.
+- Made invitation authorization and membership departure atomic with their database changes, including requests whose body arrives after an admin is demoted.
+- Rejected the E2E shutdown endpoint and relaxed test limits in production configuration.
+- Removed usernames, session hashes, arbitrary URL paths, and raw room identifiers from HTTP and metadata-panic logs.
+
+### Fixed
+
+- Recovered loads beyond a video's duration even when YouTube stays buffering at zero, without waiting for a stable playback state that never arrives.
+- Prevented local iframe state and diagnostic updates from retriggering authoritative synchronization and creating seek/buffering feedback loops.
+- Kept automatically scrolled controls below the sticky header and removed global smooth scrolling that could move controls during a click.
+- Kept the explicit **Autoplay blocked — play with sound** action visible when YouTube remains unstarted past the startup watchdog, instead of replacing it with a retry error.
+- Built each room snapshot in one read transaction so concurrent commands cannot mix room, playback, queue, and permission revisions.
+- Preserved the former owner's private-room invitation when ownership transfer retains their admin role.
+- Rejected account-only room visibility for anonymous owners so they cannot lock themselves out of their room.
+
+### Changed
+
+- Disabled Playwright retries in CI and split long independent lifecycle scenarios without removing assertions or raising timeouts.
+- Recorded the repository, security, playback, browser, and container audit in `docs/audit-2026-09-07.md`.
+
 ## [0.12.3] - 2026-09-07
 
 ### Changed

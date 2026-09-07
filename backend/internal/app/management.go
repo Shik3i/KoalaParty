@@ -31,13 +31,15 @@ func (a *application) myRooms(w http.ResponseWriter, r *http.Request, p principa
 		r.last_active_at,coalesce(media.title,''),playback.status
 		FROM rooms r
 		JOIN identities owner ON owner.id=r.owner_identity_id
+		JOIN identities i ON i.id=?
 		JOIN playback_states playback ON playback.room_id=r.id
 		LEFT JOIN media_items media ON media.id=playback.current_media_id
 		WHERE r.deleted_at IS NULL AND (owner.account_id=? OR EXISTS(
 			SELECT 1 FROM room_members rm JOIN identities member_identity ON member_identity.id=rm.identity_id
 			WHERE rm.room_id=r.id AND member_identity.account_id=?
 		))
-		ORDER BY r.last_active_at DESC`, p.AccountID, p.AccountID, p.AccountID, p.AccountID)
+		AND `+roomAccessSQL+`
+		ORDER BY r.last_active_at DESC`, p.AccountID, p.AccountID, p.IdentityID, p.AccountID, p.AccountID)
 	if err != nil {
 		problem(w, 500, "database_error", "Could not list rooms.")
 		return
@@ -77,8 +79,14 @@ func (a *application) deleteRoom(w http.ResponseWriter, r *http.Request, p princ
 
 func (a *application) leaveRoom(w http.ResponseWriter, r *http.Request, p principal) {
 	id := r.PathValue("roomId")
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		problem(w, 500, "database_error", "Could not leave room.")
+		return
+	}
+	defer tx.Rollback()
 	var role string
-	err := a.db.QueryRowContext(r.Context(), "SELECT role FROM room_members WHERE room_id=? AND identity_id=?", id, p.IdentityID).Scan(&role)
+	err = tx.QueryRowContext(r.Context(), "SELECT role FROM room_members WHERE room_id=? AND identity_id=?", id, p.IdentityID).Scan(&role)
 	if errors.Is(err, sql.ErrNoRows) {
 		problem(w, 404, "membership_not_found", "You are not a member of this room.")
 		return
@@ -91,7 +99,11 @@ func (a *application) leaveRoom(w http.ResponseWriter, r *http.Request, p princi
 		problem(w, 409, "ownership_transfer_required", "Transfer ownership or delete the room before leaving.")
 		return
 	}
-	if _, err = a.db.ExecContext(r.Context(), "DELETE FROM room_members WHERE room_id=? AND identity_id=?", id, p.IdentityID); err != nil {
+	if _, err = tx.ExecContext(r.Context(), "DELETE FROM room_members WHERE room_id=? AND identity_id=?", id, p.IdentityID); err != nil {
+		problem(w, 500, "database_error", "Could not leave room.")
+		return
+	}
+	if err = tx.Commit(); err != nil {
 		problem(w, 500, "database_error", "Could not leave room.")
 		return
 	}
@@ -101,13 +113,28 @@ func (a *application) leaveRoom(w http.ResponseWriter, r *http.Request, p princi
 
 func (a *application) roomInvites(w http.ResponseWriter, r *http.Request, p principal) {
 	room := r.PathValue("roomId")
-	role, _ := a.roleAndAllowed(room, p.IdentityID, "room.manage_invites")
+	var in struct {
+		Username string `json:"username"`
+	}
+	// Read a potentially slow body before locking the database, then authorize
+	// against the same transaction that reads or changes invitations.
+	if r.Method != http.MethodGet && !decode(w, r, &in) {
+		return
+	}
+	in.Username = strings.TrimSpace(in.Username)
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		problem(w, 500, "database_error", "Could not manage invitations.")
+		return
+	}
+	defer tx.Rollback()
+	role, _ := roleAndAllowed(r.Context(), tx, room, p.IdentityID, "room.manage_invites")
 	if role != "owner" && role != "admin" {
 		problem(w, 403, "permission_denied", "Only room managers can manage invitations.")
 		return
 	}
 	if r.Method == http.MethodGet {
-		rows, err := a.db.QueryContext(r.Context(), `SELECT a.username,i.created_at FROM room_invites i JOIN accounts a ON a.id=i.account_id WHERE i.room_id=? ORDER BY i.created_at`, room)
+		rows, err := tx.QueryContext(r.Context(), `SELECT a.username,i.created_at FROM room_invites i JOIN accounts a ON a.id=i.account_id WHERE i.room_id=? ORDER BY i.created_at`, room)
 		if err != nil {
 			problem(w, 500, "database_error", "Could not list invitations.")
 			return
@@ -129,19 +156,15 @@ func (a *application) roomInvites(w http.ResponseWriter, r *http.Request, p prin
 		writeJSON(w, 200, out)
 		return
 	}
-	var in struct {
-		Username string `json:"username"`
-	}
-	if !decode(w, r, &in) {
-		return
-	}
-	in.Username = strings.TrimSpace(in.Username)
 	var accountID string
-	if a.db.QueryRowContext(r.Context(), "SELECT id FROM accounts WHERE username=?", in.Username).Scan(&accountID) != nil {
+	if tx.QueryRowContext(r.Context(), "SELECT id FROM accounts WHERE username=?", in.Username).Scan(&accountID) != nil {
 		problem(w, 404, "account_not_found", "Account was not found.")
 		return
 	}
-	_, err := a.db.ExecContext(r.Context(), `INSERT INTO room_invites(id,room_id,account_id,created_by_identity_id) VALUES(?,?,?,?) ON CONFLICT(room_id,account_id) DO NOTHING`, newID(10), room, accountID, p.IdentityID)
+	_, err = tx.ExecContext(r.Context(), `INSERT INTO room_invites(id,room_id,account_id,created_by_identity_id) VALUES(?,?,?,?) ON CONFLICT(room_id,account_id) DO NOTHING`, newID(10), room, accountID, p.IdentityID)
+	if err == nil {
+		err = tx.Commit()
+	}
 	if err != nil {
 		problem(w, 500, "database_error", "Could not create invitation.")
 		return
@@ -151,12 +174,18 @@ func (a *application) roomInvites(w http.ResponseWriter, r *http.Request, p prin
 
 func (a *application) revokeInvite(w http.ResponseWriter, r *http.Request, p principal) {
 	room := r.PathValue("roomId")
-	role, _ := a.roleAndAllowed(room, p.IdentityID, "room.manage_invites")
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		problem(w, 500, "database_error", "Could not revoke invitation.")
+		return
+	}
+	defer tx.Rollback()
+	role, _ := roleAndAllowed(r.Context(), tx, room, p.IdentityID, "room.manage_invites")
 	if role != "owner" && role != "admin" {
 		problem(w, 403, "permission_denied", "Only room managers can manage invitations.")
 		return
 	}
-	result, err := a.db.ExecContext(r.Context(), "DELETE FROM room_invites WHERE room_id=? AND account_id=(SELECT id FROM accounts WHERE username=?)", room, r.PathValue("username"))
+	result, err := tx.ExecContext(r.Context(), "DELETE FROM room_invites WHERE room_id=? AND account_id=(SELECT id FROM accounts WHERE username=?)", room, r.PathValue("username"))
 	if err != nil {
 		problem(w, 500, "database_error", "Could not revoke invitation.")
 		return
@@ -165,6 +194,11 @@ func (a *application) revokeInvite(w http.ResponseWriter, r *http.Request, p pri
 		problem(w, 404, "invite_not_found", "Invitation was not found.")
 		return
 	}
+	if err = tx.Commit(); err != nil {
+		problem(w, 500, "database_error", "Could not revoke invitation.")
+		return
+	}
+	a.refreshRoomAccess(r.Context(), room)
 	w.WriteHeader(204)
 }
 

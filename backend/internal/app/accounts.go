@@ -253,6 +253,9 @@ func (a *application) friendAction(w http.ResponseWriter, r *http.Request, p pri
 			return
 		}
 	}
+	if action == "remove" || action == "block" {
+		a.refreshFriendRoomAccess(r.Context(), p.AccountID, target)
+	}
 	w.WriteHeader(204)
 }
 func (a *application) discover(w http.ResponseWriter, r *http.Request) {

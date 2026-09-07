@@ -87,6 +87,16 @@ func TestMyRoomsInvitationsOwnershipAndLifecycle(t *testing.T) {
 	if ownerID != memberP.IdentityID || oldRole != "admin" || newRole != "owner" {
 		t.Fatalf("transfer state owner=%q old=%q new=%q", ownerID, oldRole, newRole)
 	}
+	if _, err = a.joinAndSnapshot(t.Context(), room, owner); err != nil {
+		t.Fatalf("former private-room owner lost retained admin access: %v", err)
+	}
+	ownerLeave := httptest.NewRecorder()
+	r = authed("DELETE", "/api/rooms/"+room+"/membership", nil, memberCookie, memberP.CSRF)
+	r.SetPathValue("roomId", room)
+	a.requireAuth(a.leaveRoom)(ownerLeave, r)
+	if ownerLeave.Code != 409 {
+		t.Fatalf("new owner left room without transfer: %d %s", ownerLeave.Code, ownerLeave.Body.String())
+	}
 
 	leave := httptest.NewRecorder()
 	r = authed("DELETE", "/api/rooms/"+room+"/membership", nil, ownerCookie, owner.CSRF)

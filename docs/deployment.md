@@ -14,6 +14,8 @@
 
 Production mode fails before opening the database when secure cookies, exact HTTPS origins, durations, booleans, retention values, or trusted proxy networks are invalid. The example container binds only to loopback, runs without Linux capabilities, uses a read-only root filesystem, limits processes/memory/CPU, and rotates runtime logs.
 
+`KOALAPARTY_E2E=true` is rejected in production. It exposes a test shutdown route and relaxed fixture-creation limits, so use it only for isolated local test servers.
+
 `KOALAPARTY_TRUSTED_PROXIES=172.16.0.0/12` matches the common private Docker network range used by the shared Caddy setup. Narrow it to the actual `caddy_net` subnet after observing the immediate peer. Never use `0.0.0.0/0` or `::/0`.
 
 ## Backups and restore drills

@@ -105,7 +105,7 @@ func Run() error {
 	commandLimiter := newRateLimiter(180, time.Minute, a.trustedProxies)
 	registrationLimit := 5
 	roomCreationLimit := 30
-	e2eMode := strings.EqualFold(env("KOALAPARTY_E2E", "false"), "true")
+	e2eMode := cfg.e2e
 	if e2eMode {
 		registrationLimit = 100
 		roomCreationLimit = 100

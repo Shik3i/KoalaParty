@@ -274,6 +274,10 @@ func (h *hub) broadcast(room string, s snapshot) {
 	}
 	h.mu.RUnlock()
 	for _, c := range clients {
+		if s.allowedIdentities != nil && !s.allowedIdentities[c.identity] {
+			c.shutdown()
+			continue
+		}
 		c.enqueue(map[string]any{"type": "snapshot", "payload": s.forIdentity(c.identity)})
 	}
 }
@@ -422,6 +426,9 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 			return
 		}
 		p = current
+		if !roomAccess(r.Context(), a.db, room, p.IdentityID) {
+			return
+		}
 		if cmd.Type == "reaction.send" {
 			var payload struct {
 				Emoji string `json:"emoji"`
