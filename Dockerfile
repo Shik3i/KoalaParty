@@ -5,7 +5,7 @@ RUN npm install --global npm@12.0.1 && npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM --platform=$BUILDPLATFORM golang:1.26.8-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS backend
+FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine@sha256:cf6fca6641884b8433441b2b0652976f975e1d0fdd26d177eaaf8596087f3125 AS backend
 WORKDIR /src/backend
 ARG VERSION=dev
 ARG COMMIT=unknown
