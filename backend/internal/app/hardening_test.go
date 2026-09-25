@@ -237,7 +237,7 @@ func TestStaticCachePolicy(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "_app", "immutable", "app.hash.js"), []byte("js"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	handler := spaHandler(root)
+	handler := spaHandler(root, "")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/_app/immutable/app.hash.js", nil))
 	if got := response.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {

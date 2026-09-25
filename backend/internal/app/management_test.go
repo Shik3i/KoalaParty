@@ -33,7 +33,20 @@ func createTestRoom(t *testing.T, a *application, cookie *http.Cookie, p princip
 	}
 	var room map[string]string
 	_ = json.Unmarshal(w.Body.Bytes(), &room)
+	cueTestMedia(t, a, room["id"])
 	return room["id"]
+}
+
+// cueTestMedia reproduces a room with a paused video already cued, the state
+// most playback tests start from. Fresh rooms themselves start empty.
+func cueTestMedia(t *testing.T, a *application, room string) {
+	t.Helper()
+	if _, err := a.db.Exec("INSERT INTO media_items(id,provider,provider_media_id,title,thumbnail_url) VALUES('YTjNQXAC9IVRw','youtube','jNQXAC9IVRw','Me at the zoo','https://i.ytimg.com/vi/jNQXAC9IVRw/mqdefault.jpg') ON CONFLICT(provider,provider_media_id) DO NOTHING"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec("UPDATE playback_states SET current_media_id='YTjNQXAC9IVRw' WHERE room_id=?", room); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestMyRoomsInvitationsOwnershipAndLifecycle(t *testing.T) {

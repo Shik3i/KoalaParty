@@ -12,7 +12,7 @@ func TestMigrationFromEmptyDatabase(t *testing.T) {
 	}
 	defer db.Close()
 	var version int
-	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 8 {
+	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 9 {
 		t.Fatalf("migration version=%d err=%v", version, e)
 	}
 	var rateColumn int
@@ -44,6 +44,13 @@ func TestMigrationFromEmptyDatabase(t *testing.T) {
 	if e = db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='command_receipts'").Scan(&receipts); e != nil || receipts != 1 {
 		t.Fatalf("command receipt table missing: count=%d err=%v", receipts, e)
 	}
+	var launchColumns, skipVotes int
+	if e = db.QueryRow("SELECT (SELECT count(*) FROM pragma_table_info('rooms') WHERE name='name')+(SELECT count(*) FROM pragma_table_info('room_queue_items') WHERE name='start_seconds')").Scan(&launchColumns); e != nil || launchColumns != 2 {
+		t.Fatalf("launch polish columns missing: count=%d err=%v", launchColumns, e)
+	}
+	if e = db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='skip_votes'").Scan(&skipVotes); e != nil || skipVotes != 1 {
+		t.Fatalf("skip vote table missing: count=%d err=%v", skipVotes, e)
+	}
 }
 
 func TestReportLimitMigrationResolvesLegacyDuplicates(t *testing.T) {
@@ -55,7 +62,10 @@ func TestReportLimitMigrationResolvesLegacyDuplicates(t *testing.T) {
 	if _, err = db.Exec(`
 		DROP INDEX room_reports_pending_reporter_idx;
 		DROP TABLE command_receipts;
-		DELETE FROM schema_migrations WHERE version IN (7, 8);
+		DROP TABLE skip_votes;
+		ALTER TABLE rooms DROP COLUMN name;
+		ALTER TABLE room_queue_items DROP COLUMN start_seconds;
+		DELETE FROM schema_migrations WHERE version IN (7, 8, 9);
 		INSERT INTO identities(id,secret_hash,display_name,avatar_seed) VALUES('owner','hash','Owner','owner');
 		INSERT INTO rooms(id,owner_identity_id) VALUES('AAAAAAAAAAAAAAAA','owner');
 		INSERT INTO room_reports(id,room_id,reporter_identity_id,reason) VALUES

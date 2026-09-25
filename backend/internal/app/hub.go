@@ -21,6 +21,7 @@ type client struct {
 	done         chan struct{}
 	closeOnce    sync.Once
 	lastReaction time.Time
+	lastChat     time.Time
 	commandCount int
 	commandReset time.Time
 	logger       *slog.Logger
@@ -96,6 +97,10 @@ type hub struct {
 	rooms           map[string]map[*client]struct{}
 	commandBuckets  map[string]rateBucket
 	reactionBuckets map[string]rateBucket
+	chatBuckets     map[string]rateBucket
+	presenceBuckets map[string]rateBucket
+	chats           map[string][]chatMessage
+	presence        map[string]map[string]string
 	metrics         *runtimeMetrics
 }
 
@@ -121,6 +126,10 @@ func newHub(metrics ...*runtimeMetrics) *hub {
 		rooms:           map[string]map[*client]struct{}{},
 		commandBuckets:  map[string]rateBucket{},
 		reactionBuckets: map[string]rateBucket{},
+		chatBuckets:     map[string]rateBucket{},
+		presenceBuckets: map[string]rateBucket{},
+		chats:           map[string][]chatMessage{},
+		presence:        map[string]map[string]string{},
 		metrics:         runtime,
 	}
 }
@@ -169,8 +178,14 @@ func (h *hub) remove(room string, c *client) bool {
 			break
 		}
 	}
+	if lastForIdentity && h.presence[room] != nil {
+		delete(h.presence[room], c.identity)
+	}
 	if len(h.rooms[room]) == 0 {
+		// Ephemeral room state disappears with the last viewer.
 		delete(h.rooms, room)
+		delete(h.chats, room)
+		delete(h.presence, room)
 	}
 	return lastForIdentity
 }
@@ -366,6 +381,8 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 		a.logger.Info("websocket connected", "room_hash", shortHash(room), "identity_hash", shortHash(p.IdentityID))
 	}
 	go c.writePump()
+	c.enqueue(map[string]any{"type": "chat.history", "messages": a.hub.chatHistory(room)})
+	c.enqueue(map[string]any{"type": "presence.all", "states": a.hub.presenceStates(room)})
 	if refreshed, snapshotErr := a.snapshot(r.Context(), room, p.IdentityID); snapshotErr == nil {
 		s = refreshed
 	}
@@ -429,6 +446,14 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 		if !roomAccess(r.Context(), a.db, room, p.IdentityID) {
 			return
 		}
+		if cmd.Type == "chat.send" {
+			a.handleChat(r.Context(), c, room, p, cmd)
+			continue
+		}
+		if cmd.Type == "presence.state" {
+			a.handlePresence(c, room, p, cmd)
+			continue
+		}
 		if cmd.Type == "reaction.send" {
 			var payload struct {
 				Emoji string `json:"emoji"`
@@ -455,15 +480,7 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 		}
 		s, e = a.applyCommand(r.Context(), room, p, cmd)
 		if e != nil {
-			code := commandErrorCode(e)
-			message := "Room command failed."
-			if code == "stale_revision" {
-				message = "Room state changed; use the latest snapshot."
-			} else if code == "permission_denied" {
-				message = "The server denied this room action."
-			} else if code == "request_id_conflict" {
-				message = "Request ID was already used for another command."
-			}
+			_, code, message := commandProblem(e)
 			c.enqueue(map[string]any{"type": "error", "requestId": cmd.RequestID, "code": code, "message": message})
 			if a.metrics != nil {
 				a.metrics.commandsRejected.Add(1)

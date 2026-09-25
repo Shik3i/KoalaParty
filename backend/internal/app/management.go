@@ -22,7 +22,7 @@ func (a *application) myRooms(w http.ResponseWriter, r *http.Request, p principa
 		return
 	}
 	rows, err := a.db.QueryContext(r.Context(), `
-		SELECT r.id,r.visibility,
+		SELECT r.id,r.name,r.visibility,
 			CASE WHEN owner.account_id=? THEN 'owner' ELSE coalesce((
 				SELECT rm.role FROM room_members rm JOIN identities member_identity ON member_identity.id=rm.identity_id
 				WHERE rm.room_id=r.id AND member_identity.account_id=?
@@ -48,11 +48,12 @@ func (a *application) myRooms(w http.ResponseWriter, r *http.Request, p principa
 	out := []map[string]any{}
 	for rows.Next() {
 		var id, visibility, role, lastActive, title, status string
-		if err = rows.Scan(&id, &visibility, &role, &lastActive, &title, &status); err != nil {
+		var name sql.NullString
+		if err = rows.Scan(&id, &name, &visibility, &role, &lastActive, &title, &status); err != nil {
 			problem(w, 500, "database_error", "Could not list rooms.")
 			return
 		}
-		out = append(out, map[string]any{"id": id, "label": roomLabel(id), "visibility": visibility, "role": role, "lastActiveAt": lastActive, "title": title, "status": status, "participants": a.hub.activeCount(id)})
+		out = append(out, map[string]any{"id": id, "label": displayLabel(id, name), "visibility": visibility, "role": role, "lastActiveAt": lastActive, "title": title, "status": status, "participants": a.hub.activeCount(id)})
 	}
 	if err = rows.Err(); err != nil {
 		problem(w, 500, "database_error", "Could not list rooms.")
@@ -202,17 +203,16 @@ func (a *application) revokeInvite(w http.ResponseWriter, r *http.Request, p pri
 	w.WriteHeader(204)
 }
 
+// accountProfile changes the display name. Anonymous identities may rename
+// themselves too; friends should not have to guess who "Bamboo Flamingo" is.
 func (a *application) accountProfile(w http.ResponseWriter, r *http.Request, p principal) {
-	if !requireAccount(w, p) {
-		return
-	}
 	var in struct {
 		DisplayName string `json:"displayName"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	in.DisplayName = strings.TrimSpace(in.DisplayName)
+	in.DisplayName = cleanName(in.DisplayName)
 	nameLength := utf8.RuneCountInString(in.DisplayName)
 	if nameLength < 1 || nameLength > 32 {
 		problem(w, 400, "invalid_display_name", "Display name must be 1 to 32 characters.")
@@ -223,6 +223,11 @@ func (a *application) accountProfile(w http.ResponseWriter, r *http.Request, p p
 		return
 	}
 	p.DisplayName = in.DisplayName
+	for _, room := range a.hub.roomsForIdentity(p.IdentityID) {
+		if s, err := a.snapshot(r.Context(), room, p.IdentityID); err == nil {
+			a.hub.broadcast(room, s)
+		}
+	}
 	writeJSON(w, 200, p)
 }
 
