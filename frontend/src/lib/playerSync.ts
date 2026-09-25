@@ -183,8 +183,10 @@ export function playerErrorMessage(code: number): string {
   }
 }
 
+// Code 2 ("invalid parameter") is retried once too: the server only accepts
+// well-formed video IDs, so it almost always comes from an interrupted load.
 export function isRetryablePlayerError(code: number): boolean {
-  return code === 0 || code === 5 || ![2, 100, 101, 150, 153].includes(code);
+  return code === 0 || code === 2 || code === 5 || ![100, 101, 150, 153].includes(code);
 }
 
 export function timelineJump(
@@ -196,4 +198,42 @@ export function timelineJump(
 ): number {
   const naturalAdvance = playing ? Math.max(0, elapsedSeconds) * Math.max(0, playbackRate || 1) : 0;
   return currentTime - previousTime - naturalAdvance;
+}
+
+// Drift correction tiers. A hard drift is realigned at once. Smaller drifts while
+// playing are only corrected when they persist, and not again during a cooldown,
+// because every seek briefly buffers and could otherwise cause a seek loop. A
+// paused player can be aligned precisely at no cost, so everyone resumes from the
+// same frame.
+export const DRIFT_HARD_SECONDS = 1.8;
+export const DRIFT_SOFT_SECONDS = 0.5;
+export const DRIFT_PAUSED_SECONDS = 0.3;
+export const DRIFT_SOFT_SUSTAIN_MS = 2_000;
+export const DRIFT_SOFT_COOLDOWN_MS = 15_000;
+
+export type DriftAction = 'none' | 'correct';
+
+export function driftAction(options: {
+  drift: number;
+  playing: boolean;
+  now: number;
+  softSince: number | null;
+  lastSoftCorrection: number;
+}): DriftAction {
+  const size = Math.abs(options.drift);
+  if (size > DRIFT_HARD_SECONDS) return 'correct';
+  if (!options.playing) return size > DRIFT_PAUSED_SECONDS ? 'correct' : 'none';
+  if (size <= DRIFT_SOFT_SECONDS || options.softSince === null) return 'none';
+  if (options.now - options.softSince < DRIFT_SOFT_SUSTAIN_MS) return 'none';
+  return options.now - options.lastSoftCorrection >= DRIFT_SOFT_COOLDOWN_MS ? 'correct' : 'none';
+}
+
+// A seek while playing lands behind its target by the time YouTube needs to
+// buffer. After each correction the residual drift is fed back so the next seek
+// aims that much ahead (damped and bounded, so noise cannot run away).
+export const MAX_SEEK_LEAD_SECONDS = 1.5;
+export function nextSeekLead(currentLead: number, residualDrift: number): number {
+  if (!Number.isFinite(residualDrift) || Math.abs(residualDrift) > 3) return currentLead;
+  const next = currentLead - residualDrift * 0.7;
+  return Math.min(MAX_SEEK_LEAD_SECONDS, Math.max(0, Math.round(next * 100) / 100));
 }

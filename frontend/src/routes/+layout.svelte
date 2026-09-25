@@ -50,23 +50,6 @@
 <svelte:head>
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f2f3e9" />
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d1b15" />
-  <meta property="og:type" content="website" />
-  <meta property="og:site_name" content="KoalaParty" />
-  <meta property="og:title" content="KoalaParty — Watch YouTube together privately" />
-  <meta property="og:image" content="/icons/koalaparty-icon.png" />
-  <meta property="og:image:alt" content="KoalaParty koala mascot holding a shared video player" />
-  <meta
-    property="og:description"
-    content="Synchronized YouTube watch parties with a shared queue — no accounts, ads, KoalaParty analytics, or fingerprinting."
-  />
-  <meta name="twitter:card" content="summary" />
-  <meta name="twitter:title" content="KoalaParty — Watch YouTube together privately" />
-  <meta name="twitter:image" content="/icons/koalaparty-icon.png" />
-  <meta name="twitter:image:alt" content="KoalaParty koala mascot holding a shared video player" />
-  <meta
-    name="twitter:description"
-    content="Synchronized YouTube watch parties with a shared queue — no accounts, ads, KoalaParty analytics, or fingerprinting."
-  />
 </svelte:head>
 <svelte:window onscroll={() => (compactHeader = window.scrollY > 28)} />
 <a class="skip" href="#main">Skip to content</a>

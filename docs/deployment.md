@@ -12,6 +12,8 @@
 8. Start with `docker compose pull && docker compose up -d`.
 9. Verify `/api/health`, `/api/ready`, `/api/version`, WebSocket upgrades, the persistent volume, and the manual two-client YouTube test through `https://party.koalastuff.net`.
 
+The first entry of `KOALAPARTY_TRUSTED_ORIGINS` is the public origin used for absolute link-preview images, so invite links render a card in chat apps. Set `KOALAPARTY_YOUTUBE_API_KEY` to enable in-app search and playlist import; without it viewers paste links. The installed PWA registers as a share target, so on Android "Share → KoalaParty" from the YouTube app queues a video directly.
+
 Production mode fails before opening the database when secure cookies, exact HTTPS origins, durations, booleans, retention values, or trusted proxy networks are invalid. The example container binds only to loopback, runs without Linux capabilities, uses a read-only root filesystem, limits processes/memory/CPU, and rotates runtime logs.
 
 `KOALAPARTY_E2E=true` is rejected in production. It exposes a test shutdown route and relaxed fixture-creation limits, so use it only for isolated local test servers.

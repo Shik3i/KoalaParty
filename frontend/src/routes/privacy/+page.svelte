@@ -70,6 +70,12 @@
       Emoji reactions are broadcast live to connected room participants, rate-limited and discarded immediately. They
       are not stored in room activity or the database.
     </p>
+    <p>
+      Room chat messages and player presence (for example “buffering” or “needs a tap for sound”) are relayed to the
+      people connected to the same room. The server keeps at most the last 60 chat messages in memory so people who join
+      can catch up; they are deleted as soon as the last person leaves the room or the server restarts. Chat is never
+      written to the database, logs or room activity.
+    </p>
   </section>
 
   <section>
@@ -103,7 +109,8 @@
     <p>
       Interface assets are hosted locally. When you open a room, KoalaParty loads YouTube's privacy-enhanced embedded
       player and thumbnails from <code>i.ytimg.com</code>, <code>youtube.com</code> and
-      <code>youtube-nocookie.com</code>, and a small notice next to the player states this.
+      <code>youtube-nocookie.com</code> as soon as the room plays a video, and a short notice below the player states this.
+      An empty room does not contact YouTube.
     </p>
     <p>
       Google or YouTube may then receive your IP address, device and browser information, referrer, request time and
@@ -116,6 +123,12 @@
       video's title. This is a server-to-YouTube request: it reveals the video ID and the server's IP address, never
       your browser or IP. Operators can disable it entirely with <code>KOALAPARTY_YOUTUBE_METADATA=false</code>, in
       which case titles fall back to the video ID.
+    </p>
+    <p>
+      If the operator enables in-app search, search terms and playlist IDs you enter are sent from the server to the
+      YouTube Data API to find videos. The request comes from the server, not from your browser, and is not linked to
+      your identity; results are cached in server memory for 15 minutes. Without this configuration, no such request is
+      made.
     </p>
     <p>
       When SponsorBlock is enabled for a room, the server also fetches skip segments for the current video from

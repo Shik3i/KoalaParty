@@ -29,6 +29,7 @@ type application struct {
 	metrics        *runtimeMetrics
 	cookieSecure   bool
 	trustedOrigins map[string]bool
+	youtube        *youtubeAPI
 	trustedProxies []*net.IPNet
 
 	// fetchTitle resolves a human-readable YouTube title for a video ID. It is
@@ -92,6 +93,7 @@ func Run() error {
 	if cfg.youtubeMetadata {
 		a.fetchTitle = fetchYouTubeTitle
 	}
+	a.youtube = newYouTubeAPI(cfg.youtubeAPIKey)
 	if cfg.sponsorBlock {
 		a.segments = newSegmentCache(fetchSponsorSegments)
 	}
@@ -116,6 +118,11 @@ func Run() error {
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		info := CurrentBuildInformation()
 		writeJSON(w, 200, map[string]string{"status": "ok", "version": info.Version})
+	})
+	// Clock probe for client-side latency and clock-offset estimation.
+	mux.HandleFunc("GET /api/time", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, 200, map[string]int64{"now": time.Now().UnixMilli()})
 	})
 	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, CurrentBuildInformation()) })
 	mux.HandleFunc("GET /api/ready", func(w http.ResponseWriter, _ *http.Request) {
@@ -161,6 +168,9 @@ func Run() error {
 	mux.HandleFunc("GET /api/rooms/{roomId}/ws", a.requireAuth(a.websocket))
 	mux.HandleFunc("POST /api/rooms/{roomId}/reports", reportLimiter.wrap(a.requireAuth(a.report)))
 	mux.HandleFunc("GET /api/discover", a.discover)
+	searchLimiter := newRateLimiter(40, time.Minute, a.trustedProxies)
+	mux.HandleFunc("GET /api/youtube/search", searchLimiter.wrap(a.requireAuth(a.youtubeSearch)))
+	mux.HandleFunc("GET /api/youtube/playlist", searchLimiter.wrap(a.requireAuth(a.youtubePlaylist)))
 	mux.HandleFunc("GET /api/admin/stats", a.requireAdmin(a.adminStats))
 	mux.HandleFunc("GET /api/admin/metrics", a.requireAdmin(a.adminMetrics))
 	mux.HandleFunc("GET /api/admin/settings", a.requireAdmin(a.adminSettings))
@@ -169,7 +179,7 @@ func Run() error {
 	mux.HandleFunc("POST /api/admin/reports/{reportId}/resolve", a.requireAdmin(a.resolveReport))
 	mux.HandleFunc("POST /api/admin/reports/{reportId}/delist", a.requireAdmin(a.delistReport))
 	webRoot := cfg.webRoot
-	mux.Handle("/", spaHandler(webRoot))
+	mux.Handle("/", spaHandler(webRoot, cfg.publicOrigin))
 	maintenanceCtx, cancelMaintenance := context.WithCancel(context.Background())
 	defer cancelMaintenance()
 	go a.maintenanceLoop(maintenanceCtx)
@@ -214,7 +224,31 @@ func (a *application) sessionBootstrap(next http.HandlerFunc) http.HandlerFunc {
 		next(w, r)
 	}
 }
-func spaHandler(root string) http.Handler {
+
+// Invite links are pasted into chat apps whose crawlers do not run JavaScript,
+// so link-preview metadata lives in the static index.html. Its image URL must be
+// absolute, and room links get an invitation instead of the generic tagline.
+// Room contents are never disclosed in previews.
+const (
+	defaultPreviewTitle       = "KoalaParty — Watch YouTube together privately"
+	defaultPreviewDescription = "Synchronized YouTube watch parties with a shared queue and chat — no accounts, ads, KoalaParty analytics, or fingerprinting."
+	roomPreviewTitle          = "You're invited to a KoalaParty 🎉"
+	roomPreviewDescription    = "Join the watch party: synchronized YouTube with friends, a shared queue and live chat. No account or install needed."
+)
+
+func renderIndex(body []byte, path, publicOrigin string) []byte {
+	page := string(body)
+	if publicOrigin != "" {
+		page = strings.ReplaceAll(page, `content="/og-image.jpg"`, `content="`+publicOrigin+`/og-image.jpg"`)
+	}
+	if strings.HasPrefix(path, "/room/") {
+		page = strings.ReplaceAll(page, `content="`+defaultPreviewTitle+`"`, `content="`+roomPreviewTitle+`"`)
+		page = strings.ReplaceAll(page, `content="`+defaultPreviewDescription+`"`, `content="`+roomPreviewDescription+`"`)
+	}
+	return []byte(page)
+}
+
+func spaHandler(root, publicOrigin string) http.Handler {
 	files := http.FileServer(http.Dir(root))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
@@ -235,6 +269,11 @@ func spaHandler(root string) http.Handler {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-cache")
+		if body, e := os.ReadFile(filepath.Join(root, "index.html")); e == nil {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write(renderIndex(body, r.URL.Path, publicOrigin))
+			return
+		}
 		clone := r.Clone(r.Context())
 		clone.URL.Path = "/"
 		files.ServeHTTP(w, clone)

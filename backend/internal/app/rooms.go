@@ -17,7 +17,7 @@ import (
 
 var youtubeID = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
 var roomIDPattern = regexp.MustCompile(`^[A-Z2-7]{16}$`)
-var memberCapabilities = []string{"playback.play_pause", "playback.seek", "media.play_now", "queue.add", "queue.remove", "queue.reorder", "queue.skip", "queue.vote"}
+var memberCapabilities = []string{"playback.play_pause", "playback.seek", "media.play_now", "queue.add", "queue.remove", "queue.reorder", "queue.skip", "queue.vote", "chat.send"}
 
 const (
 	maxRoomMembers = 100
@@ -36,6 +36,8 @@ type queueItem struct {
 	Media    media    `json:"media"`
 	Votes    int      `json:"votes"`
 	Voted    bool     `json:"voted"`
+	AddedBy  string   `json:"addedBy"`
+	Start    float64  `json:"start"`
 	voterIDs []string `json:"-"`
 }
 type member struct {
@@ -54,6 +56,12 @@ type playback struct {
 	Segments  []sponsorSegment `json:"segments"`
 	Revision  int64            `json:"revision"`
 	UpdatedAt string           `json:"updatedAt"`
+	// SkipVotes counts votes to skip the current video; SkipNeeded is the
+	// majority of connected people required. SkipVoted is personalized.
+	SkipVotes  int      `json:"skipVotes"`
+	SkipNeeded int      `json:"skipNeeded"`
+	SkipVoted  bool     `json:"skipVoted"`
+	skipVoters []string `json:"-"`
 }
 type event struct {
 	ID        string         `json:"id"`
@@ -77,12 +85,17 @@ type snapshot struct {
 	Events             []event     `json:"events"`
 	Revision           int64       `json:"revision"`
 	PublicRoomsEnabled bool        `json:"publicRoomsEnabled"`
-	allowedIdentities  map[string]bool
+	SearchEnabled      bool        `json:"searchEnabled"`
+	// ServerTime is the server clock (Unix ms) at which Playback.Position was
+	// extrapolated, so clients can anchor it independent of network latency.
+	ServerTime        int64 `json:"serverTime"`
+	allowedIdentities map[string]bool
 }
 
 func (s snapshot) forIdentity(identity string) snapshot {
 	personalized := s
 	personalized.Me = identity
+	personalized.Playback.SkipVoted = contains(s.Playback.skipVoters, identity)
 	if len(s.Queue) == 0 {
 		return personalized
 	}
@@ -109,6 +122,14 @@ func newID(bytes int) string {
 	}
 	return strings.TrimRight(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b), "=")
 }
+
+// displayLabel is the owner-chosen room name, or the generated label.
+func displayLabel(id string, name sql.NullString) string {
+	if name.Valid && name.String != "" {
+		return name.String
+	}
+	return roomLabel(id)
+}
 func roomLabel(id string) string {
 	var n uint64
 	for _, c := range []byte(id) {
@@ -126,18 +147,13 @@ func (a *application) createRoom(w http.ResponseWriter, r *http.Request, p princ
 		return
 	}
 	defer tx.Rollback()
-	preset := presetVideos[pickPreset(id)]
-	presetMediaID := "YT" + preset.ID
 	_, e = tx.Exec("INSERT INTO rooms(id,owner_identity_id) VALUES(?,?)", id, p.IdentityID)
 	if e == nil {
 		_, e = tx.Exec("INSERT INTO room_members(room_id,identity_id,role) VALUES(?,?,'owner')", id, p.IdentityID)
 	}
 	if e == nil {
-		_, e = tx.Exec("INSERT INTO media_items(id,provider,provider_media_id,title,thumbnail_url) VALUES(?,'youtube',?,?,?) ON CONFLICT(provider,provider_media_id) DO UPDATE SET title=excluded.title", presetMediaID, preset.ID, preset.Title, "https://i.ytimg.com/vi/"+preset.ID+"/mqdefault.jpg")
-	}
-	if e == nil {
-		// A fresh room starts with a preset cued (paused) so the player is never blank.
-		_, e = tx.Exec("INSERT INTO playback_states(room_id,current_media_id,status) VALUES(?,?,'paused')", id, presetMediaID)
+		// A fresh room starts empty; the first added video starts automatically.
+		_, e = tx.Exec("INSERT INTO playback_states(room_id,status) VALUES(?,'paused')", id)
 	}
 	if e == nil {
 		e = a.insertEventTx(tx, id, p.IdentityID, "room.created", map[string]any{})
@@ -150,7 +166,6 @@ func (a *application) createRoom(w http.ResponseWriter, r *http.Request, p princ
 		problem(w, 500, "database_error", "Could not create room.")
 		return
 	}
-	go a.enrichTitle(id, presetMediaID, preset.ID)
 	writeJSON(w, 201, map[string]string{"id": id, "label": roomLabel(id)})
 }
 func (a *application) roomSnapshot(w http.ResponseWriter, r *http.Request, p principal) {
@@ -182,13 +197,14 @@ func (a *application) roomPreviews(w http.ResponseWriter, r *http.Request, p pri
 		}
 		seen[id] = true
 		var title, thumbnail, status, updatedAt string
+		var name sql.NullString
 		var position, playbackRate float64
-		err := a.db.QueryRowContext(r.Context(), `SELECT coalesce(m.title,''),coalesce(m.thumbnail_url,''),p.status,p.position_seconds,p.playback_rate,p.updated_at
+		err := a.db.QueryRowContext(r.Context(), `SELECT r.name,coalesce(m.title,''),coalesce(m.thumbnail_url,''),p.status,p.position_seconds,p.playback_rate,p.updated_at
 			FROM rooms r JOIN identities i ON i.id=? JOIN playback_states p ON p.room_id=r.id LEFT JOIN media_items m ON m.id=p.current_media_id
 			WHERE r.id=? AND r.deleted_at IS NULL AND EXISTS (
 				SELECT 1 FROM room_members rm JOIN identities i ON i.id=rm.identity_id
 				WHERE rm.room_id=r.id AND (i.id=? OR (i.account_id IS NOT NULL AND i.account_id=?))
-			) AND `+roomAccessSQL, p.IdentityID, id, p.IdentityID, p.AccountID).Scan(&title, &thumbnail, &status, &position, &playbackRate, &updatedAt)
+			) AND `+roomAccessSQL, p.IdentityID, id, p.IdentityID, p.AccountID).Scan(&name, &title, &thumbnail, &status, &position, &playbackRate, &updatedAt)
 		if err != nil {
 			continue
 		}
@@ -197,7 +213,7 @@ func (a *application) roomPreviews(w http.ResponseWriter, r *http.Request, p pri
 				position += time.Since(updated.UTC()).Seconds() * playbackRate
 			}
 		}
-		out = append(out, map[string]any{"id": id, "label": roomLabel(id), "title": title, "thumbnail": thumbnail, "status": status, "position": position, "participants": a.hub.activeCount(id)})
+		out = append(out, map[string]any{"id": id, "label": displayLabel(id, name), "title": title, "thumbnail": thumbnail, "status": status, "position": position, "participants": a.hub.activeCount(id)})
 	}
 	writeJSON(w, 200, out)
 }
@@ -297,16 +313,18 @@ func (a *application) joinAndSnapshot(ctx context.Context, id string, p principa
 	return a.snapshot(ctx, id, p.IdentityID)
 }
 func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, error) {
-	s := snapshot{ID: id, Label: roomLabel(id), Me: me, Members: []member{}, Queue: []queueItem{}, History: []media{}, Events: []event{}, PublicRoomsEnabled: a.getPublicRooms()}
+	s := snapshot{ID: id, Label: roomLabel(id), Me: me, Members: []member{}, Queue: []queueItem{}, History: []media{}, Events: []event{}, PublicRoomsEnabled: a.getPublicRooms(), SearchEnabled: a.youtube != nil}
 	tx, e := a.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if e != nil {
 		return s, e
 	}
 	defer tx.Rollback()
 	s.allowedIdentities = map[string]bool{}
-	if e := tx.QueryRowContext(ctx, "SELECT visibility,revision,queue_loop,sponsorblock_enabled FROM rooms WHERE id=?", id).Scan(&s.Visibility, &s.Revision, &s.QueueLoop, &s.SponsorBlock); e != nil {
+	var name sql.NullString
+	if e := tx.QueryRowContext(ctx, "SELECT visibility,revision,queue_loop,sponsorblock_enabled,name FROM rooms WHERE id=?", id).Scan(&s.Visibility, &s.Revision, &s.QueueLoop, &s.SponsorBlock, &name); e != nil {
 		return s, e
 	}
+	s.Label = displayLabel(id, name)
 	rows, e := tx.QueryContext(ctx, "SELECT i.id,i.display_name,m.role,i.account_id,"+roomAccessSQL+" FROM room_members m JOIN identities i ON i.id=m.identity_id JOIN rooms r ON r.id=m.room_id WHERE m.room_id=? ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,i.display_name", id)
 	if e != nil {
 		return s, e
@@ -358,14 +376,14 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 		return s, e
 	}
 	permissionRows.Close()
-	q, e := tx.QueryContext(ctx, `SELECT q.id,q.position,m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,''),count(v.identity_id),coalesce(group_concat(v.identity_id, char(31)),'') FROM room_queue_items q JOIN media_items m ON m.id=q.media_id LEFT JOIN queue_votes v ON v.queue_item_id=q.id AND v.room_id=q.room_id WHERE q.room_id=? GROUP BY q.id ORDER BY count(v.identity_id) DESC,q.position`, id)
+	q, e := tx.QueryContext(ctx, `SELECT q.id,q.position,m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,''),count(v.identity_id),coalesce(group_concat(v.identity_id, char(31)),''),coalesce(ai.display_name,''),q.start_seconds FROM room_queue_items q JOIN media_items m ON m.id=q.media_id LEFT JOIN identities ai ON ai.id=q.added_by_identity_id LEFT JOIN queue_votes v ON v.queue_item_id=q.id AND v.room_id=q.room_id WHERE q.room_id=? GROUP BY q.id ORDER BY count(v.identity_id) DESC,q.position`, id)
 	if e != nil {
 		return s, e
 	}
 	for q.Next() {
 		var x queueItem
 		var voterIDs string
-		if e = q.Scan(&x.ID, &x.Position, &x.Media.ID, &x.Media.ProviderID, &x.Media.Title, &x.Media.Thumbnail, &x.Votes, &voterIDs); e != nil {
+		if e = q.Scan(&x.ID, &x.Position, &x.Media.ID, &x.Media.ProviderID, &x.Media.Title, &x.Media.Thumbnail, &x.Votes, &voterIDs, &x.AddedBy, &x.Start); e != nil {
 			q.Close()
 			return s, e
 		}
@@ -411,7 +429,24 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 	// Always emit an array, never null: a nil slice would marshal to JSON null and
 	// crash the client's segment filter when SponsorBlock is on but nothing is cached.
 	s.Playback.Segments = []sponsorSegment{}
+	s.Playback.skipVoters = []string{}
+	s.Playback.SkipNeeded = skipVotesNeeded(len(activeIdentities))
 	if mid.Valid {
+		voterRows, voterErr := tx.QueryContext(ctx, "SELECT identity_id FROM skip_votes WHERE room_id=? AND media_id=?", id, mid.String)
+		if voterErr != nil {
+			return s, voterErr
+		}
+		for voterRows.Next() {
+			var voter string
+			if e = voterRows.Scan(&voter); e != nil {
+				voterRows.Close()
+				return s, e
+			}
+			s.Playback.skipVoters = append(s.Playback.skipVoters, voter)
+		}
+		voterRows.Close()
+		s.Playback.SkipVotes = len(s.Playback.skipVoters)
+		s.Playback.SkipVoted = contains(s.Playback.skipVoters, me)
 		s.Playback.Media = &media{ID: mid.String, ProviderID: provider.String, Title: title.String, Thumbnail: thumb.String}
 		// Surface any already-cached SponsorBlock segments for the current video when
 		// the room has it enabled. This never fetches (that happens in the background
@@ -422,11 +457,14 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 			}
 		}
 	}
+	now := time.Now()
+	s.ServerTime = now.UnixMilli()
 	if s.Playback.Status == "playing" {
+		// The layout also accepts the stored millisecond fraction.
 		if updated, err := time.Parse("2006-01-02 15:04:05", s.Playback.UpdatedAt); err == nil {
 			// Media advances `rate` seconds per wall-clock second while playing, so the
 			// elapsed-time extrapolation must scale by the playback rate.
-			s.Playback.Position += time.Since(updated.UTC()).Seconds() * s.Playback.Rate
+			s.Playback.Position += now.Sub(updated.UTC()).Seconds() * s.Playback.Rate
 		}
 	}
 	er, e := tx.QueryContext(ctx, `SELECT e.id,coalesce(e.actor_identity_id,''),coalesce(i.display_name,''),e.event_type,e.payload_json,e.created_at FROM room_events e LEFT JOIN identities i ON i.id=e.actor_identity_id WHERE e.room_id=? ORDER BY e.created_at DESC LIMIT 200`, id)

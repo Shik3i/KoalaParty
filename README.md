@@ -5,10 +5,14 @@
 [![Latest release](https://img.shields.io/github/v/release/Shik3i/KoalaParty)](https://github.com/Shik3i/KoalaParty/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Privacy-first shared YouTube rooms. Synchronized playback and a collaborative queue without advertising, analytics, fingerprinting, or a required account for unlisted rooms.
+Privacy-first shared YouTube rooms. Synchronized playback, a collaborative queue and live chat without advertising, analytics, fingerprinting, or a required account for unlisted rooms.
 
 ## Features
 
+- Paste a YouTube link anywhere in a room (or drop it, or share it from the YouTube app on Android) and it is queued instantly; an idle room starts it right away. Several links, playlists (optional), `?t=` start times, play next and play now are supported.
+- Ephemeral live chat, emoji reactions and join notices that also show over the video in fullscreen; nothing is stored.
+- Vote to skip, per-person presence (who is buffering or still needs to tap for sound), undo for removals, room names and self-chosen display names without an account.
+- Optional server-side YouTube search and playlist import with `KOALAPARTY_YOUTUBE_API_KEY`.
 - Server-authoritative play, pause, seek, queue, reorder, skip, and reconnect behavior.
 - Collaborative queue voting, shuffle, loop, duplicate protection, history, and ephemeral emoji reactions.
 - Room-synchronized playback speed and optional SponsorBlock skipping of sponsor/intro/outro segments for everyone at once.
@@ -41,7 +45,7 @@ Release images support `linux/amd64` and `linux/arm64`:
 
 ```sh
 cp .env.example .env
-docker pull ghcr.io/shik3i/koalaparty:0.11.0
+docker pull ghcr.io/shik3i/koalaparty:0.13.0
 docker compose -f deploy/docker-compose.ghcr.yml up -d
 ```
 

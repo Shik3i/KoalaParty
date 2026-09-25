@@ -17,6 +17,8 @@ type config struct {
 	sessionTTL        time.Duration
 	cookieSecure      bool
 	trustedOrigins    map[string]bool
+	publicOrigin      string
+	youtubeAPIKey     string
 	trustedProxies    []*net.IPNet
 	activityMaxAge    time.Duration
 	activityMaxEvents int
@@ -106,7 +108,13 @@ func loadConfig() (config, error) {
 			return config{}, fmt.Errorf("production trusted origin must use HTTPS and a hostname: %q", origin)
 		}
 		c.trustedOrigins[origin] = true
+		if c.publicOrigin == "" {
+			c.publicOrigin = origin
+		}
 	}
+	// Optional: enables in-app YouTube search and playlist import. Requests go
+	// from this server to the YouTube Data API; viewers never contact it.
+	c.youtubeAPIKey = strings.TrimSpace(os.Getenv("KOALAPARTY_YOUTUBE_API_KEY"))
 	rawProxies := os.Getenv("KOALAPARTY_TRUSTED_PROXIES")
 	if rawProxies == "" {
 		rawProxies = "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,::1/128,fc00::/7,fe80::/10"

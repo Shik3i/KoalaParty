@@ -4,6 +4,32 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-26
+
+### Added
+
+- Paste a YouTube link anywhere in a room, drop it onto the page, or share it to the installed app on Android to queue it instantly. Several links at once, `?t=` start times, **Play next** and **Play now** are supported, and pasting a video link on the start page opens a new room with it.
+- Ephemeral live chat with unread badge, chat and join bubbles over the video, per-member chat mute, and a room-wide majority **Vote skip**.
+- Player presence: see who is buffering or still needs to tap for sound.
+- Room renaming for owners and admins; anonymous viewers can pick their own display name.
+- Optional YouTube search and playlist import through the server when `KOALAPARTY_YOUTUBE_API_KEY` is set.
+- Social toasts for joins, leaves (delayed, so reloads stay quiet) and other people's actions such as adding, pausing, seeking or skipping; reactions show who sent them, and three or more of the same emoji become a room-wide combo. Chat messages with YouTube links get an **Add to queue** button, the tab title counts unread messages while hidden, and keys 1–0 send reactions from an expanded palette.
+- Link-preview image and invitation copy for room links, native share sheet for invites, keyboard shortcut overlay, fullscreen with reactions, ambient glow and now-playing splash.
+
+### Changed
+
+- Tighter synchronization: playback timestamps are stored with millisecond precision (previously whole seconds, which could leave late joiners up to a second apart), snapshots carry the server time and clients anchor them with an NTP-style clock offset instead of their receive time, paused players align to within 0.3 s, and sustained drifts above 0.5 s are corrected with a self-calibrating seek lead that compensates YouTube's buffering delay.
+- Redesigned the room: the add box stays visible next to the player, queue, chat, people and activity share one tabbed panel, the player stays on screen while scrolling on phones, and diagnostics moved into the room menu.
+- Fresh rooms start empty instead of cueing a demo video; the first added video starts immediately, and an empty room does not contact YouTube.
+- Adding, voting and removing no longer fail when someone else plays, seeks or joins at the same moment, and are no longer blocked by other pending actions.
+- Command errors now explain what happened (for example “That video is already in the queue or playing.”) and disappear on their own; removals can be undone.
+
+### Fixed
+
+- Role, permission and name changes now update the room interface without a reload.
+- Toasts, dialogs and the mini-player are no longer misplaced while the room fades in.
+- YouTube error 2 is retried once automatically, since server-validated video IDs make it transient.
+
 ## [0.12.4] - 2026-09-07
 
 ### Security

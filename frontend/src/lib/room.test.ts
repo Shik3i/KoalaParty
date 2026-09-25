@@ -4,7 +4,11 @@ import {
   currentPlaybackPosition,
   filterQueue,
   formatActivity,
+  formatDuration,
+  looksLikeLink,
+  parseStartTime,
   parseYouTube,
+  parseYouTubeInput,
   participantNameParts,
   remainingEndReportLease,
   reconnectDelay,
@@ -47,6 +51,9 @@ describe('playback position', () => {
     segments: [],
     revision: 1,
     updatedAt: '',
+    skipVotes: 0,
+    skipNeeded: 1,
+    skipVoted: false,
   };
   it('advances a playing snapshot from its local receipt time', () =>
     expect(currentPlaybackPosition(playback, 1_000, 4_250)).toBe(15.75));
@@ -154,4 +161,53 @@ describe('activity formatting — sponsorblock', () => {
         createdAt: '',
       }),
     ).toBe('Moss turned SponsorBlock off'));
+});
+
+describe('pasted YouTube input', () => {
+  it('reads start times from t= and start=', () => {
+    expect(parseYouTubeInput('https://youtu.be/dQw4w9WgXcQ?t=42').videos).toEqual([
+      { videoId: 'dQw4w9WgXcQ', start: 42 },
+    ]);
+    expect(parseYouTubeInput('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1m30s').videos[0].start).toBe(90);
+    expect(parseYouTubeInput('https://www.youtube.com/embed/dQw4w9WgXcQ?start=7').videos[0].start).toBe(7);
+    expect(parseStartTime('1h2m3s')).toBe(3723);
+    expect(parseStartTime('nonsense')).toBe(0);
+  });
+  it('collects several links and ignores duplicates and other sites', () => {
+    const parsed = parseYouTubeInput(
+      'look https://youtu.be/dQw4w9WgXcQ\nhttps://www.youtube.com/watch?v=9bZkp7q19f0, https://youtu.be/dQw4w9WgXcQ https://vimeo.com/123',
+    );
+    expect(parsed.videos.map((v) => v.videoId)).toEqual(['dQw4w9WgXcQ', '9bZkp7q19f0']);
+  });
+  it('recognizes playlists with and without a current video', () => {
+    expect(parseYouTubeInput('https://www.youtube.com/playlist?list=PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG')).toEqual({
+      videos: [],
+      playlistId: 'PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG',
+    });
+    const withVideo = parseYouTubeInput(
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG',
+    );
+    expect(withVideo.videos[0].videoId).toBe('dQw4w9WgXcQ');
+    expect(withVideo.playlistId).toBe('PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG');
+  });
+  it('never mistakes a search word for a video ID', () => {
+    expect(parseYouTubeInput('programming').videos).toEqual([]);
+    expect(looksLikeLink('never gonna give you up')).toBe(false);
+    expect(parseYouTubeInput('dQw4w9WgXcQ').videos).toEqual([{ videoId: 'dQw4w9WgXcQ', start: 0 }]);
+    expect(looksLikeLink('youtube.com/watch?v=x')).toBe(true);
+  });
+  it('formats durations and new activity', () => {
+    expect(formatDuration(3723)).toBe('1:02:03');
+    expect(formatDuration(65)).toBe('1:05');
+    const base = { id: 'e', actorName: 'Lisa', createdAt: '2026-01-01 00:00:00' };
+    expect(formatActivity({ ...base, type: 'queue.add', payload: { count: 5 } })).toBe(
+      'Lisa added 5 videos to the queue',
+    );
+    expect(formatActivity({ ...base, type: 'queue.add', payload: { title: 'X', next: true } })).toBe(
+      'Lisa queued “X” to play next',
+    );
+    expect(formatActivity({ ...base, type: 'media.vote_skipped', payload: {} })).toBe(
+      'The room voted to skip the video',
+    );
+  });
 });

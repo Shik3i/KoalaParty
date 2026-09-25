@@ -9,6 +9,8 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 type command struct {
@@ -27,23 +29,7 @@ func (a *application) roomCommand(w http.ResponseWriter, r *http.Request, p prin
 	}
 	s, e := a.applyCommand(r.Context(), id, p, c)
 	if e != nil {
-		code := commandErrorCode(e)
-		status := http.StatusBadRequest
-		message := "Room command failed."
-		switch code {
-		case "permission_denied":
-			status, message = http.StatusForbidden, "The server denied this room action."
-		case "stale_revision":
-			status, message = http.StatusConflict, "Room state changed; use the latest snapshot."
-		case "request_id_conflict":
-			status, message = http.StatusConflict, "Request ID was already used for another command."
-		case "invalid_command":
-			message = "The room command was invalid."
-		case "not_found":
-			status, message = http.StatusNotFound, "The requested room resource was not found."
-		case "unsupported_command":
-			message = "This room command is not supported."
-		}
+		status, code, message := commandProblem(e)
 		if a.metrics != nil {
 			a.metrics.commandsRejected.Add(1)
 		}
@@ -57,6 +43,38 @@ func (a *application) roomCommand(w http.ResponseWriter, r *http.Request, p prin
 	a.logCommand(r.Context(), id, p, c, "accepted", "")
 	a.hub.broadcast(id, s)
 	writeJSON(w, 200, s)
+}
+
+// userError is a rejection whose message is safe and useful to show verbatim.
+type userError struct{ code, message string }
+
+func (e userError) Error() string { return e.message }
+
+func reject(code, message string) error { return userError{code: code, message: message} }
+
+// commandProblem maps a command rejection to the HTTP status, stable code and
+// human-readable message shared by the REST and WebSocket command paths.
+func commandProblem(err error) (int, string, string) {
+	var user userError
+	if errors.As(err, &user) {
+		return http.StatusBadRequest, user.code, user.message
+	}
+	code := commandErrorCode(err)
+	switch code {
+	case "permission_denied":
+		return http.StatusForbidden, code, "You don't have permission to do that in this room."
+	case "stale_revision":
+		return http.StatusConflict, code, "Someone changed the room at the same moment. Please try again."
+	case "request_id_conflict":
+		return http.StatusConflict, code, "Request ID was already used for another command."
+	case "invalid_command":
+		return http.StatusBadRequest, code, "The room command was invalid."
+	case "not_found":
+		return http.StatusNotFound, code, "That item no longer exists in this room."
+	case "unsupported_command":
+		return http.StatusBadRequest, code, "This room command is not supported."
+	}
+	return http.StatusBadRequest, code, "Room command failed."
 }
 
 var errDenied = errors.New("permission denied")
@@ -84,7 +102,7 @@ func capFor(t string) string {
 		return "queue.reorder"
 	case "queue.shuffle", "queue.loop":
 		return "queue.reorder"
-	case "queue.vote":
+	case "queue.vote", "queue.vote_skip":
 		return "queue.vote"
 	case "queue.skip":
 		return "queue.skip"
@@ -98,7 +116,7 @@ func capFor(t string) string {
 		return "members.manage_permissions"
 	case "room.visibility":
 		return "room.manage_visibility"
-	case "room.sponsorblock":
+	case "room.sponsorblock", "room.rename":
 		return "room.manage_visibility"
 	case "room.transfer":
 		return "room.manage_ownership"
@@ -117,21 +135,41 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	// instant; the real oEmbed title is fetched afterwards by enrichTitle. This
 	// keeps adding a video fast even when the server's outbound network to YouTube
 	// is slow or unavailable.
-	var mediaTitle, enrichVideoID string
+	var additions []queueAddition
+	var enrichVideoIDs []string
+	var insertAt *int
 	var conditionalSkipMediaID string
 	var discardSkippedMedia bool
 	var endedPosition, endedDuration float64
 	if c.Type == "queue.add" || c.Type == "queue.play_now" {
 		var in struct {
-			VideoID string `json:"videoId"`
-			Title   string `json:"title"`
+			queueAddition
+			Items    []queueAddition `json:"items"`
+			Position *int            `json:"position"`
 		}
-		if json.Unmarshal(c.Payload, &in) != nil || !youtubeID.MatchString(in.VideoID) {
+		if json.Unmarshal(c.Payload, &in) != nil {
 			return snapshot{}, errors.New("invalid YouTube video ID")
 		}
-		mediaTitle = fallbackTitle("", in.VideoID)
-		if a.fetchTitle != nil {
-			enrichVideoID = in.VideoID
+		additions = in.Items
+		if len(additions) == 0 {
+			additions = []queueAddition{in.queueAddition}
+		}
+		if len(additions) > maxQueueItems || (c.Type == "queue.play_now" && len(additions) != 1) {
+			return snapshot{}, errors.New("invalid number of videos")
+		}
+		for _, item := range additions {
+			if !youtubeID.MatchString(item.VideoID) {
+				return snapshot{}, errors.New("invalid YouTube video ID")
+			}
+			if math.IsNaN(item.Start) || math.IsInf(item.Start, 0) || item.Start < 0 || item.Start > 604800 {
+				return snapshot{}, errors.New("invalid start position")
+			}
+		}
+		if in.Position != nil {
+			if *in.Position < 0 {
+				return snapshot{}, errors.New("invalid queue position")
+			}
+			insertAt = in.Position
 		}
 	} else if c.Type == "queue.skip" || c.Type == "playback.ended" {
 		var in struct {
@@ -210,7 +248,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		} else if c.Type == "playback.ended" && playbackStatus != "playing" {
 			return snapshot{}, errStale
 		}
-	} else if c.ExpectedRevision != current {
+	} else if !revisionFreeCommands[c.Type] && c.ExpectedRevision != current {
 		return snapshot{}, errStale
 	}
 	eventType := c.Type
@@ -231,9 +269,9 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			status = "playing"
 		}
 		if c.Type == "player.seek" {
-			_, e = tx.Exec("UPDATE playback_states SET position_seconds=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", in.Position, p.IdentityID, room)
+			_, e = tx.Exec("UPDATE playback_states SET position_seconds=?,revision=revision+1,updated_at=strftime('%Y-%m-%d %H:%M:%f','now'),updated_by_identity_id=? WHERE room_id=?", in.Position, p.IdentityID, room)
 		} else {
-			_, e = tx.Exec("UPDATE playback_states SET status=?,position_seconds=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", status, in.Position, p.IdentityID, room)
+			_, e = tx.Exec("UPDATE playback_states SET status=?,position_seconds=?,revision=revision+1,updated_at=strftime('%Y-%m-%d %H:%M:%f','now'),updated_by_identity_id=? WHERE room_id=?", status, in.Position, p.IdentityID, room)
 		}
 		payload["position"] = in.Position
 	case "player.rate":
@@ -251,50 +289,76 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		if math.IsNaN(in.Position) || math.IsInf(in.Position, 0) || in.Position < 0 || in.Position > 604800 {
 			return snapshot{}, errors.New("invalid playback position")
 		}
-		_, e = tx.Exec("UPDATE playback_states SET playback_rate=?,position_seconds=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", in.Rate, in.Position, p.IdentityID, room)
+		_, e = tx.Exec("UPDATE playback_states SET playback_rate=?,position_seconds=?,revision=revision+1,updated_at=strftime('%Y-%m-%d %H:%M:%f','now'),updated_by_identity_id=? WHERE room_id=?", in.Rate, in.Position, p.IdentityID, room)
 		payload["rate"] = in.Rate
 		payload["position"] = in.Position
 	case "queue.add", "queue.play_now":
-		var in struct {
-			VideoID string `json:"videoId"`
-			Title   string `json:"title"`
-		}
-		if json.Unmarshal(c.Payload, &in) != nil || !youtubeID.MatchString(in.VideoID) {
-			return snapshot{}, errors.New("invalid YouTube video ID")
-		}
-		mediaID := "YT" + in.VideoID
 		var queueCount int
 		if e = tx.QueryRow("SELECT count(*) FROM room_queue_items WHERE room_id=?", room).Scan(&queueCount); e != nil {
 			return snapshot{}, e
 		}
-		if c.Type == "queue.add" && queueCount >= maxQueueItems {
-			return snapshot{}, errors.New("queue has reached its 100-item limit")
+		added := []queueAddition{}
+		seen := map[string]bool{}
+		full := false
+		for _, item := range additions {
+			mediaID := "YT" + item.VideoID
+			if seen[mediaID] {
+				continue
+			}
+			seen[mediaID] = true
+			var duplicate int
+			if e = tx.QueryRow(`SELECT count(*) FROM (
+				SELECT media_id FROM room_queue_items WHERE room_id=? AND media_id=?
+				UNION ALL SELECT current_media_id FROM playback_states WHERE room_id=? AND current_media_id=?
+			)`, room, mediaID, room, mediaID).Scan(&duplicate); e != nil {
+				return snapshot{}, e
+			}
+			if duplicate > 0 {
+				continue
+			}
+			if c.Type == "queue.add" && queueCount+len(added) >= maxQueueItems {
+				full = true
+				break
+			}
+			if _, e = tx.Exec("INSERT INTO media_items(id,provider,provider_media_id,title,thumbnail_url) VALUES(?,'youtube',?,?,?) ON CONFLICT(provider,provider_media_id) DO NOTHING", mediaID, item.VideoID, fallbackTitle("", item.VideoID), "https://i.ytimg.com/vi/"+item.VideoID+"/mqdefault.jpg"); e != nil {
+				return snapshot{}, e
+			}
+			added = append(added, item)
 		}
-		var duplicate int
-		if e = tx.QueryRow(`SELECT count(*) FROM (
-			SELECT media_id FROM room_queue_items WHERE room_id=? AND media_id=?
-			UNION ALL SELECT current_media_id FROM playback_states WHERE room_id=? AND current_media_id=?
-		)`, room, mediaID, room, mediaID).Scan(&duplicate); e != nil {
-			return snapshot{}, e
+		if len(added) == 0 {
+			if full {
+				return snapshot{}, reject("queue_full", "The queue is full (100 videos). Remove something first.")
+			}
+			return snapshot{}, reject("already_queued", "That video is already in the queue or playing.")
 		}
-		if duplicate > 0 {
-			return snapshot{}, errors.New("video is already in the queue")
+		for _, item := range added {
+			enrichVideoIDs = append(enrichVideoIDs, item.VideoID)
 		}
-		_, e = tx.Exec("INSERT INTO media_items(id,provider,provider_media_id,title,thumbnail_url) VALUES(?,'youtube',?,?,?) ON CONFLICT(provider,provider_media_id) DO NOTHING", mediaID, in.VideoID, mediaTitle, "https://i.ytimg.com/vi/"+in.VideoID+"/mqdefault.jpg")
-		if e == nil && c.Type == "queue.add" {
-			var pos int
-			_ = tx.QueryRow("SELECT coalesce(max(position),-1)+1 FROM room_queue_items WHERE room_id=?", room).Scan(&pos)
-			_, e = tx.Exec("INSERT INTO room_queue_items(id,room_id,media_id,position,added_by_identity_id) VALUES(?,?,?,?,?)", newID(10), room, mediaID, pos, p.IdentityID)
-		} else if e == nil {
-			e = addCurrentToHistory(tx, room)
-		}
-		if e == nil && c.Type == "queue.play_now" {
-			_, e = tx.Exec("UPDATE playback_states SET current_media_id=?,status='playing',position_seconds=0,playback_rate=1,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", mediaID, p.IdentityID, room)
+		if c.Type == "queue.play_now" {
+			if e = addCurrentToHistory(tx, room); e == nil {
+				e = setCurrentMedia(tx, room, p.IdentityID, "YT"+added[0].VideoID, added[0].Start)
+			}
 			eventType = "media.activated"
-			activatedVideoID = in.VideoID
+			activatedVideoID = added[0].VideoID
+		} else {
+			e = insertQueueItems(tx, room, p.IdentityID, added, insertAt)
+			if e == nil {
+				// An idle room starts the first added video right away instead of
+				// leaving it waiting behind an extra "play" click.
+				var currentMedia sql.NullString
+				if e = tx.QueryRow("SELECT current_media_id FROM playback_states WHERE room_id=?", room).Scan(&currentMedia); e == nil && !currentMedia.Valid {
+					activatedVideoID, e = advanceQueue(tx, room, p.IdentityID)
+				}
+			}
 		}
-		payload["videoId"] = in.VideoID
-		payload["title"] = mediaTitle
+		payload["videoId"] = added[0].VideoID
+		payload["title"] = fallbackTitle("", added[0].VideoID)
+		if len(added) > 1 {
+			payload["count"] = len(added)
+		}
+		if insertAt != nil && *insertAt == 0 {
+			payload["next"] = true
+		}
 	case "queue.remove":
 		var in struct {
 			ItemID string `json:"itemId"`
@@ -416,24 +480,49 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 				_, e = tx.Exec("INSERT INTO room_queue_items(id,room_id,media_id,position,added_by_identity_id) VALUES(?,?,?,?,?)", newID(10), room, currentMedia.String, pos, p.IdentityID)
 			}
 		}
-		var mediaID, queueItemID string
-		e = tx.QueryRow("SELECT q.id,q.media_id FROM room_queue_items q LEFT JOIN queue_votes v ON v.queue_item_id=q.id WHERE q.room_id=? GROUP BY q.id ORDER BY count(v.identity_id) DESC,q.position LIMIT 1", room).Scan(&queueItemID, &mediaID)
-		if errors.Is(e, sql.ErrNoRows) {
-			mediaID = ""
-			e = nil
+		activatedVideoID, e = advanceQueue(tx, room, p.IdentityID)
+	case "queue.vote_skip":
+		var currentMedia sql.NullString
+		if e = tx.QueryRow("SELECT current_media_id FROM playback_states WHERE room_id=?", room).Scan(&currentMedia); e != nil {
+			return snapshot{}, e
 		}
-		if mediaID != "" {
-			_, e = tx.Exec("DELETE FROM room_queue_items WHERE room_id=? AND id=?", room, queueItemID)
-			if e == nil {
-				e = resequence(tx, room)
+		if !currentMedia.Valid {
+			return snapshot{}, reject("nothing_playing", "Nothing is playing right now.")
+		}
+		var voted int
+		_ = tx.QueryRow("SELECT count(*) FROM skip_votes WHERE room_id=? AND identity_id=? AND media_id=?", room, p.IdentityID, currentMedia.String).Scan(&voted)
+		if voted > 0 {
+			_, e = tx.Exec("DELETE FROM skip_votes WHERE room_id=? AND identity_id=?", room, p.IdentityID)
+			eventType = "media.skip_vote_withdrawn"
+			break
+		}
+		if _, e = tx.Exec("INSERT INTO skip_votes(room_id,media_id,identity_id) VALUES(?,?,?) ON CONFLICT(room_id,identity_id) DO UPDATE SET media_id=excluded.media_id,created_at=CURRENT_TIMESTAMP", room, currentMedia.String, p.IdentityID); e != nil {
+			return snapshot{}, e
+		}
+		var votes int
+		if e = tx.QueryRow("SELECT count(*) FROM skip_votes WHERE room_id=? AND media_id=?", room, currentMedia.String).Scan(&votes); e != nil {
+			return snapshot{}, e
+		}
+		eventType = "media.skip_voted"
+		if votes >= skipVotesNeeded(a.hub.activeCount(room)) {
+			eventType = "media.vote_skipped"
+			if e = addCurrentToHistory(tx, room); e == nil {
+				activatedVideoID, e = advanceQueue(tx, room, p.IdentityID)
 			}
 		}
-		if e == nil {
-			_, e = tx.Exec("UPDATE playback_states SET current_media_id=?,status=?,position_seconds=0,playback_rate=1,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", nullable(mediaID), map[bool]string{true: "playing", false: "paused"}[mediaID != ""], p.IdentityID, room)
+	case "room.rename":
+		var in struct {
+			Name string `json:"name"`
 		}
-		if mediaID != "" {
-			activatedVideoID = strings.TrimPrefix(mediaID, "YT")
+		if json.Unmarshal(c.Payload, &in) != nil {
+			return snapshot{}, errors.New("invalid room name")
 		}
+		name := cleanName(in.Name)
+		if utf8.RuneCountInString(name) > 60 {
+			return snapshot{}, reject("invalid_room_name", "Room names can be at most 60 characters.")
+		}
+		_, e = tx.Exec("UPDATE rooms SET name=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", nullable(name), room)
+		payload["name"] = name
 	case "member.role":
 		var in struct{ IdentityID, Role string }
 		if json.Unmarshal(c.Payload, &in) != nil {
@@ -441,7 +530,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		}
 		var targetRole string
 		if e = tx.QueryRow("SELECT role FROM room_members WHERE room_id=? AND identity_id=?", room, in.IdentityID).Scan(&targetRole); e != nil {
-			return snapshot{}, errors.New("member not found")
+			return snapshot{}, reject("member_not_found", "That person is no longer in this room.")
 		}
 		if targetRole == "owner" || !(in.Role == "admin" || in.Role == "member") {
 			return snapshot{}, errDenied
@@ -458,7 +547,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		}
 		var targetRole string
 		if e = tx.QueryRow("SELECT role FROM room_members WHERE room_id=? AND identity_id=?", room, in.IdentityID).Scan(&targetRole); e != nil {
-			return snapshot{}, errors.New("member not found")
+			return snapshot{}, reject("member_not_found", "That person is no longer in this room.")
 		}
 		if targetRole == "owner" || !contains(memberCapabilities, in.Permission) {
 			return snapshot{}, errDenied
@@ -476,7 +565,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		var targetRole string
 		var account sql.NullString
 		if e = tx.QueryRow("SELECT m.role,i.account_id FROM room_members m JOIN identities i ON i.id=m.identity_id WHERE m.room_id=? AND i.id=?", room, in.IdentityID).Scan(&targetRole, &account); e != nil {
-			return snapshot{}, errors.New("member not found")
+			return snapshot{}, reject("member_not_found", "That person is no longer in this room.")
 		}
 		if targetRole == "owner" {
 			return snapshot{}, errDenied
@@ -517,14 +606,14 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		}
 		if in.Visibility == "public" {
 			if !a.getPublicRooms() {
-				return snapshot{}, errors.New("public rooms are disabled")
+				return snapshot{}, reject("public_rooms_disabled", "Public rooms are disabled on this server.")
 			}
 		}
 		if in.Visibility != "unlisted" {
 			var ownerAccount sql.NullString
 			_ = tx.QueryRow("SELECT i.account_id FROM rooms r JOIN identities i ON i.id=r.owner_identity_id WHERE r.id=?", room).Scan(&ownerAccount)
 			if !ownerAccount.Valid {
-				return snapshot{}, errors.New(in.Visibility + " rooms require an account owner")
+				return snapshot{}, reject("account_required", "Only rooms owned by an account can be private or friends-only.")
 			}
 		}
 		_, e = tx.Exec("UPDATE rooms SET visibility=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", in.Visibility, room)
@@ -559,7 +648,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		}
 		var targetAccount sql.NullString
 		if e = tx.QueryRow(`SELECT i.account_id FROM room_members m JOIN identities i ON i.id=m.identity_id WHERE m.room_id=? AND m.identity_id=?`, room, in.IdentityID).Scan(&targetAccount); e != nil || !targetAccount.Valid {
-			return snapshot{}, errors.New("new owner must be an account-linked room member")
+			return snapshot{}, reject("account_required", "The new owner needs an account and must be a room member.")
 		}
 		// Transfer retains the former owner as admin. Preserve their private-room
 		// eligibility once ownership no longer supplies it implicitly.
@@ -596,8 +685,12 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			a.hub.disconnect(room, id)
 		}
 	}
-	if enrichVideoID != "" {
-		go a.enrichTitle(room, "YT"+enrichVideoID, enrichVideoID)
+	if len(enrichVideoIDs) > 0 && a.fetchTitle != nil {
+		go func() {
+			for _, videoID := range enrichVideoIDs {
+				a.enrichTitle(room, "YT"+videoID, videoID)
+			}
+		}()
 	}
 	if a.segments != nil && activatedVideoID != "" {
 		go a.enrichSegments(room, activatedVideoID)
@@ -687,4 +780,119 @@ func (a *application) insertEventTx(tx *sql.Tx, room, actor, t string, p map[str
 	b, _ := json.Marshal(p)
 	_, e := tx.Exec("INSERT INTO room_events(id,room_id,actor_identity_id,event_type,payload_json) VALUES(?,?,?,?,?)", newID(10), room, nullable(actor), t, string(b))
 	return e
+}
+
+type queueAddition struct {
+	VideoID string  `json:"videoId"`
+	Start   float64 `json:"start"`
+}
+
+// revisionFreeCommands are intents whose effect does not depend on the exact
+// room state the sender saw. They must not fail just because someone else
+// played, seeked or joined a moment earlier.
+var revisionFreeCommands = map[string]bool{
+	"queue.add":         true,
+	"queue.play_now":    true,
+	"queue.remove":      true,
+	"queue.vote":        true,
+	"queue.vote_skip":   true,
+	"queue.loop":        true,
+	"room.sponsorblock": true,
+	"room.rename":       true,
+}
+
+// skipVotesNeeded is a simple majority of the people currently connected.
+func skipVotesNeeded(active int) int {
+	return max(1, active/2+1)
+}
+
+// cleanName trims a user-chosen name and drops control characters.
+func cleanName(raw string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, raw))
+}
+
+// setCurrentMedia makes mediaID the room's current video, playing from start,
+// or clears playback when mediaID is empty. Pending skip votes are discarded.
+func setCurrentMedia(tx *sql.Tx, room, actor, mediaID string, start float64) error {
+	status := "playing"
+	if mediaID == "" {
+		status = "paused"
+	}
+	if _, e := tx.Exec("UPDATE playback_states SET current_media_id=?,status=?,position_seconds=?,playback_rate=1,revision=revision+1,updated_at=strftime('%Y-%m-%d %H:%M:%f','now'),updated_by_identity_id=? WHERE room_id=?", nullable(mediaID), status, start, actor, room); e != nil {
+		return e
+	}
+	_, e := tx.Exec("DELETE FROM skip_votes WHERE room_id=?", room)
+	return e
+}
+
+// advanceQueue makes the next queued item (most votes first) current, or clears
+// playback when the queue is empty. It returns the activated YouTube ID.
+func advanceQueue(tx *sql.Tx, room, actor string) (string, error) {
+	var mediaID, queueItemID string
+	var start float64
+	e := tx.QueryRow("SELECT q.id,q.media_id,q.start_seconds FROM room_queue_items q LEFT JOIN queue_votes v ON v.queue_item_id=q.id WHERE q.room_id=? GROUP BY q.id ORDER BY count(v.identity_id) DESC,q.position LIMIT 1", room).Scan(&queueItemID, &mediaID, &start)
+	if errors.Is(e, sql.ErrNoRows) {
+		return "", setCurrentMedia(tx, room, actor, "", 0)
+	}
+	if e != nil {
+		return "", e
+	}
+	if _, e = tx.Exec("DELETE FROM room_queue_items WHERE room_id=? AND id=?", room, queueItemID); e != nil {
+		return "", e
+	}
+	if e = resequence(tx, room); e != nil {
+		return "", e
+	}
+	if e = setCurrentMedia(tx, room, actor, mediaID, start); e != nil {
+		return "", e
+	}
+	return strings.TrimPrefix(mediaID, "YT"), nil
+}
+
+// insertQueueItems appends items, or inserts them before index `at` when given.
+func insertQueueItems(tx *sql.Tx, room, actor string, items []queueAddition, at *int) error {
+	rows, e := tx.Query("SELECT id FROM room_queue_items WHERE room_id=? ORDER BY position", room)
+	if e != nil {
+		return e
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			rows.Close()
+			return e
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if e = rows.Err(); e != nil {
+		return e
+	}
+	index := len(ids)
+	if at != nil && *at < index {
+		index = *at
+	}
+	newIDs := make([]string, 0, len(items))
+	for i, item := range items {
+		id := newID(10)
+		if _, e = tx.Exec("INSERT INTO room_queue_items(id,room_id,media_id,position,added_by_identity_id,start_seconds) VALUES(?,?,?,?,?,?)", id, room, "YT"+item.VideoID, 2000000+i, actor, item.Start); e != nil {
+			return e
+		}
+		newIDs = append(newIDs, id)
+	}
+	ordered := append(append(append([]string{}, ids[:index]...), newIDs...), ids[index:]...)
+	if _, e = tx.Exec("UPDATE room_queue_items SET position=position+1000000 WHERE room_id=? AND position<2000000", room); e != nil {
+		return e
+	}
+	for position, id := range ordered {
+		if _, e = tx.Exec("UPDATE room_queue_items SET position=? WHERE room_id=? AND id=?", position, room, id); e != nil {
+			return e
+		}
+	}
+	return nil
 }

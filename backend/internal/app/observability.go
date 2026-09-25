@@ -224,6 +224,10 @@ func commandErrorCode(err error) string {
 	if err == nil {
 		return ""
 	}
+	var user userError
+	if errors.As(err, &user) {
+		return user.code
+	}
 	if errors.Is(err, errDenied) {
 		return "permission_denied"
 	}

@@ -12,6 +12,8 @@ describe('legal and KoalaSync cross-promotion', () => {
     expect(privacy).toContain('Room activity is limited to 200 visible events per room and 30 days');
     expect(privacy).toContain('youtube-nocookie.com');
     expect(privacy).toContain('oEmbed');
+    expect(privacy).toContain('written to the database, logs or room activity');
+    expect(privacy).toContain('YouTube Data API');
   });
 
   it('keeps platform artwork local and links to KoalaSync', () => {

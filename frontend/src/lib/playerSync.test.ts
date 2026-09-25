@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   PLAYER_STATE,
   isCurrentVideoError,
+  driftAction,
+  nextSeekLead,
   isLocalTimelineJump,
   isStableTimelineState,
   isRetryablePlayerError,
@@ -206,6 +208,7 @@ describe('player error attribution', () => {
   it('only retries transient or unknown player failures', () => {
     expect(isRetryablePlayerError(5)).toBe(true);
     expect(isRetryablePlayerError(0)).toBe(true);
+    expect(isRetryablePlayerError(2)).toBe(true);
     expect(isRetryablePlayerError(153)).toBe(false);
     expect(isRetryablePlayerError(150)).toBe(false);
     expect(isRetryablePlayerError(999)).toBe(true);
@@ -219,5 +222,34 @@ describe('timelineJump', () => {
 
   it('still detects a real seek at accelerated playback', () => {
     expect(timelineJump(18, 10, 0.5, true, 4)).toBeCloseTo(6);
+  });
+});
+
+describe('tiered drift correction', () => {
+  const base = { now: 100_000, softSince: null, lastSoftCorrection: 0 };
+  it('corrects hard drift immediately and small paused drift precisely', () => {
+    expect(driftAction({ ...base, drift: 2.1, playing: true })).toBe('correct');
+    expect(driftAction({ ...base, drift: -0.5, playing: false })).toBe('correct');
+    expect(driftAction({ ...base, drift: 0.2, playing: false })).toBe('none');
+  });
+  it('only corrects sustained moderate drift while playing, with a cooldown', () => {
+    expect(driftAction({ ...base, drift: 1.1, playing: true })).toBe('none');
+    expect(driftAction({ ...base, drift: 1.1, playing: true, softSince: 99_000 })).toBe('none');
+    expect(driftAction({ ...base, drift: 1.1, playing: true, softSince: 97_000 })).toBe('correct');
+    expect(driftAction({ ...base, drift: 1.1, playing: true, softSince: 97_000, lastSoftCorrection: 95_000 })).toBe(
+      'none',
+    );
+    expect(driftAction({ ...base, drift: 0.4, playing: true, softSince: 90_000 })).toBe('none');
+  });
+});
+
+describe('adaptive seek lead', () => {
+  it('learns to aim ahead of buffering and stays bounded', () => {
+    expect(nextSeekLead(0, -0.6)).toBe(0.42);
+    expect(nextSeekLead(0.42, -0.2)).toBe(0.56);
+    expect(nextSeekLead(0.56, 0.3)).toBe(0.35);
+    expect(nextSeekLead(1.4, -1)).toBe(1.5);
+    expect(nextSeekLead(0.2, 0.9)).toBe(0);
+    expect(nextSeekLead(0.5, 12)).toBe(0.5);
   });
 });

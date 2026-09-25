@@ -141,6 +141,7 @@ func TestRoomPersistenceAndOwnerProtection(t *testing.T) {
 	}
 	var created map[string]string
 	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	cueTestMedia(t, a, created["id"])
 	memberCookie, memberP := exchange(t, a, "123e4567-e89b-42d3-a456-426614174002", strings.Repeat("b", 43))
 	s, e := a.joinAndSnapshot(t.Context(), created["id"], memberP)
 	if e != nil || len(s.Members) != 2 {
@@ -183,6 +184,7 @@ func TestQueueTitleCannotOverwriteSharedMediaMetadata(t *testing.T) {
 	a.requireAuth(a.createRoom)(w, authed("POST", "/api/rooms", nil, cookie, owner.CSRF))
 	var created map[string]string
 	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	cueTestMedia(t, a, created["id"])
 
 	s, err := a.snapshot(t.Context(), created["id"], owner.IdentityID)
 	if err != nil {
@@ -249,6 +251,7 @@ func TestQueuePolishCommands(t *testing.T) {
 	a.requireAuth(a.createRoom)(w, authed("POST", "/api/rooms", nil, cookie, owner.CSRF))
 	var created map[string]string
 	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	cueTestMedia(t, a, created["id"])
 	s, err := a.snapshot(t.Context(), created["id"], owner.IdentityID)
 	if err != nil {
 		t.Fatal(err)
@@ -602,7 +605,7 @@ func TestHistoricalMembersDoNotFillRoomAndQueueCapacityIsBounded(t *testing.T) {
 		ExpectedRevision: s.Revision,
 		Payload:          json.RawMessage(`{"videoId":"cap12345678"}`),
 	})
-	if err == nil || err.Error() != "queue has reached its 100-item limit" {
+	if commandErrorCode(err) != "queue_full" {
 		t.Fatalf("full queue accepted another item: %v", err)
 	}
 }
@@ -630,6 +633,7 @@ func TestSponsorBlockRoomToggle(t *testing.T) {
 	a.requireAuth(a.createRoom)(w, authed("POST", "/api/rooms", nil, ownerCookie, owner.CSRF))
 	var created map[string]string
 	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	cueTestMedia(t, a, created["id"])
 
 	s, err := a.snapshot(t.Context(), created["id"], owner.IdentityID)
 	if err != nil {
@@ -676,6 +680,7 @@ func TestRoomPreviewsDoNotJoinUnassociatedRooms(t *testing.T) {
 	a.requireAuth(a.createRoom)(w, authed("POST", "/api/rooms", nil, ownerCookie, owner.CSRF))
 	var created map[string]string
 	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	cueTestMedia(t, a, created["id"])
 
 	preview := httptest.NewRecorder()
 	a.requireAuth(a.roomPreviews)(preview, authed("POST", "/api/rooms/previews", map[string]any{"ids": []string{created["id"]}}, ownerCookie, owner.CSRF))
@@ -722,6 +727,7 @@ func TestRepeatedSnapshotDoesNotDuplicateJoinEvent(t *testing.T) {
 	a.requireAuth(a.createRoom)(w, authed("POST", "/api/rooms", nil, cookie, owner.CSRF))
 	var created map[string]string
 	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	cueTestMedia(t, a, created["id"])
 	_, member := exchange(t, a, "123e4567-e89b-42d3-a456-426614174007", strings.Repeat("g", 43))
 	first, e := a.joinAndSnapshot(t.Context(), created["id"], member)
 	if e != nil {
@@ -770,6 +776,7 @@ func TestActivityRetentionAndRoomCleanup(t *testing.T) {
 	a.requireAuth(a.createRoom)(w, authed("POST", "/api/rooms", nil, cookie, p.CSRF))
 	var created map[string]string
 	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	cueTestMedia(t, a, created["id"])
 	for i := 0; i < 15; i++ {
 		if e := a.insertEvent(created["id"], p.IdentityID, "queue.reordered", map[string]any{"i": i}); e != nil {
 			t.Fatal(e)
