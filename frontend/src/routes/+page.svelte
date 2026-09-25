@@ -4,6 +4,7 @@
   import { api } from '$lib/api';
   import { forgetRoom, recentRooms as loadRecentRooms, reconcileRecentRooms, type RecentRoom } from '$lib/recentRooms';
   import KoalaSyncPromo from '$lib/KoalaSyncPromo.svelte';
+  import { parseYouTubeInput } from '$lib/room';
   import {
     Compass,
     Broadcast,
@@ -25,6 +26,12 @@
   let recentRooms: RecentRoom[] = [];
   let roomPreviews = new Map<string, { participants: number; status: string; position: number; thumbnail: string }>();
   onMount(async () => {
+    // App shortcut ("Create a room") from the installed PWA.
+    if (new URLSearchParams(location.search).get('create') === '1') {
+      history.replaceState(history.state, '', '/');
+      void createRoom();
+      return;
+    }
     recentRooms = loadRecentRooms();
     if (!recentRooms.length) return;
     try {
@@ -37,7 +44,9 @@
       // Local shortcuts remain useful while the server is temporarily unavailable.
     }
   });
-  async function createRoom() {
+  // `add` is a YouTube link to start the new room with, so pasting a video on the
+  // start page is a one-step party.
+  async function createRoom(add = '') {
     creating = true;
     error = '';
     try {
@@ -54,7 +63,7 @@
       } catch {
         /* sessionStorage unavailable */
       }
-      await goto(`/room/${room.id}`);
+      await goto(`/room/${room.id}${add ? `?add=${encodeURIComponent(add)}` : ''}`);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Could not create room';
     } finally {
@@ -68,9 +77,14 @@
       createRoom();
       return;
     }
+    const video = parseYouTubeInput(value);
+    if (video.videos.length || video.playlistId) {
+      createRoom(value);
+      return;
+    }
     const match = value.match(/(?:room\/)?([A-Z2-7]{16})$/i);
     if (!match) {
-      error = 'Enter a valid 16-character room code or link.';
+      error = 'Enter a room link, a 16-character room code, or a YouTube link.';
       return;
     }
     goto(`/room/${match[1].toUpperCase()}`);
@@ -84,10 +98,11 @@
     <div class="eyebrow">Your permanent digital living room</div>
     <h1>Watch YouTube together.<br /><span>Keep it private.</span></h1>
     <p class="lede">
-      Shared playback and a collaborative queue without accounts, advertising, KoalaParty analytics, or fingerprinting.
+      Synchronized playback, a shared queue and live chat — without accounts, advertising, KoalaParty analytics, or
+      fingerprinting.
     </p>
     <div class="actions">
-      <button type="button" onclick={createRoom} disabled={creating}
+      <button type="button" onclick={() => createRoom()} disabled={creating}
         >{creating ? 'Creating…' : 'Create a room'}<ArrowRight size={18} weight="bold" /></button
       >
       <a class="button secondary" href="/discover"><Compass size={18} weight="bold" />Browse public rooms</a>
@@ -97,20 +112,29 @@
   <aside class="join panel">
     <img class="room-mark" src="/icons/koalaparty-192.png" alt="" />
     <h2>Jump into a room</h2>
-    <p class="muted">Paste an invite link to join friends — or leave it empty to spin up a new room.</p>
+    <p class="muted">
+      Paste an invite link to join friends, paste a YouTube link to start a party with it — or leave it empty.
+    </p>
     <form
       onsubmit={(e) => {
         e.preventDefault();
         joinOrCreate();
       }}
     >
-      <label>Room link or code<input bind:value={roomCode} placeholder="7FD3KQ9X…" autocomplete="off" /></label><button
-        type="submit"
-        disabled={creating}
-        >{creating ? 'Creating…' : roomCode.trim() ? 'Join room' : 'Create a room'}<ArrowRight
-          size={17}
-          weight="bold"
-        /></button
+      <label
+        >Room or YouTube link<input
+          bind:value={roomCode}
+          placeholder="Invite link, room code or YouTube link"
+          autocomplete="off"
+        /></label
+      ><button type="submit" disabled={creating}
+        >{creating
+          ? 'Creating…'
+          : !roomCode.trim()
+            ? 'Create a room'
+            : parseYouTubeInput(roomCode).videos.length || parseYouTubeInput(roomCode).playlistId
+              ? 'Start party with this video'
+              : 'Join room'}<ArrowRight size={17} weight="bold" /></button
       >
     </form>
     {#if error}<p class="error" role="alert">{error}</p>{/if}

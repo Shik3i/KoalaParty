@@ -234,7 +234,7 @@ const (
 func renderIndex(body []byte, path, publicOrigin string) []byte {
 	page := string(body)
 	if publicOrigin != "" {
-		page = strings.ReplaceAll(page, `content="/og-image.png"`, `content="`+publicOrigin+`/og-image.png"`)
+		page = strings.ReplaceAll(page, `content="/og-image.jpg"`, `content="`+publicOrigin+`/og-image.jpg"`)
 	}
 	if strings.HasPrefix(path, "/room/") {
 		page = strings.ReplaceAll(page, `content="`+defaultPreviewTitle+`"`, `content="`+roomPreviewTitle+`"`)

@@ -1,7 +1,7 @@
 {
   "name": "KoalaParty",
   "short_name": "KoalaParty",
-  "description": "Privacy-first shared YouTube rooms.",
+  "description": "Watch YouTube together: synchronized playback, a shared queue and live chat.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0d1b15",
@@ -18,6 +18,39 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
+    }
+  ],
+  "id": "/",
+  "scope": "/",
+  "share_target": {
+    "action": "/share",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "shortcuts": [
+    {
+      "name": "Create a room",
+      "url": "/?create=1",
+      "icons": [
+        {
+          "src": "/icons/koalaparty-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "My rooms",
+      "url": "/rooms",
+      "icons": [
+        {
+          "src": "/icons/koalaparty-192.png",
+          "sizes": "192x192"
+        }
+      ]
     }
   ]
 }

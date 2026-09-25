@@ -185,9 +185,9 @@ func TestChatIsEphemeralAndBounded(t *testing.T) {
 }
 
 func TestIndexPreviewMetadata(t *testing.T) {
-	page := []byte(`<meta property="og:image" content="/og-image.png" /><meta property="og:title" content="` + defaultPreviewTitle + `" /><meta property="og:description" content="` + defaultPreviewDescription + `" />`)
+	page := []byte(`<meta property="og:image" content="/og-image.jpg" /><meta property="og:title" content="` + defaultPreviewTitle + `" /><meta property="og:description" content="` + defaultPreviewDescription + `" />`)
 	home := string(renderIndex(page, "/", "https://party.example"))
-	if !strings.Contains(home, `content="https://party.example/og-image.png"`) || !strings.Contains(home, defaultPreviewTitle) {
+	if !strings.Contains(home, `content="https://party.example/og-image.jpg"`) || !strings.Contains(home, defaultPreviewTitle) {
 		t.Fatalf("home preview: %s", home)
 	}
 	room := string(renderIndex(page, "/room/ABCDEFGHIJKLMNOP", "https://party.example"))

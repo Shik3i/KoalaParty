@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { Play, Warning, Hourglass, SkipForward } from 'phosphor-svelte';
+  import { Play, Warning, Hourglass, SkipForward, SpeakerHigh } from 'phosphor-svelte';
   import {
     isCurrentVideoError,
     isLocalTimelineJump,
@@ -43,6 +43,8 @@
     onDuration = () => {},
     onDiagnostics = () => {},
     onDiagnosticEvent = () => {},
+    onPresence = () => {},
+    showEmpty = true,
   }: {
     enabled?: boolean;
     videoId?: string | null;
@@ -67,8 +69,25 @@
     onDuration?: (duration: number) => void;
     onDiagnostics?: (diagnostics: { drift: number; state: string; correctedAt: number | null }) => void;
     onDiagnosticEvent?: (event: DiagnosticEvent) => void;
+    onPresence?: (state: 'playing' | 'paused' | 'buffering' | 'blocked' | 'idle') => void;
+    showEmpty?: boolean;
   } = $props();
   let host: HTMLDivElement;
+  // Tell the room what this viewer's player is doing so others can see who is
+  // still buffering or needs to tap for sound.
+  $effect(() => {
+    onPresence(
+      !videoId
+        ? 'idle'
+        : autoplayBlocked
+          ? 'blocked'
+          : playerState === BUFFERING
+            ? 'buffering'
+            : playerState === PLAYING
+              ? 'playing'
+              : 'paused',
+    );
+  });
   let player = $state<any>(null);
   let disposed = false;
   let loading = $state(false);
@@ -424,7 +443,7 @@
             const code = Number(e?.data);
             playerErrorCode = Number.isFinite(code) ? code : null;
             emitDiagnostic('error', { code: playerErrorCode });
-            if (isRetryablePlayerError(code) && status === 'playing' && retryCount < 1) {
+            if (isRetryablePlayerError(code) && (status === 'playing' || code === 2) && retryCount < 1) {
               playerError = 'Playback interrupted. Retrying…';
               if (retryTimer) clearTimeout(retryTimer);
               const retry = ++retryGeneration;
@@ -862,9 +881,13 @@
 
 <div class="player">
   <div class="player-host" bind:this={host}></div>
-  {#if autoplayBlocked && !playerError}<button class="autoplay-prompt" onclick={resumeAutoplay}
-      ><Play size={18} weight="fill" /><span>Autoplay blocked — play with sound</span></button
-    >{/if}
+  {#if autoplayBlocked && !playerError}<div class="autoplay-scrim">
+      <button class="autoplay-prompt" aria-label="Join the party — play with sound" onclick={resumeAutoplay}
+        ><SpeakerHigh size={22} weight="fill" /><span
+          ><b>Join the party</b><small>Autoplay blocked — tap to watch with sound</small></span
+        ></button
+      >
+    </div>{/if}
   {#if playerError}<div class="player-error" role="alert">
       <span><Warning size={38} weight="fill" /></span>
       <p>{playerError}</p>
@@ -881,7 +904,7 @@
           >{/if}
       </div>
     </div>{/if}
-  {#if !videoId}<div class="empty">
+  {#if !videoId && showEmpty}<div class="empty">
       <span
         >{#if hasQueue}<Hourglass size={40} weight="regular" />{:else}<Play size={40} weight="fill" />{/if}</span
       >
@@ -907,17 +930,49 @@
     height: 100%;
     border: 0;
   }
-  .autoplay-prompt {
+  .autoplay-scrim {
     position: absolute;
-    left: 50%;
-    bottom: 0.9rem;
-    transform: translateX(-50%);
+    inset: 0;
     z-index: 3;
-    font-size: 0.85rem;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: radial-gradient(circle, rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.6));
+    backdrop-filter: blur(3px);
   }
-  .autoplay-prompt:hover {
-    transform: translateX(-50%) translateY(-1px);
+  .autoplay-prompt {
+    font-size: 0.95rem;
+    padding: 0.9rem 1.3rem;
+    border-radius: 999px;
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+    animation: pulse-ring 2s ease-out infinite;
+  }
+  .autoplay-prompt span {
+    display: grid;
+    text-align: left;
+    line-height: 1.25;
+  }
+  .autoplay-prompt small {
+    font-weight: 550;
+    opacity: 0.8;
+    font-size: 0.75rem;
+  }
+  @keyframes pulse-ring {
+    0% {
+      box-shadow:
+        0 14px 40px rgba(0, 0, 0, 0.45),
+        0 0 0 0 color-mix(in srgb, var(--accent-primary) 55%, transparent);
+    }
+    100% {
+      box-shadow:
+        0 14px 40px rgba(0, 0, 0, 0.45),
+        0 0 0 18px transparent;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .autoplay-prompt {
+      animation: none;
+    }
   }
   .empty {
     position: absolute;

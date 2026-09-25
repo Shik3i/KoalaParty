@@ -49,6 +49,26 @@ async function command(
   );
 }
 
+const E2E_START_VIDEO_ID = 'startx12345';
+// Fresh rooms start empty and play the first added video immediately. Most
+// scenarios begin from the previous baseline: a paused, cued video.
+async function cueVideo(page: Page, roomId: string) {
+  expect((await command(page, roomId, 'queue.play_now', { videoId: E2E_START_VIDEO_ID })).status).toBe(200);
+  expect((await command(page, roomId, 'player.pause', { position: 0 })).status).toBe(200);
+  await page.waitForFunction(
+    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
+  );
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+}
+async function createRoomWithVideo(page: Page) {
+  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await expect(page).toHaveURL(/\/room\/[A-Z2-7]{16}$/);
+  await expect(page.locator('.room-header h1')).toBeVisible();
+  const roomId = page.url().split('/').at(-1)!;
+  await cueVideo(page, roomId);
+  return roomId;
+}
+
 const fakeYouTubeAPI = String.raw`
   (() => {
     class FakePlayer {
@@ -157,10 +177,7 @@ test('ended fullscreen playback is not restarted and its iframe is torn down', a
     route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
   );
   await page.goto('/');
-  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
-  await page.waitForFunction(
-    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
-  );
+  await createRoomWithVideo(page);
   await page.getByRole('button', { name: 'Play', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
 
@@ -177,7 +194,7 @@ test('ended fullscreen playback is not restarted and its iframe is torn down', a
     return player.playCalls;
   });
   expect((await automaticSkip).status()).toBe(200);
-  await expect(page.getByText('Add a YouTube video to start watching.')).toBeVisible();
+  await expect(page.getByText('Start the party')).toBeVisible();
   expect(
     await page.evaluate(() => {
       const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
@@ -196,10 +213,7 @@ test('the next queued video starts when the iframe briefly retains the previous 
     route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
   );
   await page.goto('/');
-  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
-  await page.waitForFunction(
-    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
-  );
+  await createRoomWithVideo(page);
   await page.getByLabel('YouTube URL').fill(`https://youtu.be/${E2E_QUEUE_VIDEO_ID}`);
   await page.getByRole('button', { name: 'Add to queue' }).click();
   await expect(page.locator('.queue li')).toHaveCount(1);
@@ -247,16 +261,13 @@ test('an autoplay block never mutes media and offers an explicit sound-preservin
     route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
   );
   await page.goto('/');
-  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
-  await page.waitForFunction(
-    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
-  );
+  await createRoomWithVideo(page);
   await page.getByRole('button', { name: 'Play', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
   await page.evaluate(() =>
     (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.blockAutoplay(),
   );
-  await expect(page.getByRole('button', { name: 'Autoplay blocked — play with sound' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Join the party — play with sound' })).toBeVisible();
   expect(
     await page.evaluate(() => {
       const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
@@ -269,19 +280,19 @@ test('an autoplay block never mutes media and offers an explicit sound-preservin
   );
   expect((await command(page, roomId, 'player.pause', { position: 0 })).status).toBe(200);
   await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Autoplay blocked — play with sound' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Join the party — play with sound' })).toHaveCount(0);
   expect(
     await page.evaluate(
       () => (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.playCalls,
     ),
   ).toBe(playCallsBeforePause);
   await page.getByRole('button', { name: 'Play', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Autoplay blocked — play with sound' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Join the party — play with sound' })).toBeVisible();
   await page.evaluate(() =>
     (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.allowAutoplay(),
   );
-  await page.getByRole('button', { name: 'Autoplay blocked — play with sound' }).click({ force: true });
-  await expect(page.getByRole('button', { name: 'Autoplay blocked — play with sound' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Join the party — play with sound' }).click({ force: true });
+  await expect(page.getByRole('button', { name: 'Join the party — play with sound' })).toHaveCount(0);
   expect(
     await page.evaluate(() => {
       const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
@@ -295,10 +306,7 @@ test('the startup watchdog preserves an unstarted autoplay gesture until the vie
     route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
   );
   await page.goto('/');
-  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
-  await page.waitForFunction(
-    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
-  );
+  await createRoomWithVideo(page);
   await page.clock.install();
   await page.evaluate(() =>
     (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.blockAutoplay(-1),
@@ -306,13 +314,13 @@ test('the startup watchdog preserves an unstarted autoplay gesture until the vie
   await page.getByRole('button', { name: 'Play', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
   await page.clock.runFor(21_000);
-  await expect(page.getByRole('button', { name: 'Autoplay blocked — play with sound' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Join the party — play with sound' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Try again', exact: true })).toHaveCount(0);
   await page.evaluate(() =>
     (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.allowAutoplay(),
   );
   await page
-    .getByRole('button', { name: 'Autoplay blocked — play with sound' })
+    .getByRole('button', { name: 'Join the party — play with sound' })
     .evaluate((button) => button.scrollIntoView({ block: 'start' }));
   await expect
     .poll(() =>
@@ -322,8 +330,8 @@ test('the startup watchdog preserves an unstarted autoplay gesture until the vie
       }),
     )
     .toBe(true);
-  await page.getByRole('button', { name: 'Autoplay blocked — play with sound' }).click();
-  await expect(page.getByRole('button', { name: 'Autoplay blocked — play with sound' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Join the party — play with sound' }).click();
+  await expect(page.getByRole('button', { name: 'Join the party — play with sound' })).toHaveCount(0);
   expect(
     await page.evaluate(() => {
       const p = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
@@ -337,10 +345,7 @@ test('a rejected native playback command immediately restores the authoritative 
     route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
   );
   await page.goto('/');
-  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
-  await page.waitForFunction(
-    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
-  );
+  await createRoomWithVideo(page);
   await page.getByRole('button', { name: 'Play', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
   await page.waitForFunction(
@@ -385,10 +390,7 @@ test('mobile player errors and notices do not overlap their controls or bottom n
     route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
   );
   await page.goto('/');
-  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
-  await page.waitForFunction(
-    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
-  );
+  await createRoomWithVideo(page);
   await page.evaluate(() => (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer.fail(150));
   await expect(page.locator('.player-error')).toBeVisible();
   const overlayLayout = await page.locator('.player-error').evaluate((overlay) => {
@@ -403,7 +405,7 @@ test('mobile player errors and notices do not overlap their controls or bottom n
   expect(overlayLayout).toEqual({ opaque: true, actionsInside: true, helperHidden: true });
 
   await page.getByLabel('YouTube URL').fill('https://example.com/video');
-  await page.getByRole('button', { name: 'Play now' }).click();
+  await page.getByLabel('YouTube URL').press('Enter');
   const notice = page.locator('.status--error');
   await expect(notice).toHaveAttribute('role', 'alert');
   const fixedLayout = await page.evaluate(() => {
@@ -423,10 +425,7 @@ for (const reloadState of [1, 3, 'seek-feedback']) {
       route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
     );
     await page.goto('/');
-    await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
-    await page.waitForFunction(
-      () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
-    );
+    await createRoomWithVideo(page);
     const roomId = page.url().split('/').at(-1)!;
     await page.getByLabel('YouTube URL').fill(`https://youtu.be/${E2E_QUEUE_VIDEO_ID}`);
     await page.getByRole('button', { name: 'Add to queue' }).click();
@@ -465,10 +464,7 @@ test('keyboard controls, manual resync, diagnostics download and reconnect stay 
     route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
   );
   await page.goto('/');
-  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
-  await page.waitForFunction(
-    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
-  );
+  await createRoomWithVideo(page);
   const playerGeometry = await page.evaluate(() => {
     const container = document.querySelector('.player')!.getBoundingClientRect();
     const host = document.querySelector('.player-host')!.getBoundingClientRect();
@@ -489,9 +485,11 @@ test('keyboard controls, manual resync, diagnostics download and reconnect stay 
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
   await page.keyboard.press('k');
   await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+  await page.locator('.more summary').click();
   await page.getByRole('button', { name: 'Sync now' }).click();
+  await page.locator('.more summary').click();
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Download' }).click();
+  await page.getByRole('button', { name: 'Download diagnostics' }).click();
   await expect((await download).suggestedFilename()).toMatch(/^koalaparty-[a-z2-7]{16}-diagnostics\.txt$/);
 
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
@@ -519,6 +517,7 @@ test('legacy anonymous koala names keep their animal badge', async ({ page }) =>
   );
   await page.goto('/');
   await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await page.getByRole('tab', { name: 'People' }).click();
   const participant = page.locator('.members li').filter({ hasText: 'Koala 474' });
   await expect(participant).toBeVisible();
   await expect(participant.locator('.avatar')).toContainText('🐨');
@@ -537,10 +536,13 @@ test('anonymous room persistence, shared sessions, idempotency and settings', as
   await owner.goto('/');
   await owner.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
   await expect(owner).toHaveURL(/\/room\/([A-Z2-7]{16})$/);
-  // A new room starts with a preset cued and loads YouTube's player on entry.
-  await expect(owner.getByText(/loads YouTube's privacy-enhanced player/)).toBeVisible();
-  await expect(owner.locator('script[src*="youtube.com/iframe_api"]')).toHaveCount(1);
+  // A new room starts empty with a paste box and contacts YouTube only once a
+  // video is playing.
+  await expect(owner.getByText('Start the party')).toBeVisible();
+  await expect(owner.locator('script[src*="youtube.com/iframe_api"]')).toHaveCount(0);
   const roomId = owner.url().split('/').at(-1)!;
+  await cueVideo(owner, roomId);
+  await expect(owner.locator('script[src*="youtube.com/iframe_api"]')).toHaveCount(1);
   await owner.goto('/');
   await expect(owner.getByRole('heading', { name: 'Your recent rooms' })).toBeVisible();
   await expect(owner.getByText(/online · (Playing|Paused) at/)).toBeVisible();
@@ -573,21 +575,19 @@ test('anonymous room persistence, shared sessions, idempotency and settings', as
   await expect(owner.locator('.queue li')).toHaveCount(0);
   const playbackSpeed = owner.getByLabel('Playback speed');
   await expect(playbackSpeed).toBeVisible();
-  await expect(owner.getByRole('button', { name: '🐘 First video' })).toBeVisible();
-  await expect(owner.getByRole('button', { name: '🎵 Player demo' })).toBeVisible();
   const settingsButton = owner.getByRole('button', { name: 'Room settings' });
   await expect(settingsButton).toHaveAttribute('aria-expanded', 'false');
   await settingsButton.click();
-  const closeSettingsButton = owner.getByRole('button', { name: 'Close settings' });
-  await expect(closeSettingsButton).toHaveAttribute('aria-expanded', 'true');
+  await expect(settingsButton).toHaveAttribute('aria-expanded', 'true');
   await expect(owner.locator('#room-settings')).toBeVisible();
-  await closeSettingsButton.click();
+  await owner.getByRole('button', { name: 'Close settings' }).click();
+  await expect(settingsButton).toHaveAttribute('aria-expanded', 'false');
   const playbackSpeedBox = await playbackSpeed.evaluate((node) => {
     const rect = node.getBoundingClientRect();
     return { width: rect.width, viewportWidth: window.innerWidth };
   });
-  expect(playbackSpeedBox.width).toBeGreaterThan(120);
-  expect(playbackSpeedBox.width).toBeLessThan(240);
+  expect(playbackSpeedBox.width).toBeGreaterThan(60);
+  expect(playbackSpeedBox.width).toBeLessThan(160);
   await Promise.all([ownerContext.close(), memberContext.close(), thirdContext.close()]);
 });
 
@@ -604,6 +604,7 @@ test('personalized queue votes, mini-player and advancing pause positions', asyn
   await owner.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
   await expect(owner).toHaveURL(/\/room\/([A-Z2-7]{16})$/);
   const roomId = owner.url().split('/').at(-1)!;
+  await cueVideo(owner, roomId);
   const member = await memberContext.newPage();
   await member.goto(`/room/${roomId}`);
   await expect(member.locator('.room-header h1')).toBeVisible();
@@ -627,7 +628,7 @@ test('personalized queue votes, mini-player and advancing pause positions', asyn
   await expect(member.locator('.queue li')).toHaveCount(0);
   await member.getByRole('button', { name: '❤️' }).click();
   await expect(owner.locator('.reaction-overlay').getByText('❤️')).toBeVisible();
-  await expect(owner.getByText(/Perfectly synced|Buffering|s (behind|ahead)/)).toBeVisible();
+  await expect(owner.locator('.sync-pill')).toHaveText(/In sync|Buffering|s (behind|ahead)/);
   await owner.getByRole('button', { name: 'Float mini-player' }).click();
   await expect(owner.locator('.player-wrap')).toHaveClass(/mini-player/);
   expect(
@@ -670,13 +671,14 @@ test('authoritative permissions, owner protection and ban survive reload', async
   await owner.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
   await expect(owner).toHaveURL(/\/room\/([A-Z2-7]{16})$/);
   const roomId = owner.url().split('/').at(-1)!;
+  await cueVideo(owner, roomId);
   const member = await memberContext.newPage();
   await member.goto(`/room/${roomId}`);
   await expect(member.locator('.room-header h1')).toBeVisible();
   await member.getByRole('button', { name: 'Play', exact: true }).click();
   await expect(member.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
-  // Use a video outside the random initial-preset pool so duplicate rejection
-  // cannot make this synchronization assertion flaky.
+  // Use a video other than the cued one so duplicate rejection cannot make this
+  // synchronization assertion flaky.
   await member.getByLabel('YouTube URL').fill(`https://youtu.be/${E2E_VIDEO_ID}`);
   await member.getByRole('button', { name: 'Add to queue' }).click();
   await expect(owner.locator('.queue li')).toHaveCount(1);
@@ -705,6 +707,7 @@ test('authoritative permissions, owner protection and ban survive reload', async
   await third.reload();
   await expect(third.getByText('You are banned from this room.')).toBeVisible();
   await owner.reload();
+  await owner.getByRole('tab', { name: 'People' }).click();
   await expect(owner.getByText('(you)')).toBeVisible();
   await Promise.all([ownerContext.close(), memberContext.close(), thirdContext.close()]);
 });
@@ -819,13 +822,14 @@ test('account room library, private invitations, transfer and room deletion work
   await expect(member.getByRole('heading', { name: 'Couldn’t enter this room' })).toBeVisible();
 
   await owner.getByLabel('Account username').fill(memberName);
-  await owner.getByRole('button', { name: 'Invite', exact: true }).click();
+  await owner.locator('#room-settings').getByRole('button', { name: 'Invite', exact: true }).click();
   await expect(owner.getByText(memberName, { exact: true })).toBeVisible();
   await member.goto(roomURL);
   await expect(member.locator('.room-header h1')).toHaveText(roomLabel ?? '');
 
   await owner.getByRole('button', { name: 'Transfer', exact: true }).click();
   await owner.getByRole('alertdialog').getByRole('button', { name: 'Transfer' }).click();
+  await member.getByRole('tab', { name: 'People' }).click();
   await expect(member.getByText('owner', { exact: true })).toBeVisible();
 
   await owner.getByRole('button', { name: 'Leave room' }).click();

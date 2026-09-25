@@ -206,6 +206,7 @@ describe('player error attribution', () => {
   it('only retries transient or unknown player failures', () => {
     expect(isRetryablePlayerError(5)).toBe(true);
     expect(isRetryablePlayerError(0)).toBe(true);
+    expect(isRetryablePlayerError(2)).toBe(true);
     expect(isRetryablePlayerError(153)).toBe(false);
     expect(isRetryablePlayerError(150)).toBe(false);
     expect(isRetryablePlayerError(999)).toBe(true);

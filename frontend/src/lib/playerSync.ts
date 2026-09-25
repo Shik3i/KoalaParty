@@ -183,8 +183,10 @@ export function playerErrorMessage(code: number): string {
   }
 }
 
+// Code 2 ("invalid parameter") is retried once too: the server only accepts
+// well-formed video IDs, so it almost always comes from an interrupted load.
 export function isRetryablePlayerError(code: number): boolean {
-  return code === 0 || code === 5 || ![2, 100, 101, 150, 153].includes(code);
+  return code === 0 || code === 2 || code === 5 || ![100, 101, 150, 153].includes(code);
 }
 
 export function timelineJump(
