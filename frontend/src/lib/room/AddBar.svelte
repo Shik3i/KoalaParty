@@ -133,7 +133,7 @@
 
   // Pasting a link into the box adds it right away; no extra click needed.
   function onPaste(event: ClipboardEvent) {
-    const text = event.clipboardData?.getData('text') ?? '';
+    const text = event.clipboardData?.getData('text/plain') || event.clipboardData?.getData('text') || '';
     const pasted = parseYouTubeInput(text);
     if (!pasted.videos.length && !pasted.playlistId) return;
     event.preventDefault();

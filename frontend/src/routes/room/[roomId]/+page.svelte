@@ -138,17 +138,35 @@
   let pendingAdd = page.url.searchParams.get('add');
   let confirmDialog: { title: string; confirmLabel: string; danger: boolean; resolve: (ok: boolean) => void } | null =
     null;
-  // Reactive declarations (not plain functions) so every template expression that
-  // uses them re-evaluates when a snapshot changes roles, permissions or names.
-  let me: () => Member | undefined;
-  let can: (cap: string) => boolean;
-  let manages: () => boolean;
-  $: me = () => room?.members.find((m) => m.identityId === room?.me);
-  $: can = (cap: string) => {
+  // Derived as reactive values so the template re-renders when a snapshot changes
+  // roles, permissions or names. Script code reads them through the helpers.
+  const CAPABILITIES = [
+    'playback.play_pause',
+    'playback.seek',
+    'media.play_now',
+    'queue.add',
+    'queue.remove',
+    'queue.reorder',
+    'queue.skip',
+    'queue.vote',
+    'chat.send',
+  ];
+  let self: Member | undefined;
+  let manager = false;
+  let caps: Record<string, boolean> = {};
+  $: self = room?.members.find((m) => m.identityId === room?.me);
+  $: manager = self?.role === 'owner' || self?.role === 'admin';
+  $: caps = Object.fromEntries(
+    CAPABILITIES.map((cap) => [cap, !!self && (manager || self.permissions[cap] !== false)]),
+  );
+  // Script code may run right after `room` changes, before reactive values
+  // update, so these read the snapshot directly.
+  const me = () => room?.members.find((m) => m.identityId === room?.me);
+  const manages = () => me()?.role === 'owner' || me()?.role === 'admin';
+  const can = (cap: string) => {
     const m = me();
     return !!m && (m.role === 'owner' || m.role === 'admin' || m.permissions[cap] !== false);
   };
-  $: manages = () => me()?.role === 'owner' || me()?.role === 'admin';
   const queueIndex = (items: Snapshot['queue'], itemId: string) => items.findIndex((item) => item.id === itemId);
   // Commands whose result depends on the exact state the user saw hold a shared
   // lock, so a double click cannot apply them twice. Adding, voting and removing
@@ -661,7 +679,7 @@
     // Paste a YouTube link anywhere in the room to queue it — no need to find the box.
     const onPaste = (event: ClipboardEvent) => {
       if (isTyping(event.target)) return;
-      const text = event.clipboardData?.getData('text') ?? '';
+      const text = event.clipboardData?.getData('text/plain') || event.clipboardData?.getData('text') || '';
       if (text && handleExternalText(text)) event.preventDefault();
     };
     const carriesText = (event: DragEvent) =>
@@ -1304,7 +1322,7 @@
                 onkeydown={(event) => event.key === 'Escape' && (renamingRoom = false)}
               />
             </form>{:else}<h1>{room.label}</h1>
-            {#if manages()}<button
+            {#if manager}<button
                 class="ghost icon-button"
                 aria-label="Rename room"
                 title="Rename room"
@@ -1385,7 +1403,7 @@
           <div>
             <h2>Access</h2>
             <p class="muted">Choose who can enter this room. Invite lists apply to private rooms.</p>
-            {#if manages()}<label
+            {#if manager}<label
                 >Visibility<select
                   value={room.visibility}
                   disabled={commandPending}
@@ -1402,7 +1420,7 @@
               >
             </p>
           </div>
-          {#if manages()}<div>
+          {#if manager}<div>
               <h2>SponsorBlock</h2>
               <p class="muted">
                 Automatically skip sponsor, intro and outro segments for everyone, in sync. Segment data from
@@ -1417,7 +1435,7 @@
                 /><span>Skip sponsor segments automatically</span>
               </label>
             </div>{/if}
-          {#if manages()}<div>
+          {#if manager}<div>
               <h2>Private invitations</h2>
               <form
                 class="invite-form"
@@ -1467,7 +1485,7 @@
                   ><button disabled={reportPending}>{reportPending ? 'Submitting…' : 'Submit report'}</button>
                 </form>{/if}
             </div>{/if}
-          {#if me()?.role === 'owner'}<div>
+          {#if self?.role === 'owner'}<div>
               <h2>Transfer ownership</h2>
               <p class="muted">Only account-linked members can become the permanent owner.</p>
               <ul class="transfer-list">
@@ -1485,14 +1503,14 @@
                 </p>{/if}
             </div>{/if}
           <div class="danger-settings">
-            <h2>{me()?.role === 'owner' ? 'Delete room' : 'Leave room'}</h2>
+            <h2>{self?.role === 'owner' ? 'Delete room' : 'Leave room'}</h2>
             <p class="muted">
-              {me()?.role === 'owner'
+              {self?.role === 'owner'
                 ? 'Permanently closes the room for every participant.'
                 : 'Removes this room from your account.'}
             </p>
             <button class="danger" onclick={leaveOrDelete}
-              >{me()?.role === 'owner' ? 'Delete room' : 'Leave room'}</button
+              >{self?.role === 'owner' ? 'Delete room' : 'Leave room'}</button
             >
           </div>
         </div>
@@ -1518,8 +1536,8 @@
               positionAt={playbackAnchor.at}
               rate={playbackAnchor.rate}
               segments={sponsorSegments()}
-              canControl={can('playback.play_pause')}
-              canSeek={can('playback.seek')}
+              canControl={caps['playback.play_pause']}
+              canSeek={caps['playback.seek']}
               hasQueue={room.queue.length > 0}
               showEmpty={false}
               onPlay={(pos) => playbackCommand('player.play', { position: pos })}
@@ -1528,7 +1546,7 @@
               onRate={(newRate, pos) => playbackCommand('player.rate', { rate: newRate, position: pos })}
               onSponsorSkip={skipSponsor}
               onEnded={reportEnded}
-              onSkip={can('queue.skip')
+              onSkip={caps['queue.skip']
                 ? (brokenMediaId) => command('queue.skip', { mediaId: brokenMediaId, discardCurrent: true })
                 : undefined}
               onDuration={handleDuration}
@@ -1537,7 +1555,7 @@
               onPresence={reportPresence}
             />
             {#if !room.playback.media}<div class="empty-stage">
-                {#if room.queue.length && can('queue.skip')}<button
+                {#if room.queue.length && caps['queue.skip']}<button
                     class="start"
                     onclick={() => command('queue.skip')}
                     disabled={commandPending}><Play size={18} weight="fill" />Play from queue</button
@@ -1549,11 +1567,11 @@
                       ? ' — or type to search YouTube'
                       : ''}.
                   </p>
-                  {#if can('queue.add')}<div class="empty-add">
+                  {#if caps['queue.add']}<div class="empty-add">
                       <AddBar
                         variant="hero"
-                        canAdd={can('queue.add')}
-                        canPlayNow={can('media.play_now')}
+                        canAdd={caps['queue.add']}
+                        canPlayNow={caps['media.play_now']}
                         searchEnabled={room.searchEnabled}
                         onAdd={addVideos}
                         onPlaylist={importPlaylist}
@@ -1591,8 +1609,10 @@
             {#if dropActive}<div class="drop-zone" transition:fade={{ duration: 120 }}>
                 <span>Drop to add to the queue</span>
               </div>{/if}
-            {#if miniPlayer}<button class="mini-close" aria-label="Close mini-player" onclick={() => (miniPlayer = false)}
-                ><X size={14} weight="bold" /></button
+            {#if miniPlayer}<button
+                class="mini-close"
+                aria-label="Close mini-player"
+                onclick={() => (miniPlayer = false)}><X size={14} weight="bold" /></button
               >{/if}
           </div>
         </div>
@@ -1604,7 +1624,7 @@
               command(room!.playback.status === 'playing' ? 'player.pause' : 'player.play', {
                 position: livePosition(),
               })}
-            disabled={commandPending || !can('playback.play_pause') || !room.playback.media}
+            disabled={commandPending || !caps['playback.play_pause'] || !room.playback.media}
             >{#if room.playback.status === 'playing'}<Pause size={18} weight="fill" />{:else}<Play
                 size={18}
                 weight="fill"
@@ -1629,7 +1649,7 @@
               >
                 <div class="scrubber-track">
                   <div class="scrubber-fill" style="width:{pct}%"></div>
-                  {#if can('playback.seek') && mediaDuration > 0}<input
+                  {#if caps['playback.seek'] && mediaDuration > 0}<input
                       class="scrubber-input"
                       type="range"
                       min="0"
@@ -1652,20 +1672,20 @@
               aria-label="Playback speed"
               title="Playback speed — synced for everyone"
               value={playbackAnchor.rate}
-              disabled={commandPending || !can('playback.play_pause')}
+              disabled={commandPending || !caps['playback.play_pause']}
               onchange={(e) =>
                 command('player.rate', { rate: Number(e.currentTarget.value), position: livePosition() })}
               >{#each [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as r}<option value={r}>{r === 1 ? '1×' : `${r}×`}</option
                 >{/each}</select
             >{/if}
-          {#if room.playback.media}{#if can('queue.skip')}<button
+          {#if room.playback.media}{#if caps['queue.skip']}<button
                 class="secondary bar-button"
                 aria-label="Skip to next video"
                 title="Skip to the next video"
                 onclick={() => command('queue.skip', {}, { silentStale: true })}
                 disabled={commandPending}
                 ><SkipForward size={17} weight="fill" /><span class="bar-label">Skip</span></button
-              >{:else if can('queue.vote')}<button
+              >{:else if caps['queue.vote']}<button
                 class="secondary bar-button"
                 class:active={room.playback.skipVoted}
                 aria-pressed={room.playback.skipVoted}
@@ -1712,6 +1732,9 @@
                 <strong>Up next:</strong>
                 {room.queue[0].media.title}
               </p>{/if}
+            <p class="player-note">
+              Player by YouTube (privacy-enhanced, youtube-nocookie.com) · <a href="/privacy">Privacy details</a>
+            </p>
           </div>
           <div class="reaction-bar" aria-label="Send a reaction">
             {#each ['❤️', '😂', '🔥', '👀', '😴', '👏'] as emoji}<button class="ghost" onclick={() => react(emoji)}
@@ -1723,7 +1746,7 @@
       <aside class="side-column panel">
         {#if namePrompt && !editingName}<div class="name-prompt" transition:fly={{ y: -6, duration: 180 }}>
             <span
-              >You're <b>{participantNameParts(me()?.displayName ?? '').label}</b>. Let friends know who you are.</span
+              >You're <b>{participantNameParts(self?.displayName ?? '').label}</b>. Let friends know who you are.</span
             >
             <button class="secondary small-button" onclick={startEditingName}>Set name</button><button
               class="ghost icon-button"
@@ -1747,8 +1770,8 @@
         <div class="side-add">
           <AddBar
             bind:inputEl={addInput}
-            canAdd={can('queue.add')}
-            canPlayNow={can('media.play_now')}
+            canAdd={caps['queue.add']}
+            canPlayNow={caps['media.play_now']}
             searchEnabled={room.searchEnabled}
             onAdd={addVideos}
             onPlaylist={importPlaylist}
@@ -1787,7 +1810,7 @@
                 title="Shuffle queue"
                 aria-label="Shuffle queue"
                 onclick={() => command('queue.shuffle')}
-                disabled={commandPending || room.queue.length < 2 || !can('queue.reorder')}
+                disabled={commandPending || room.queue.length < 2 || !caps['queue.reorder']}
                 ><Shuffle size={15} weight="bold" /></button
               ><button
                 class="ghost"
@@ -1796,7 +1819,7 @@
                 aria-label="Loop queue"
                 aria-pressed={room.queueLoop}
                 onclick={() => command('queue.loop', { enabled: !room!.queueLoop })}
-                disabled={!can('queue.reorder')}><Repeat size={15} weight="bold" /></button
+                disabled={!caps['queue.reorder']}><Repeat size={15} weight="bold" /></button
               >
             </div>
           </header>
@@ -1814,13 +1837,13 @@
               {#each filterQueue(room.queue, queueQuery) as item (item.id)}{@const i = queueIndex(room.queue, item.id)}
                 <li
                   animate:flip={{ duration: 260 }}
-                  draggable={!queueQuery && !commandPending && can('queue.reorder')}
+                  draggable={!queueQuery && !commandPending && caps['queue.reorder']}
                   ondragstart={() => (dragging = item.id)}
                   ondragend={() => (dragging = null)}
                   ondragover={(e) => e.preventDefault()}
                   ondrop={() => drop(item.id)}
                 >
-                  {#if can('queue.reorder')}<span class="handle" aria-hidden="true"
+                  {#if caps['queue.reorder']}<span class="handle" aria-hidden="true"
                       ><DotsSixVertical size={16} weight="bold" /></span
                     >{/if}{#if watching}<img src={item.media.thumbnail} alt="" loading="lazy" />{:else}<span
                       class="thumbnail-placeholder"
@@ -1839,7 +1862,7 @@
                     aria-label={`Vote for ${item.media.title}`}
                     title="Vote — most-voted plays first"
                     onclick={() => command('queue.vote', { itemId: item.id })}
-                    disabled={!can('queue.vote')}
+                    disabled={!caps['queue.vote']}
                     ><ThumbsUp size={14} weight={item.voted ? 'fill' : 'bold'} />{item.votes}</button
                   >
                   <details class="item-menu" use:anchoredMenu>
@@ -1849,14 +1872,14 @@
                     <div class="menu">
                       <button
                         class="ghost"
-                        disabled={!can('media.play_now') || !can('queue.remove')}
+                        disabled={!caps['media.play_now'] || !caps['queue.remove']}
                         onclick={(event) => {
                           closeMenu(event);
                           void playItemNow(item);
                         }}><Play size={14} weight="fill" />Play now</button
                       ><button
                         class="ghost"
-                        disabled={!can('queue.reorder') || i === 0}
+                        disabled={!caps['queue.reorder'] || i === 0}
                         onclick={(event) => {
                           closeMenu(event);
                           moveTo(item.id, 0);
@@ -1864,7 +1887,7 @@
                       ><button
                         class="ghost"
                         aria-label={`Move ${item.media.title} up`}
-                        disabled={!can('queue.reorder') || i === 0}
+                        disabled={!caps['queue.reorder'] || i === 0}
                         onclick={(event) => {
                           closeMenu(event);
                           moveTo(item.id, i - 1);
@@ -1872,7 +1895,7 @@
                       ><button
                         class="ghost"
                         aria-label={`Move ${item.media.title} down`}
-                        disabled={!can('queue.reorder') || i === room.queue.length - 1}
+                        disabled={!caps['queue.reorder'] || i === room.queue.length - 1}
                         onclick={(event) => {
                           closeMenu(event);
                           moveTo(item.id, i + 1);
@@ -1884,7 +1907,7 @@
                     class="ghost icon"
                     aria-label={`Remove ${item.media.title}`}
                     onclick={() => removeItem(item)}
-                    disabled={!can('queue.remove')}><X size={16} weight="bold" /></button
+                    disabled={!caps['queue.remove']}><X size={16} weight="bold" /></button
                   >
                 </li>{/each}
             </ol>{/if}
@@ -1892,7 +1915,7 @@
               <summary>Recently played ({room.history.length})</summary>
               <ul>
                 {#each room.history as item, index (`${item.id}-${index}`)}<li>
-                    <span title={item.title}>{item.title}</span>{#if can('queue.add')}<button
+                    <span title={item.title}>{item.title}</span>{#if caps['queue.add']}<button
                         class="ghost"
                         aria-label={`Add ${item.title} again`}
                         title="Add again"
@@ -1913,7 +1936,7 @@
           <ChatPanel
             messages={chat}
             me={room.me}
-            canChat={can('chat.send')}
+            canChat={caps['chat.send']}
             {connected}
             active={sideTab === 'chat'}
             onSend={sendChat}
@@ -1958,7 +1981,7 @@
                     onclick={startEditingName}
                     aria-label="Change your name"><PencilSimple size={14} weight="bold" /></button
                   >{/if}
-                {#if manages() && member.role !== 'owner' && member.identityId !== room.me}<details use:anchoredMenu>
+                {#if manager && member.role !== 'owner' && member.identityId !== room.me}<details use:anchoredMenu>
                     <summary aria-label={`Manage ${member.displayName}`}
                       ><DotsThreeVertical size={18} weight="bold" /></summary
                     >
@@ -2665,6 +2688,18 @@
     align-items: center;
     gap: 0.3rem;
     color: var(--warning);
+  }
+  .player-note {
+    margin: 0;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  .player-note a {
+    color: inherit;
   }
   .reaction-bar {
     display: flex;

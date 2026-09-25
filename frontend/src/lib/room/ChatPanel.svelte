@@ -64,7 +64,7 @@
 </script>
 
 <div class="chat">
-  <div class="messages" bind:this={list} onscroll={onScroll} aria-live="polite" aria-label="Chat messages">
+  <div class="messages" bind:this={list} onscroll={onScroll} aria-live="polite" aria-label="Chat history">
     {#if !messages.length}<div class="empty">
         <span>💬</span>
         <p>Say hi! Chat is private to this room and disappears when everyone leaves.</p>

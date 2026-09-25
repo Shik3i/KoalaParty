@@ -871,3 +871,77 @@ test('account profile, password and deletion work end to end', async ({ browser 
 
   await ownerContext.close();
 });
+
+test('paste anywhere, live chat and vote-to-skip work between viewers', async ({ browser }) => {
+  const ownerContext = await browser.newContext();
+  const memberContext = await browser.newContext();
+  for (const context of [ownerContext, memberContext]) {
+    await context.route('**/iframe_api', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
+    );
+  }
+  const owner = await ownerContext.newPage();
+  await owner.goto('/');
+  await owner.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await expect(owner).toHaveURL(/\/room\/([A-Z2-7]{16})$/);
+  const roomId = owner.url().split('/').at(-1)!;
+  await expect(owner.getByText('Start the party')).toBeVisible();
+
+  // Pasting outside any input queues the link, and an idle room starts it at once.
+  await owner.evaluate((videoId) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', `https://www.youtube.com/watch?v=${videoId}&t=1m5s`);
+    // Engines differ in whether synthetic clipboard data is readable, so attach it directly.
+    const event = new ClipboardEvent('paste', { bubbles: true });
+    Object.defineProperty(event, 'clipboardData', { value: data });
+    document.body.dispatchEvent(event);
+  }, E2E_START_VIDEO_ID);
+  await expect(owner.getByText('Now playing for everyone')).toBeVisible();
+  await owner.waitForFunction(
+    (videoId) => (window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId === videoId,
+    E2E_START_VIDEO_ID,
+  );
+  expect(
+    await owner.evaluate(
+      async (id) => (await fetch(`/api/rooms/${id}`).then((r) => r.json())).playback.position,
+      roomId,
+    ),
+  ).toBeGreaterThanOrEqual(65);
+
+  const member = await memberContext.newPage();
+  await member.goto(`/room/${roomId}`);
+  await expect(member.locator('.room-header h1')).toBeVisible();
+
+  await owner.getByRole('tab', { name: 'Chat' }).click();
+  await owner.getByLabel('Chat message', { exact: true }).fill('Hallo zusammen!');
+  await owner.getByLabel('Chat message', { exact: true }).press('Enter');
+  await expect(owner.locator('.messages')).toContainText('Hallo zusammen!');
+  await expect(member.locator('.bubbles')).toContainText('Hallo zusammen!');
+  await expect(member.getByRole('tab', { name: /Chat/ })).toContainText('1');
+  await member.getByRole('tab', { name: /Chat/ }).click();
+  await expect(member.locator('.messages')).toContainText('Hallo zusammen!');
+
+  const memberId = await identityId(member);
+  expect(
+    (
+      await command(owner, roomId, 'member.permission', {
+        identityId: memberId,
+        permission: 'queue.skip',
+        allowed: false,
+      })
+    ).status,
+  ).toBe(200);
+  expect((await command(owner, roomId, 'queue.add', { videoId: E2E_QUEUE_VIDEO_ID })).status).toBe(200);
+  const voteSkip = member.getByRole('button', { name: /Vote skip/ });
+  await expect(voteSkip).toHaveText(/0\/2/);
+  await voteSkip.click();
+  await expect(voteSkip).toHaveText(/1\/2/);
+  await expect(voteSkip).toHaveAttribute('aria-pressed', 'true');
+  expect((await command(owner, roomId, 'queue.vote_skip', {})).status).toBe(200);
+  await member.waitForFunction(
+    (videoId) => (window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId === videoId,
+    E2E_QUEUE_VIDEO_ID,
+  );
+  await expect(member.getByRole('tab', { name: 'Activity' })).toBeVisible();
+  await Promise.all([ownerContext.close(), memberContext.close()]);
+});
