@@ -152,8 +152,8 @@
     'chat.send',
   ];
   let self: Member | undefined;
-  let manager = false;
-  let caps: Record<string, boolean> = {};
+  let manager: boolean;
+  let caps: Record<string, boolean>;
   $: self = room?.members.find((m) => m.identityId === room?.me);
   $: manager = self?.role === 'owner' || self?.role === 'admin';
   $: caps = Object.fromEntries(
