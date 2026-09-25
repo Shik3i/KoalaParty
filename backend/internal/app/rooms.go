@@ -86,7 +86,10 @@ type snapshot struct {
 	Revision           int64       `json:"revision"`
 	PublicRoomsEnabled bool        `json:"publicRoomsEnabled"`
 	SearchEnabled      bool        `json:"searchEnabled"`
-	allowedIdentities  map[string]bool
+	// ServerTime is the server clock (Unix ms) at which Playback.Position was
+	// extrapolated, so clients can anchor it independent of network latency.
+	ServerTime        int64 `json:"serverTime"`
+	allowedIdentities map[string]bool
 }
 
 func (s snapshot) forIdentity(identity string) snapshot {
@@ -454,11 +457,14 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 			}
 		}
 	}
+	now := time.Now()
+	s.ServerTime = now.UnixMilli()
 	if s.Playback.Status == "playing" {
+		// The layout also accepts the stored millisecond fraction.
 		if updated, err := time.Parse("2006-01-02 15:04:05", s.Playback.UpdatedAt); err == nil {
 			// Media advances `rate` seconds per wall-clock second while playing, so the
 			// elapsed-time extrapolation must scale by the playback rate.
-			s.Playback.Position += time.Since(updated.UTC()).Seconds() * s.Playback.Rate
+			s.Playback.Position += now.Sub(updated.UTC()).Seconds() * s.Playback.Rate
 		}
 	}
 	er, e := tx.QueryContext(ctx, `SELECT e.id,coalesce(e.actor_identity_id,''),coalesce(i.display_name,''),e.event_type,e.payload_json,e.created_at FROM room_events e LEFT JOIN identities i ON i.id=e.actor_identity_id WHERE e.room_id=? ORDER BY e.created_at DESC LIMIT 200`, id)

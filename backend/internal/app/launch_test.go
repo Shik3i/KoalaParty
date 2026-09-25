@@ -237,3 +237,24 @@ func TestYouTubeSearchUsesServerSideAPI(t *testing.T) {
 		t.Fatalf("repeated search was not cached: calls=%v", calls)
 	}
 }
+
+func TestPlaybackPositionIsExtrapolatedWithSubsecondPrecision(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "223e4567-e89b-42d3-a456-426614174011", strings.Repeat("k", 43))
+	room := createTestRoom(t, a, cookie, owner)
+	s, _ := a.snapshot(t.Context(), room, owner.IdentityID)
+	if _, err := a.applyCommand(t.Context(), room, owner, command{Type: "player.play", ExpectedRevision: s.Revision, Payload: json.RawMessage(`{"position":10}`)}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(350 * time.Millisecond)
+	s, err := a.snapshot(t.Context(), room, owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Playback.Position < 10.25 || s.Playback.Position > 10.6 {
+		t.Fatalf("extrapolated position %.3f is not millisecond-accurate", s.Playback.Position)
+	}
+	if drift := time.Now().UnixMilli() - s.ServerTime; drift < 0 || drift > 1000 {
+		t.Fatalf("snapshot server time is off by %dms", drift)
+	}
+}

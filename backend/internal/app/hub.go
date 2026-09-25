@@ -296,6 +296,10 @@ func (h *hub) broadcast(room string, s snapshot) {
 		c.enqueue(map[string]any{"type": "snapshot", "payload": s.forIdentity(c.identity)})
 	}
 }
+
+// reactionEmojis is the fixed reaction palette; anything else is rejected.
+var reactionEmojis = map[string]bool{"❤️": true, "😂": true, "🔥": true, "👀": true, "😴": true, "👏": true, "🎉": true, "😮": true, "😭": true, "🍿": true}
+
 func (h *hub) broadcastReaction(room, identity, emoji string) {
 	h.mu.RLock()
 	clients := make([]*client, 0, len(h.rooms[room]))
@@ -458,8 +462,7 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 			var payload struct {
 				Emoji string `json:"emoji"`
 			}
-			allowed := map[string]bool{"❤️": true, "😂": true, "🔥": true, "👀": true, "😴": true, "👏": true}
-			if json.Unmarshal(cmd.Payload, &payload) != nil || !allowed[payload.Emoji] {
+			if json.Unmarshal(cmd.Payload, &payload) != nil || !reactionEmojis[payload.Emoji] {
 				c.enqueue(map[string]any{"type": "error", "requestId": cmd.RequestID, "code": "invalid_reaction", "message": "Invalid reaction."})
 				continue
 			}

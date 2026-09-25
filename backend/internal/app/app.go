@@ -119,6 +119,11 @@ func Run() error {
 		info := CurrentBuildInformation()
 		writeJSON(w, 200, map[string]string{"status": "ok", "version": info.Version})
 	})
+	// Clock probe for client-side latency and clock-offset estimation.
+	mux.HandleFunc("GET /api/time", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, 200, map[string]int64{"now": time.Now().UnixMilli()})
+	})
 	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, CurrentBuildInformation()) })
 	mux.HandleFunc("GET /api/ready", func(w http.ResponseWriter, _ *http.Request) {
 		if e := db.Ping(); e != nil {

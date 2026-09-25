@@ -269,9 +269,9 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			status = "playing"
 		}
 		if c.Type == "player.seek" {
-			_, e = tx.Exec("UPDATE playback_states SET position_seconds=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", in.Position, p.IdentityID, room)
+			_, e = tx.Exec("UPDATE playback_states SET position_seconds=?,revision=revision+1,updated_at=strftime('%Y-%m-%d %H:%M:%f','now'),updated_by_identity_id=? WHERE room_id=?", in.Position, p.IdentityID, room)
 		} else {
-			_, e = tx.Exec("UPDATE playback_states SET status=?,position_seconds=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", status, in.Position, p.IdentityID, room)
+			_, e = tx.Exec("UPDATE playback_states SET status=?,position_seconds=?,revision=revision+1,updated_at=strftime('%Y-%m-%d %H:%M:%f','now'),updated_by_identity_id=? WHERE room_id=?", status, in.Position, p.IdentityID, room)
 		}
 		payload["position"] = in.Position
 	case "player.rate":
@@ -289,7 +289,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		if math.IsNaN(in.Position) || math.IsInf(in.Position, 0) || in.Position < 0 || in.Position > 604800 {
 			return snapshot{}, errors.New("invalid playback position")
 		}
-		_, e = tx.Exec("UPDATE playback_states SET playback_rate=?,position_seconds=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", in.Rate, in.Position, p.IdentityID, room)
+		_, e = tx.Exec("UPDATE playback_states SET playback_rate=?,position_seconds=?,revision=revision+1,updated_at=strftime('%Y-%m-%d %H:%M:%f','now'),updated_by_identity_id=? WHERE room_id=?", in.Rate, in.Position, p.IdentityID, room)
 		payload["rate"] = in.Rate
 		payload["position"] = in.Position
 	case "queue.add", "queue.play_now":
@@ -823,7 +823,7 @@ func setCurrentMedia(tx *sql.Tx, room, actor, mediaID string, start float64) err
 	if mediaID == "" {
 		status = "paused"
 	}
-	if _, e := tx.Exec("UPDATE playback_states SET current_media_id=?,status=?,position_seconds=?,playback_rate=1,revision=revision+1,updated_at=CURRENT_TIMESTAMP,updated_by_identity_id=? WHERE room_id=?", nullable(mediaID), status, start, actor, room); e != nil {
+	if _, e := tx.Exec("UPDATE playback_states SET current_media_id=?,status=?,position_seconds=?,playback_rate=1,revision=revision+1,updated_at=strftime('%Y-%m-%d %H:%M:%f','now'),updated_by_identity_id=? WHERE room_id=?", nullable(mediaID), status, start, actor, room); e != nil {
 		return e
 	}
 	_, e := tx.Exec("DELETE FROM skip_votes WHERE room_id=?", room)

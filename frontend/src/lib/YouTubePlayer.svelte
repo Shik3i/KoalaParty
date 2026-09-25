@@ -2,6 +2,9 @@
   import { onMount, untrack } from 'svelte';
   import { Play, Warning, Hourglass, SkipForward, SpeakerHigh } from 'phosphor-svelte';
   import {
+    DRIFT_SOFT_SECONDS,
+    driftAction,
+    nextSeekLead,
     isCurrentVideoError,
     isLocalTimelineJump,
     isRetryablePlayerError,
@@ -114,6 +117,10 @@
   let guardUntil = 0; // suppress the monitor right after we drive the player
   let localSeekUntil = 0; // suppress drift correction while our own seek round-trips
   let localControlUntil = 0; // do not undo a local play/pause while its command is in flight
+  let softDriftSince: number | null = null; // when a moderate drift was first seen
+  let lastSoftCorrection = 0;
+  let seekLead = 0; // learned buffering lag for seeks while playing
+  let measureSeekResidual = false;
   let prevTime = 0; // last observed media time (for discontinuity detection)
   let prevWall = 0; // wall clock at prevTime
   let previousTimelineState: number | null = null;
@@ -692,16 +699,30 @@
       return;
     }
     const drift = t - expected;
+    if (measureSeekResidual && state === PLAYING) {
+      measureSeekResidual = false;
+      seekLead = nextSeekLead(seekLead, drift);
+    }
     onDiagnostics({
       drift,
       state:
         state === BUFFERING ? 'buffering' : state === PLAYING ? 'playing' : state === PAUSED ? 'paused' : 'loading',
       correctedAt,
     });
-    if (Math.abs(drift) > DRIFT_MAX) {
+    // Tiers are chosen by the room's state: a viewer whose autoplay is blocked is
+    // locally paused while the room plays and must not be re-aligned every poll.
+    const roomPlaying = status === 'playing';
+    softDriftSince = roomPlaying && Math.abs(drift) > DRIFT_SOFT_SECONDS ? (softDriftSince ?? now) : null;
+    if (
+      driftAction({ drift, playing: roomPlaying, now, softSince: softDriftSince, lastSoftCorrection }) === 'correct'
+    ) {
+      if (roomPlaying && Math.abs(drift) <= DRIFT_MAX) lastSoftCorrection = now;
+      softDriftSince = null;
+      const target = roomPlaying && state === PLAYING ? expected + seekLead * (rate || 1) : expected;
+      measureSeekResidual = roomPlaying && state === PLAYING;
       guard();
-      player.seekTo(expected, true);
-      prevTime = expected;
+      player.seekTo(target, true);
+      prevTime = target;
       correctedAt = now;
     }
   }

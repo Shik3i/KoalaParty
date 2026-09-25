@@ -9,6 +9,8 @@
   import YouTubePlayer from '$lib/YouTubePlayer.svelte';
   import AddBar from '$lib/room/AddBar.svelte';
   import ChatPanel from '$lib/room/ChatPanel.svelte';
+  import SocialToasts, { type SocialToast } from '$lib/room/SocialToasts.svelte';
+  import { anchorTime, measureClockOffset } from '$lib/clock';
   import {
     automaticEndDelay,
     filterQueue,
@@ -18,10 +20,12 @@
     participantNameParts,
     remainingEndReportLease,
     reconnectDelay,
+    REACTION_EMOJIS,
     SKIPPED_SPONSOR_CATEGORIES,
     SPONSOR_CATEGORY_LABELS,
     type AddMode,
     type ChatMessage,
+    type Activity as RoomEvent,
     type Member,
     type PresenceState,
     type QueueItem,
@@ -98,8 +102,19 @@
   let diagnosticEvents: DiagnosticEvent[] = [];
   let online = true;
   let visible = true;
-  let reactions: Array<{ id: string; emoji: string; x: number }> = [];
+  let reactions: Array<{ id: string; emoji: string; badge: string; x: number }> = [];
   let bubbles: Array<{ id: string; badge: string; name: string; text: string }> = [];
+  let socialToasts: SocialToast[] = [];
+  let combo: { id: string; emoji: string; count: number } | null = null;
+  let comboTimer: ReturnType<typeof setTimeout> | null = null;
+  const recentReactions: Array<{ emoji: string; at: number }> = [];
+  const leaveTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+  // Event IDs already shown (or present before joining); plain bookkeeping.
+  let seenEvents: Record<string, true> | null = null;
+  let hiddenUnread = 0;
+  // Server-minus-client clock offset; anchors snapshots independent of latency.
+  let clockOffset: number | null = null;
+  let clockReady: Promise<void> = Promise.resolve();
   let queueQuery = '';
   type SideTab = 'queue' | 'chat' | 'people' | 'activity';
   const sideTabs: SideTab[] = ['queue', 'chat', 'people', 'activity'];
@@ -218,6 +233,70 @@
       /* Media Session position support varies by browser and live-stream type. */
     }
   }
+  function pushToast(badge: string, name: string, text: string, tone: SocialToast['tone']) {
+    const last = socialToasts.at(-1);
+    // Coalesce bursts such as repeated seeks by the same person into one toast.
+    if (
+      last &&
+      last.name === name &&
+      last.tone === tone &&
+      tone === 'action' &&
+      last.text.startsWith('jumped') &&
+      text.startsWith('jumped')
+    ) {
+      socialToasts = socialToasts.slice(0, -1);
+    }
+    const toast = { id: randomUUID(), badge, name, text, tone };
+    socialToasts = [...socialToasts, toast].slice(-4);
+    const timer = setTimeout(() => {
+      socialToasts = socialToasts.filter((item) => item.id !== toast.id);
+      reactionTimers = reactionTimers.filter((t) => t !== timer);
+    }, 4500);
+    reactionTimers.push(timer);
+  }
+  const clockTime = (seconds: unknown) => formatDuration(Number(seconds) || 0);
+  function mediaTitle(next: Snapshot, videoId: unknown) {
+    const id = String(videoId ?? '');
+    const queued = next.queue.find((item) => item.media.providerId === id)?.media.title;
+    const current = next.playback.media?.providerId === id ? next.playback.media.title : undefined;
+    const title = queued ?? current ?? next.history.find((item) => item.providerId === id)?.title;
+    return title && !title.startsWith('YouTube video ') ? `“${title}”` : 'a video';
+  }
+  // Turns another person's room activity into a short toast line.
+  function describeEvent(event: RoomEvent, next: Snapshot): string | null {
+    const payload = event.payload ?? {};
+    switch (event.type) {
+      case 'queue.add': {
+        const count = Number(payload.count || 0);
+        if (count > 1) return `added ${count} videos to the queue`;
+        return payload.next
+          ? `queued ${mediaTitle(next, payload.videoId)} to play next`
+          : `added ${mediaTitle(next, payload.videoId)}`;
+      }
+      case 'media.activated':
+        return `started ${mediaTitle(next, payload.videoId)}`;
+      case 'player.play':
+        return 'pressed play ▶';
+      case 'player.pause':
+        return `paused at ${clockTime(payload.position)}`;
+      case 'player.seek':
+        return `jumped to ${clockTime(payload.position)}`;
+      case 'player.rate':
+        return `set the speed to ${Number(payload.rate || 1)}×`;
+      case 'queue.skip':
+        return 'skipped to the next video ⏭';
+      case 'media.skip_voted':
+        return `voted to skip (${next.playback.skipVotes}/${next.playback.skipNeeded})`;
+      case 'media.vote_skipped':
+        return 'tipped the vote — skipping ⏭';
+      case 'queue.shuffle':
+        return 'shuffled the queue 🔀';
+      case 'room.rename':
+        return payload.name ? `renamed the room to “${String(payload.name)}”` : 'reset the room name';
+      default:
+        return null;
+    }
+  }
   function announceChanges(previous: Snapshot, next: Snapshot) {
     const nextMedia = next.playback.media?.id ?? '';
     if (nextMedia && nextMedia !== (previous.playback.media?.id ?? '')) {
@@ -227,11 +306,46 @@
     }
     const wasActive = new Set(previous.members.filter((m) => m.active).map((m) => m.identityId));
     for (const member of next.members) {
-      if (member.active && !wasActive.has(member.identityId) && member.identityId !== next.me) {
-        const parts = participantNameParts(member.displayName);
-        pushBubble(parts.badge, parts.label, 'joined the party');
+      if (member.identityId === next.me) continue;
+      const parts = participantNameParts(member.displayName);
+      if (member.active && !wasActive.has(member.identityId)) {
+        // A quick reload looks like leave + join; stay quiet about it.
+        const pendingLeave = leaveTimers[member.identityId];
+        if (pendingLeave) {
+          clearTimeout(pendingLeave);
+          delete leaveTimers[member.identityId];
+        } else {
+          pushToast(parts.badge, parts.label, 'joined the party 🎉', 'join');
+        }
+      } else if (!member.active && wasActive.has(member.identityId) && !leaveTimers[member.identityId]) {
+        const id = member.identityId;
+        leaveTimers[id] = setTimeout(() => {
+          delete leaveTimers[id];
+          if (!room?.members.some((m) => m.identityId === id && m.active))
+            pushToast(parts.badge, parts.label, 'left', 'leave');
+        }, 6000);
       }
     }
+    const seen = seenEvents ?? {};
+    for (const event of next.events) {
+      if (seen[event.id]) continue;
+      seen[event.id] = true;
+      if (!seenEvents || !event.actorId || event.actorId === next.me) continue;
+      const parts = participantNameParts(event.actorName || 'Someone');
+      // Titles are resolved just after a video is added; wait for them briefly.
+      if (event.type === 'queue.add' || event.type === 'media.activated') {
+        const timer = setTimeout(() => {
+          reactionTimers = reactionTimers.filter((t) => t !== timer);
+          const text = room ? describeEvent(event, room) : null;
+          if (text) pushToast(parts.badge, parts.label, text, 'action');
+        }, 1200);
+        reactionTimers.push(timer);
+        continue;
+      }
+      const text = describeEvent(event, next);
+      if (text) pushToast(parts.badge, parts.label, text, 'action');
+    }
+    seenEvents = seen;
   }
   function updateRoom(next: Snapshot) {
     if (room && next.revision < room.revision) return;
@@ -254,10 +368,11 @@
         mediaId,
         rate,
         revision: pb.revision,
-        at: Date.now(),
+        at: anchorTime(next.serverTime, clockOffset, Date.now()),
       };
     }
     if (room) announceChanges(room, next);
+    else seenEvents = Object.fromEntries(next.events.map((event) => [event.id, true as const]));
     room = next;
     updateMediaSession(next);
     updateMediaPosition();
@@ -517,6 +632,7 @@
           await establish();
           if (disposed || socket) return;
           const firstJoin = !room;
+          if (firstJoin) await Promise.race([clockReady, new Promise((resolve) => setTimeout(resolve, 1500))]);
           const joinedRoom = await api<Snapshot>(`/api/rooms/${roomId}`);
           updateRoom(joinedRoom);
           rememberRoom({
@@ -596,7 +712,14 @@
     return false;
   }
   let reactionTimers: ReturnType<typeof setTimeout>[] = [];
+  function syncClock() {
+    clockReady = measureClockOffset().then((offset) => {
+      if (offset !== null) clockOffset = offset;
+    });
+  }
   onMount(() => {
+    syncClock();
+    const clockTimer = setInterval(syncClock, 10 * 60_000);
     online = navigator.onLine;
     visible = document.visibilityState === 'visible';
     const siteHeader = document.querySelector<HTMLElement>('.site-header');
@@ -629,6 +752,10 @@
     };
     const onVisibility = () => {
       visible = document.visibilityState === 'visible';
+      if (visible) {
+        hiddenUnread = 0;
+        syncClock();
+      }
       updateProgressTimer();
       recordDiagnostic({
         at: new Date().toISOString(),
@@ -672,6 +799,9 @@
         void toggleFullscreen();
       } else if (key === 'm') {
         miniPlayer = !miniPlayer;
+      } else if (/^[0-9]$/.test(key)) {
+        const emoji = REACTION_EMOJIS[(Number(key) + 9) % 10];
+        if (emoji) react(emoji);
       } else if (key === '?') {
         shortcutsOpen = true;
       }
@@ -780,6 +910,9 @@
     void joinWithRetry();
     return () => {
       disposed = true;
+      clearInterval(clockTimer);
+      if (comboTimer) clearTimeout(comboTimer);
+      Object.values(leaveTimers).forEach(clearTimeout);
       headerObserver?.disconnect();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       cancelJoinWait();
@@ -850,13 +983,7 @@
           recordDiagnostic({ at: new Date().toISOString(), source: 'websocket', event: 'snapshot', details: {} });
           updateRoom(data.payload);
         } else if (data.type === 'reaction') {
-          const reaction = { id: randomUUID(), emoji: String(data.emoji), x: Math.round(Math.random() * 60) };
-          reactions = [...reactions, reaction].slice(-24);
-          const timer = setTimeout(() => {
-            reactions = reactions.filter((item) => item.id !== reaction.id);
-            reactionTimers = reactionTimers.filter((t) => t !== timer);
-          }, 2600);
-          reactionTimers.push(timer);
+          receiveReaction(String(data.emoji), String(data.identityId ?? ''));
         } else if (data.type === 'chat.history') {
           chat = Array.isArray(data.messages) ? data.messages : [];
         } else if (data.type === 'chat') {
@@ -881,10 +1008,32 @@
       }
     };
   }
+  function receiveReaction(emoji: string, identityId: string) {
+    const sender = room?.members.find((member) => member.identityId === identityId);
+    const badge = sender ? participantNameParts(sender.displayName).badge : '';
+    const reaction = { id: randomUUID(), emoji, badge, x: Math.round(Math.random() * 60) };
+    reactions = [...reactions, reaction].slice(-24);
+    const timer = setTimeout(() => {
+      reactions = reactions.filter((item) => item.id !== reaction.id);
+      reactionTimers = reactionTimers.filter((t) => t !== timer);
+    }, 2600);
+    reactionTimers.push(timer);
+    // Three or more of the same emoji within a moment become a room-wide combo.
+    const now = Date.now();
+    recentReactions.push({ emoji, at: now });
+    while (recentReactions.length && now - recentReactions[0].at > 4000) recentReactions.shift();
+    const count = recentReactions.filter((item) => item.emoji === emoji).length;
+    if (count >= 3) {
+      combo = { id: randomUUID(), emoji, count };
+      if (comboTimer) clearTimeout(comboTimer);
+      comboTimer = setTimeout(() => (combo = null), 1800);
+    }
+  }
   function receiveChat(message: ChatMessage) {
     chat = [...chat, message].slice(-200);
     const chatVisible = sideTab === 'chat' && !theater && !fullscreen && !miniPlayer;
     if (sideTab !== 'chat') unread += 1;
+    if (document.visibilityState !== 'visible' && message.identityId !== room?.me) hiddenUnread += 1;
     if (!chatVisible && message.identityId !== room?.me) {
       const parts = participantNameParts(message.name);
       pushBubble(parts.badge, parts.label, message.text);
@@ -1288,7 +1437,7 @@
             : `${Math.abs(diagnostics.drift).toFixed(1)}s ${diagnostics.drift < 0 ? 'behind' : 'ahead'}`;
 </script>
 
-<svelte:head><title>{room?.label || roomId} · KoalaParty</title></svelte:head>
+<svelte:head><title>{hiddenUnread ? `(${hiddenUnread}) ` : ''}{room?.label || roomId} · KoalaParty</title></svelte:head>
 <svelte:window onkeydown={(e) => confirmDialog && e.key === 'Escape' && resolveConfirm(false)} />
 {#if error}<main class="fatal panel">
     <img src="/icons/koalaparty-192.png" alt="" />
@@ -1593,9 +1742,14 @@
             <div class="reaction-overlay" aria-live="polite">
               {#each reactions as reaction (reaction.id)}<span
                   style={`right:${reaction.x}px`}
-                  out:fade={{ duration: 300 }}>{reaction.emoji}</span
+                  out:fade={{ duration: 300 }}
+                  >{reaction.emoji}{#if reaction.badge}<small aria-hidden="true">{reaction.badge}</small>{/if}</span
                 >{/each}
             </div>
+            {#if combo}{#key combo.id}<div class="combo" aria-hidden="true">
+                  <span>{combo.emoji}</span><b>×{combo.count}</b>
+                </div>{/key}{/if}
+            {#if fullscreen}<SocialToasts toasts={socialToasts} placement="overlay" />{/if}
             <div class="bubbles" aria-live="polite">
               {#each bubbles as bubble (bubble.id)}<p
                   animate:flip={{ duration: 200 }}
@@ -1737,8 +1891,10 @@
             </p>
           </div>
           <div class="reaction-bar" aria-label="Send a reaction">
-            {#each ['❤️', '😂', '🔥', '👀', '😴', '👏'] as emoji}<button class="ghost" onclick={() => react(emoji)}
-                >{emoji}</button
+            {#each REACTION_EMOJIS as emoji, index}<button
+                class="ghost"
+                title={`React ${emoji} (${(index + 1) % 10})`}
+                onclick={() => react(emoji)}>{emoji}</button
               >{/each}
           </div>
         </div>
@@ -1941,6 +2097,10 @@
             active={sideTab === 'chat'}
             onSend={sendChat}
             onReact={react}
+            canAdd={caps['queue.add']}
+            onAddLink={(text) => {
+              if (!handleExternalText(text)) showNotice('That link is not a YouTube video.', ERROR_MS, 'error');
+            }}
             bind:inputEl={chatInput}
           />
         </div>
@@ -2019,6 +2179,7 @@
         </div>
       </aside>
     </section>
+    {#if !fullscreen}<SocialToasts toasts={socialToasts} />{/if}
     {#if notice}<div
         class="status status--{noticeKind}"
         role={noticeKind === 'error' ? 'alert' : 'status'}
@@ -2520,6 +2681,55 @@
     }
     100% {
       transform: translateY(-260%) scale(1);
+      opacity: 0;
+    }
+  }
+  .reaction-overlay small {
+    position: absolute;
+    right: -0.45rem;
+    bottom: -0.1rem;
+    font-size: 0.95rem;
+    filter: none;
+  }
+  .combo {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    display: grid;
+    place-content: center;
+    grid-auto-flow: column;
+    align-items: center;
+    gap: 0.3rem;
+    pointer-events: none;
+    animation: comboPop 1.8s cubic-bezier(0.2, 0.9, 0.3, 1.3) forwards;
+  }
+  .combo span {
+    font-size: clamp(3rem, 9vw, 6.5rem);
+    filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.45));
+  }
+  .combo b {
+    font-size: clamp(1.6rem, 4vw, 3rem);
+    color: white;
+    -webkit-text-stroke: 1px rgba(0, 0, 0, 0.35);
+    text-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  }
+  @keyframes comboPop {
+    0% {
+      transform: scale(0.3);
+      opacity: 0;
+    }
+    18% {
+      transform: scale(1.12);
+      opacity: 1;
+    }
+    30% {
+      transform: scale(1);
+    }
+    80% {
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1.05) translateY(-12px);
       opacity: 0;
     }
   }
@@ -3315,7 +3525,8 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .empty-emoji,
-    .reaction-overlay span {
+    .reaction-overlay span,
+    .combo {
       animation: none;
     }
   }

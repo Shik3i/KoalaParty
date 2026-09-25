@@ -73,7 +73,10 @@ export interface Snapshot {
   revision: number;
   publicRoomsEnabled: boolean;
   searchEnabled: boolean;
+  serverTime?: number;
 }
+// Reaction palette, in keyboard order (1–9, then 0). Must match the server.
+export const REACTION_EMOJIS = ['❤️', '😂', '🔥', '👀', '😮', '👏', '🎉', '😭', '🍿', '😴'];
 export interface ChatMessage {
   id: string;
   identityId: string;

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { PaperPlaneRight } from 'phosphor-svelte';
-  import { participantNameParts, type ChatMessage } from '$lib/room';
+  import { PaperPlaneRight, Plus } from 'phosphor-svelte';
+  import { participantNameParts, parseYouTubeInput, REACTION_EMOJIS, type ChatMessage } from '$lib/room';
 
   let {
     messages,
@@ -11,6 +11,8 @@
     active = true,
     onSend,
     onReact,
+    canAdd = false,
+    onAddLink = () => {},
     inputEl = $bindable(null),
   }: {
     messages: ChatMessage[];
@@ -20,6 +22,8 @@
     active?: boolean;
     onSend: (text: string) => boolean;
     onReact: (emoji: string) => void;
+    canAdd?: boolean;
+    onAddLink?: (text: string) => void;
     inputEl?: HTMLTextAreaElement | null;
   } = $props();
 
@@ -77,10 +81,15 @@
             >
           </header>{/if}
         <p>{message.text}</p>
+        {#if canAdd && parseYouTubeInput(message.text).videos.length}<button
+            type="button"
+            class="secondary add-link"
+            onclick={() => onAddLink(message.text)}><Plus size={13} weight="bold" />Add to queue</button
+          >{/if}
       </article>{/each}
   </div>
   <div class="quick-reactions" aria-label="Send a reaction">
-    {#each ['❤️', '😂', '🔥', '👀', '😴', '👏'] as emoji}<button
+    {#each REACTION_EMOJIS as emoji}<button
         type="button"
         class="ghost"
         aria-label={`React ${emoji}`}
@@ -171,14 +180,20 @@
     border-top: 1px solid var(--border-subtle);
   }
   .quick-reactions button {
-    font-size: 1.1rem;
-    padding: 0.3rem 0.45rem;
+    font-size: 1rem;
+    padding: 0.25rem 0.2rem;
     border-radius: 999px;
     transition: transform 0.15s ease;
   }
   .quick-reactions button:hover {
     transform: scale(1.2);
     background: var(--surface-hover);
+  }
+  .add-link {
+    margin: 0.3rem 0 0.1rem 1.35rem;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.72rem;
+    border-radius: 999px;
   }
   .composer {
     display: flex;

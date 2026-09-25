@@ -911,6 +911,7 @@ test('paste anywhere, live chat and vote-to-skip work between viewers', async ({
   const member = await memberContext.newPage();
   await member.goto(`/room/${roomId}`);
   await expect(member.locator('.room-header h1')).toBeVisible();
+  await expect(owner.locator('.social-toasts')).toContainText('joined the party');
 
   await owner.getByRole('tab', { name: 'Chat' }).click();
   await owner.getByLabel('Chat message', { exact: true }).fill('Hallo zusammen!');
@@ -932,6 +933,16 @@ test('paste anywhere, live chat and vote-to-skip work between viewers', async ({
     ).status,
   ).toBe(200);
   expect((await command(owner, roomId, 'queue.add', { videoId: E2E_QUEUE_VIDEO_ID })).status).toBe(200);
+  await expect(member.locator('.social-toasts')).toContainText('added');
+  // Click at human speed; WebKit's actionability checks would otherwise space
+  // the clicks several seconds apart.
+  await owner.evaluate(async () => {
+    for (let i = 0; i < 3; i++) {
+      document.querySelector<HTMLButtonElement>('.reaction-bar button')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+  });
+  await expect(member.locator('.combo')).toContainText('×3');
   const voteSkip = member.getByRole('button', { name: /Vote skip/ });
   await expect(voteSkip).toHaveText(/0\/2/);
   await voteSkip.click();

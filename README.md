@@ -45,7 +45,7 @@ Release images support `linux/amd64` and `linux/arm64`:
 
 ```sh
 cp .env.example .env
-docker pull ghcr.io/shik3i/koalaparty:0.12.4
+docker pull ghcr.io/shik3i/koalaparty:0.13.0
 docker compose -f deploy/docker-compose.ghcr.yml up -d
 ```
 
