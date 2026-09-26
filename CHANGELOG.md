@@ -4,6 +4,8 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-26
+
 ### Added
 
 - “Play next” now really plays next: such items are marked “Up next” and play before voted videos.
