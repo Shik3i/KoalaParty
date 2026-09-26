@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n';
   const platforms = [
     { name: 'Netflix', icon: '/assets/platforms/netflix.svg' },
     { name: 'YouTube', icon: '/assets/platforms/youtube.svg' },
@@ -12,30 +13,26 @@
 
 <section class="sync-promo panel" aria-labelledby="koalasync-title">
   <div class="copy">
-    <p class="eyebrow">Need more than YouTube?</p>
-    <h2 id="koalasync-title">Take the watch party to almost any video site.</h2>
-    <p>
-      Want to watch Netflix, Disney+, Prime Video, Twitch or your own media server together? KoalaSync synchronizes the
-      player directly in every participant's browser.
-    </p>
+    <p class="eyebrow">{$t('promo.eyebrow')}</p>
+    <h2 id="koalasync-title">{$t('promo.title')}</h2>
+    <p>{$t('promo.body')}</p>
     <a class="button" href="https://sync.koalastuff.net/" target="_blank" rel="noopener noreferrer">
-      See KoalaSync <span aria-hidden="true">↗</span>
+      {$t('promo.cta')} <span aria-hidden="true">↗</span>
     </a>
   </div>
 
-  <div class="platforms" aria-label="Platforms supported by KoalaSync">
+  <div class="platforms" aria-label={$t('promo.platforms')}>
     {#each platforms as platform}
       <div class:wide={platform.wide} class="platform">
         <img src={platform.icon} alt="" width={platform.wide ? 54 : 28} height="28" />
         <span>{platform.name}</span>
       </div>
     {/each}
-    <div class="platform more"><strong>+</strong><span>many more</span></div>
+    <div class="platform more"><strong>+</strong><span>{$t('promo.more')}</span></div>
   </div>
 
   <p class="trademark">
-    KoalaParty and KoalaSync are not affiliated with or endorsed by the listed platforms. Their trademarks belong to
-    their respective owners.
+    {$t('promo.trademark')}
   </p>
 </section>
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText, t } from '$lib/i18n';
   import { onMount } from 'svelte';
   type Room = { id: string; label: string; title: string; thumbnail: string; status: string; participants: number };
   let rooms: Room[] = [];
@@ -15,10 +16,10 @@
         disabled = true;
         return;
       }
-      if (!r.ok) throw new Error('Discovery is unavailable.');
+      if (!r.ok) throw new Error($t('discover.unavailable'));
       rooms = await r.json();
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Discovery is unavailable.';
+      error = errorText(e);
     } finally {
       loading = false;
     }
@@ -26,37 +27,41 @@
   onMount(load);
 </script>
 
-<svelte:head><title>Discover public rooms · KoalaParty</title></svelte:head>
+<svelte:head><title>{$t('discover.title')} · KoalaParty</title></svelte:head>
 <main class="hub">
   <header>
-    <p class="eyebrow">Public living rooms</p>
-    <h1>See what’s playing</h1>
-    <p>Controlled metadata only. Rooms have no editable titles, descriptions, or promotional text.</p>
+    <p class="eyebrow">{$t('discover.eyebrow')}</p>
+    <h1>{$t('discover.heading')}</h1>
+    <p>{$t('discover.body')}</p>
   </header>
-  {#if loading}<div class="empty panel" role="status">Loading active rooms…</div>{:else if error}<div
+  {#if loading}<div class="empty panel" role="status">{$t('discover.loading')}</div>{:else if error}<div
       class="empty panel"
       role="alert"
     >
-      <h2>Could not load public rooms</h2>
+      <h2>{$t('discover.loadFailed')}</h2>
       <p class="error">{error}</p>
-      <button onclick={load}>Try again</button>
+      <button onclick={load}>{$t('player.tryAgain')}</button>
     </div>{:else if disabled}<div class="empty panel">
       <span>🔗</span>
-      <h2>Invite-only early beta</h2>
-      <p>Public room discovery is currently disabled. Join a room with its invite link or code.</p>
+      <h2>{$t('discover.beta')}</h2>
+      <p>{$t('discover.betaBody')}</p>
     </div>{:else if !rooms.length}<div class="empty panel">
       <span>🌱</span>
-      <h2>It’s quiet here</h2>
-      <p>No public rooms are active. Unlisted rooms never appear here.</p>
+      <h2>{$t('discover.quiet')}</h2>
+      <p>{$t('discover.quietBody')}</p>
     </div>{:else}<div class="grid">
       {#each rooms as room}<article class="panel">
           <div class="thumbnail-placeholder" aria-hidden="true"><span>▶</span><small>YouTube</small></div>
           <div>
-            <div class="row"><b>{room.label}</b><span class="pill">{room.status}</span></div>
-            <p>{room.title || 'Waiting for a video'}</p>
-            <small>{room.participants} participant{room.participants === 1 ? '' : 's'}</small><a
+            <div class="row">
+              <b>{room.label}</b><span class="pill"
+                >{room.status === 'playing' ? $t('discover.playing') : $t('discover.paused')}</span
+              >
+            </div>
+            <p>{room.title || $t('rooms.waiting')}</p>
+            <small>{$t('discover.participants', { count: room.participants })}</small><a
               class="button"
-              href={`/room/${room.id}`}>Join</a
+              href={`/room/${room.id}`}>{$t('discover.join')}</a
             >
           </div>
         </article>{/each}

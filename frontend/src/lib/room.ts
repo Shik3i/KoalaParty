@@ -1,3 +1,4 @@
+import { tNow, type MessageKey, type Translate } from '$lib/i18n';
 export type Role = 'owner' | 'admin' | 'member';
 export interface Media {
   id: string;
@@ -68,13 +69,21 @@ export interface Snapshot {
     skipVotes: number;
     skipNeeded: number;
     skipVoted: boolean;
+    startsAt?: number;
+    autoPaused?: boolean;
   };
   events: Activity[];
   revision: number;
   publicRoomsEnabled: boolean;
   searchEnabled: boolean;
   serverTime?: number;
+  slug?: string;
+  mode?: RoomMode;
+  waitForAll?: boolean;
+  countdownSeconds?: number;
+  scheduledAt?: number;
 }
+export type RoomMode = 'party' | 'cinema' | 'host';
 // Reaction palette, in keyboard order (1–9, then 0). Must match the server.
 export const REACTION_EMOJIS = ['❤️', '😂', '🔥', '👀', '😮', '👏', '🎉', '😭', '🍿', '😴'];
 export interface ChatMessage {
@@ -252,74 +261,130 @@ export function formatDuration(seconds: number): string {
   const rest = String(s % 60).padStart(2, '0');
   return h ? `${h}:${String(m).padStart(2, '0')}:${rest}` : `${m}:${rest}`;
 }
-export function formatActivity(e: Activity) {
-  const who = e.actorName || 'Someone';
-  const title = String(e.payload?.title || 'a video');
+// Activity event types with a plain "{who} did something" sentence.
+const SIMPLE_ACTIVITY: Record<string, MessageKey> = {
+  'member.joined': 'activity.joined',
+  'member.left': 'activity.left',
+  'player.play': 'activity.play',
+  'player.pause': 'activity.pause',
+  'media.skip_voted': 'activity.skipVoted',
+  'media.skip_vote_withdrawn': 'activity.skipVoteWithdrawn',
+  'media.vote_skipped': 'activity.voteSkipped',
+  'media.ended': 'activity.ended',
+  'queue.remove': 'activity.remove',
+  'queue.reorder': 'activity.reorder',
+  'queue.skip': 'activity.skip',
+  'role.admin_granted': 'activity.adminGranted',
+  'role.admin_removed': 'activity.adminRemoved',
+  'member.kicked': 'activity.kicked',
+  'member.banned': 'activity.banned',
+  'member.permission': 'activity.permission',
+  'queue.shuffle': 'activity.shuffle',
+  'member.unbanned': 'activity.unbanned',
+  'room.transfer': 'activity.transfer',
+  'room.created': 'activity.created',
+  'room.slug': 'activity.slug',
+  'room.mode': 'activity.mode',
+  'room.wait': 'activity.wait',
+  'room.countdown': 'activity.countdown',
+  'room.schedule': 'activity.schedule',
+};
+
+export function formatActivity(e: Activity, t: Translate = tNow) {
+  const who = e.actorName || t('activity.someone');
+  const title = String(e.payload?.title || t('activity.aVideo'));
   const position = Number(e.payload?.position || 0);
   const time = `${Math.floor(position / 60)}:${String(Math.floor(position % 60)).padStart(2, '0')}`;
+  const on = (value: unknown) => (value ? t('activity.on') : t('activity.off'));
   switch (e.type) {
-    case 'member.joined':
-      return `${who} joined the room`;
-    case 'member.left':
-      return `${who} left the room`;
-    case 'player.play':
-      return `${who} played the video`;
     case 'player.pause':
-      return `${who} paused the video`;
+      return e.payload?.reason === 'wait' ? t('activity.waitPause', { who }) : t('activity.pause', { who });
     case 'player.seek':
-      return `${who} jumped to ${time}`;
-    case 'player.rate': {
-      const rate = Number(e.payload?.rate || 1);
-      return `${who} set the speed to ${rate}×`;
-    }
+      return t('activity.seek', { who, time });
+    case 'player.rate':
+      return t('activity.rate', { who, rate: Number(e.payload?.rate || 1) });
     case 'queue.add': {
       const count = Number(e.payload?.count || 0);
-      if (count > 1) return `${who} added ${count} videos to the queue`;
-      return e.payload?.next ? `${who} queued “${title}” to play next` : `${who} added “${title}” to the queue`;
+      if (count > 1) return t('activity.addMany', { who, count });
+      return e.payload?.next ? t('activity.addNext', { who, title }) : t('activity.add', { who, title });
     }
-    case 'media.skip_voted':
-      return `${who} voted to skip`;
-    case 'media.skip_vote_withdrawn':
-      return `${who} withdrew a skip vote`;
-    case 'media.vote_skipped':
-      return `The room voted to skip the video`;
     case 'room.rename':
-      return e.payload?.name ? `${who} renamed the room to “${String(e.payload.name)}”` : `${who} reset the room name`;
+      return e.payload?.name
+        ? t('activity.rename', { who, name: String(e.payload.name) })
+        : t('activity.renameReset', { who });
     case 'media.activated':
-      return `${who} started “${title}”`;
-    case 'media.ended':
-      return `${who} finished the video`;
-    case 'queue.remove':
-      return `${who} removed a video`;
-    case 'queue.reorder':
-      return `${who} reordered the queue`;
-    case 'queue.skip':
-      return `${who} skipped to the next video`;
-    case 'role.admin_granted':
-      return `${who} granted admin access`;
-    case 'role.admin_removed':
-      return `${who} removed admin access`;
-    case 'member.kicked':
-      return `${who} kicked a participant`;
-    case 'member.banned':
-      return `${who} banned a participant`;
-    case 'member.permission':
-      return `${who} changed a permission`;
-    case 'queue.shuffle':
-      return `${who} shuffled the queue`;
+      return t('activity.started', { who, title });
     case 'queue.loop':
-      return `${who} turned queue looping ${e.payload?.enabled ? 'on' : 'off'}`;
-    case 'member.unbanned':
-      return `${who} removed a room ban`;
+      return t('activity.loop', { who, state: on(e.payload?.enabled) });
     case 'room.visibility':
-      return `${who} changed the room to ${String(e.payload?.visibility ?? '').replace('_', '-')}`;
+      return t('activity.visibility', { who, visibility: String(e.payload?.visibility ?? '').replace('_', '-') });
     case 'room.sponsorblock':
-      return `${who} turned SponsorBlock ${e.payload?.enabled ? 'on' : 'off'}`;
-    case 'room.transfer':
-      return `${who} transferred room ownership`;
-    case 'room.created':
-      return `${who} created the room`;
+      return t('activity.sponsorblock', { who, state: on(e.payload?.enabled) });
     default:
-      return `${who} updated the room`;
+      return t(SIMPLE_ACTIVITY[e.type] ?? 'activity.updated', { who });
   }
+}
+
+export interface TextSegment {
+  text: string;
+  seconds?: number;
+}
+
+// Splits chat text so timestamps such as "1:23" or "1:02:03" can become buttons
+// that jump the whole room to that moment.
+export function splitTimestamps(text: string): TextSegment[] {
+  const segments: TextSegment[] = [];
+  const pattern = /(?<![\d:])(?:(\d{1,2}):)?([0-5]?\d):([0-5]\d)(?![\d:])/g;
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    if (index > last) segments.push({ text: text.slice(last, index) });
+    const seconds = Number(match[1] ?? 0) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+    segments.push({ text: match[0], seconds });
+    last = index + match[0].length;
+  }
+  if (last < text.length) segments.push({ text: text.slice(last) });
+  return segments;
+}
+
+/** An .ics calendar entry for a scheduled party. */
+export function partyCalendar(options: { title: string; url: string; start: number; minutes?: number }): string {
+  const stamp = (ms: number) =>
+    new Date(ms)
+      .toISOString()
+      .replace(/[-:]/g, '')
+      .replace(/\.\d{3}/, '');
+  const escape = (value: string) => value.replace(/[\\;,]/g, (c) => `\\${c}`).replace(/\r?\n/g, '\\n');
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//KoalaParty//Watch party//EN',
+    'BEGIN:VEVENT',
+    `UID:${options.start}-${encodeURIComponent(options.url)}@koalaparty`,
+    `DTSTAMP:${stamp(Date.now())}`,
+    `DTSTART:${stamp(options.start)}`,
+    `DTEND:${stamp(options.start + (options.minutes ?? 120) * 60_000)}`,
+    `SUMMARY:${escape(options.title)}`,
+    `URL:${options.url}`,
+    `DESCRIPTION:${escape(options.url)}`,
+    'BEGIN:VALARM',
+    'TRIGGER:-PT10M',
+    'ACTION:DISPLAY',
+    `DESCRIPTION:${escape(options.title)}`,
+    'END:VALARM',
+    'END:VEVENT',
+    'END:VCALENDAR',
+    '',
+  ].join('\r\n');
+}
+
+/** Human "in 2 h 5 min" style countdown text parts. */
+export function untilParts(ms: number): { days: number; hours: number; minutes: number; seconds: number } {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return {
+    days: Math.floor(total / 86400),
+    hours: Math.floor((total % 86400) / 3600),
+    minutes: Math.floor((total % 3600) / 60),
+    seconds: total % 60,
+  };
 }

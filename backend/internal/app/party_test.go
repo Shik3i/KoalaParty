@@ -78,7 +78,7 @@ func TestRoomSlugsAreValidatedUniqueAndResolvable(t *testing.T) {
 	}
 	resolve := func(slug string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/api/rooms/by-slug/"+slug, nil)
+		r := httptest.NewRequest("GET", "/api/room-links/"+slug, nil)
 		r.SetPathValue("slug", slug)
 		a.roomBySlug(w, r)
 		return w
@@ -243,5 +243,23 @@ func TestShortLinkPreviewUsesInvitationCopy(t *testing.T) {
 	page := []byte(`<meta property="og:title" content="` + defaultPreviewTitle + `" />`)
 	if !strings.Contains(string(renderIndex(page, "/r/filmabend", "")), roomPreviewTitle) {
 		t.Fatal("short links should get the invitation preview")
+	}
+}
+
+func TestPublicDiscoveryNeverShowsCustomRoomNames(t *testing.T) {
+	a := testApp(t)
+	a.setPublicRooms(true)
+	cookie, owner, _ := accountPrincipal(t, a, "323e4567-e89b-42d3-a456-426614174020", "discover_owner")
+	room := createTestRoom(t, a, cookie, owner)
+	if _, err := roomCommandAs(t, a, room, owner, "room.visibility", map[string]string{"visibility": "public"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := roomCommandAs(t, a, room, owner, "room.rename", map[string]string{"name": "Unmoderated text"}); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	a.discover(w, httptest.NewRequest("GET", "/api/discover", nil))
+	if w.Code != 200 || strings.Contains(w.Body.String(), "Unmoderated text") || !strings.Contains(w.Body.String(), roomLabel(room)) {
+		t.Fatalf("discover exposed a custom name: %d %s", w.Code, w.Body.String())
 	}
 }

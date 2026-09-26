@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText, t } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
@@ -40,31 +41,31 @@
       const room = await api<{ id: string }>('/api/rooms', { method: 'POST' });
       open(room.id);
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Could not create a room.';
+      error = errorText(e);
       creating = false;
     }
   }
 </script>
 
-<svelte:head><title>Share to KoalaParty</title></svelte:head>
+<svelte:head><title>{$t('share.title')}</title></svelte:head>
 <main class="share panel">
   <span class="icon" aria-hidden="true"><ShareNetwork size={28} weight="bold" /></span>
-  {#if !link}<h1>Nothing to add</h1>
-    <p class="muted">Share a YouTube video or playlist to KoalaParty to queue it in one of your rooms.</p>
-    <a class="button" href="/">Go to KoalaParty</a>
+  {#if !link}<h1>{$t('share.nothing')}</h1>
+    <p class="muted">{$t('share.nothingBody')}</p>
+    <a class="button" href="/">{$t('share.goHome')}</a>
   {:else}
-    <h1>Add to a watch party</h1>
+    <h1>{$t('share.heading')}</h1>
     <p class="muted">
       {parsed.videos.length > 1
-        ? `${parsed.videos.length} videos`
+        ? $t('share.many', { count: parsed.videos.length })
         : parsed.videos.length
-          ? 'This video'
-          : 'This playlist'} will be added to the room you pick.
+          ? $t('share.one')
+          : $t('share.playlist')}
     </p>
     {#if rooms.length}<ul class="rooms">
         {#each rooms as room, index (room.id)}<li>
             <button class:secondary={index > 0} onclick={() => open(room.id)}>
-              <span><b>{room.label}</b><small>{room.title || 'Ready to watch'}</small></span><ArrowRight
+              <span><b>{room.label}</b><small>{room.title || $t('home.readyToWatch')}</small></span><ArrowRight
                 size={18}
                 weight="bold"
               />
@@ -72,7 +73,7 @@
           </li>{/each}
       </ul>{/if}
     <button class:secondary={rooms.length > 0} class="new-room" onclick={createRoom} disabled={creating}
-      ><Plus size={18} weight="bold" />{creating ? 'Creating…' : 'Start a new room with it'}</button
+      ><Plus size={18} weight="bold" />{creating ? $t('home.creating') : $t('share.newRoom')}</button
     >
     {#if error}<p class="error" role="alert">{error}</p>{/if}
   {/if}

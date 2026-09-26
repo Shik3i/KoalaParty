@@ -10,6 +10,7 @@ import {
   parseYouTube,
   parseYouTubeInput,
   participantNameParts,
+  splitTimestamps,
   remainingEndReportLease,
   reconnectDelay,
 } from './room';
@@ -209,5 +210,19 @@ describe('pasted YouTube input', () => {
     expect(formatActivity({ ...base, type: 'media.vote_skipped', payload: {} })).toBe(
       'The room voted to skip the video',
     );
+  });
+});
+
+describe('chat timestamps', () => {
+  it('turns times into jump targets and leaves other numbers alone', () => {
+    expect(splitTimestamps('look at 1:23 and 1:02:03!')).toEqual([
+      { text: 'look at ' },
+      { text: '1:23', seconds: 83 },
+      { text: ' and ' },
+      { text: '1:02:03', seconds: 3723 },
+      { text: '!' },
+    ]);
+    expect(splitTimestamps('score 3:0 or 12:345 or 1:2:3')).toEqual([{ text: 'score 3:0 or 12:345 or 1:2:3' }]);
+    expect(splitTimestamps('')).toEqual([]);
   });
 });

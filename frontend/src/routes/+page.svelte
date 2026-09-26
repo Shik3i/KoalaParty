@@ -4,6 +4,8 @@
   import { api } from '$lib/api';
   import { forgetRoom, recentRooms as loadRecentRooms, reconcileRecentRooms, type RecentRoom } from '$lib/recentRooms';
   import KoalaSyncPromo from '$lib/KoalaSyncPromo.svelte';
+  import LiveDemo from '$lib/LiveDemo.svelte';
+  import { errorText, t } from '$lib/i18n';
   import { parseYouTubeInput } from '$lib/room';
   import {
     Compass,
@@ -15,6 +17,10 @@
     ShieldCheck,
     GithubLogo,
     ArrowRight,
+    Check,
+    Minus,
+    QrCode,
+    ChatsCircle,
     ClockCounterClockwise,
     X,
   } from 'phosphor-svelte';
@@ -65,7 +71,7 @@
       }
       await goto(`/room/${room.id}${add ? `?add=${encodeURIComponent(add)}` : ''}`);
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Could not create room';
+      error = errorText(e);
     } finally {
       creating = false;
     }
@@ -82,39 +88,39 @@
       createRoom(value);
       return;
     }
+    const short = value.match(/(?:^|\/)r\/([a-z0-9-]{3,32})\/?$/i);
+    if (short) {
+      goto(`/r/${short[1].toLowerCase()}`);
+      return;
+    }
     const match = value.match(/(?:room\/)?([A-Z2-7]{16})$/i);
     if (!match) {
-      error = 'Enter a room link, a 16-character room code, or a YouTube link.';
+      error = $t('home.invalidInput');
       return;
     }
     goto(`/room/${match[1].toUpperCase()}`);
   }
 </script>
 
-<svelte:head><title>KoalaParty — Watch YouTube together privately</title></svelte:head>
+<svelte:head><title>KoalaParty — {$t('home.title')}</title></svelte:head>
 <main class="landing">
   <div class="hero-glow" aria-hidden="true"></div>
   <section class="hero">
-    <div class="eyebrow">Your permanent digital living room</div>
-    <h1>Watch YouTube together.<br /><span>Keep it private.</span></h1>
-    <p class="lede">
-      Synchronized playback, a shared queue and live chat — without accounts, advertising, KoalaParty analytics, or
-      fingerprinting.
-    </p>
+    <div class="eyebrow">{$t('home.eyebrow')}</div>
+    <h1>{$t('home.headline1')}<br /><span>{$t('home.headline2')}</span></h1>
+    <p class="lede">{$t('home.lede')}</p>
     <div class="actions">
       <button type="button" onclick={() => createRoom()} disabled={creating}
-        >{creating ? 'Creating…' : 'Create a room'}<ArrowRight size={18} weight="bold" /></button
+        >{creating ? $t('home.creating') : $t('home.create')}<ArrowRight size={18} weight="bold" /></button
       >
-      <a class="button secondary" href="/discover"><Compass size={18} weight="bold" />Browse public rooms</a>
+      <a class="button secondary" href="/discover"><Compass size={18} weight="bold" />{$t('home.browse')}</a>
     </div>
-    <p class="warning">Anonymous rooms belong to this browser. Link an account before clearing browser storage.</p>
+    <p class="warning">{$t('home.anonWarning')}</p>
   </section>
   <aside class="join panel">
     <img class="room-mark" src="/icons/koalaparty-192.png" alt="" />
-    <h2>Jump into a room</h2>
-    <p class="muted">
-      Paste an invite link to join friends, paste a YouTube link to start a party with it — or leave it empty.
-    </p>
+    <h2>{$t('home.joinTitle')}</h2>
+    <p class="muted">{$t('home.joinBody')}</p>
     <form
       onsubmit={(e) => {
         e.preventDefault();
@@ -122,26 +128,26 @@
       }}
     >
       <label
-        >Room or YouTube link<input
+        >{$t('home.joinLabel')}<input
           bind:value={roomCode}
-          placeholder="Invite link, room code or YouTube link"
+          placeholder={$t('home.joinPlaceholder')}
           autocomplete="off"
         /></label
       ><button type="submit" disabled={creating}
         >{creating
-          ? 'Creating…'
+          ? $t('home.creating')
           : !roomCode.trim()
-            ? 'Create a room'
+            ? $t('home.create')
             : parseYouTubeInput(roomCode).videos.length || parseYouTubeInput(roomCode).playlistId
-              ? 'Start party with this video'
-              : 'Join room'}<ArrowRight size={17} weight="bold" /></button
+              ? $t('home.startWithVideo')
+              : $t('home.join')}<ArrowRight size={17} weight="bold" /></button
       >
     </form>
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     <div class="signals">
-      <span><Broadcast size={15} weight="bold" />Live sync</span><span
-        ><InfinityIcon size={15} weight="bold" />Permanent</span
-      ><span><UserCircle size={15} weight="bold" />Account optional</span>
+      <span><Broadcast size={15} weight="bold" />{$t('home.signalSync')}</span><span
+        ><InfinityIcon size={15} weight="bold" />{$t('home.signalPermanent')}</span
+      ><span><UserCircle size={15} weight="bold" />{$t('home.signalAccount')}</span>
     </div>
   </aside>
 </main>
@@ -149,27 +155,29 @@
   <section class="recent" aria-labelledby="recent-rooms-title">
     <div class="section-heading">
       <div>
-        <span class="eyebrow"><ClockCounterClockwise size={15} weight="bold" />Continue watching</span>
-        <h2 id="recent-rooms-title">Your recent rooms</h2>
+        <span class="eyebrow"><ClockCounterClockwise size={15} weight="bold" />{$t('home.recentEyebrow')}</span>
+        <h2 id="recent-rooms-title">{$t('home.recentTitle')}</h2>
       </div>
     </div>
     <div class="recent-grid">
       {#each recentRooms as room (room.id)}
         <article class="recent-room panel">
-          <a href={`/room/${room.id}`} aria-label={`Open ${room.label}`}>
+          <a href={`/room/${room.id}`} aria-label={$t('home.openRoom', { room: room.label })}>
             <span class="room-code">{room.id}</span>
             <strong>{room.label}</strong>
-            <span class="recent-title">{room.title || 'Ready to keep watching'}</span>
+            <span class="recent-title">{room.title || $t('home.readyToWatch')}</span>
             {#if roomPreviews.has(room.id)}{@const preview = roomPreviews.get(room.id)!}<span class="recent-meta"
-                >{preview.participants} online · {preview.status === 'playing' ? 'Playing' : 'Paused'} at
-                {fmtRecentTime(preview.position)}</span
+                >{$t(preview.status === 'playing' ? 'home.previewPlaying' : 'home.previewPaused', {
+                  count: preview.participants,
+                  time: fmtRecentTime(preview.position),
+                })}</span
               >{/if}
           </a>
           <button
             class="icon-button secondary"
             type="button"
-            aria-label={`Remove ${room.label} from recent rooms`}
-            title="Remove from recent rooms"
+            aria-label={$t('home.forgetRoom', { room: room.label })}
+            title={$t('home.forget')}
             onclick={() => (recentRooms = forgetRoom(room.id))}><X size={16} weight="bold" /></button
           >
         </article>
@@ -177,22 +185,62 @@
     </div>
   </section>
 {/if}
+<section class="showcase" aria-labelledby="showcase-title">
+  <div class="showcase-copy">
+    <span class="eyebrow">{$t('home.showcaseEyebrow')}</span>
+    <h2 id="showcase-title">{$t('home.showcaseTitle')}</h2>
+    <ol class="steps">
+      <li>
+        <span class="step-icon"><ListPlus size={22} weight="duotone" /></span>
+        <div><b>{$t('home.step1')}</b><span>{$t('home.step1Body')}</span></div>
+      </li>
+      <li>
+        <span class="step-icon"><QrCode size={22} weight="duotone" /></span>
+        <div><b>{$t('home.step2')}</b><span>{$t('home.step2Body')}</span></div>
+      </li>
+      <li>
+        <span class="step-icon"><ChatsCircle size={22} weight="duotone" /></span>
+        <div><b>{$t('home.step3')}</b><span>{$t('home.step3Body')}</span></div>
+      </li>
+    </ol>
+  </div>
+  <LiveDemo />
+</section>
+<section class="compare" aria-labelledby="compare-title">
+  <h2 id="compare-title">{$t('home.compareTitle')}</h2>
+  <p class="muted">{$t('home.compareBody')}</p>
+  <div class="compare-table" role="table" aria-label={$t('home.compareTitle')}>
+    <div class="row head" role="row">
+      <span role="columnheader"></span><span role="columnheader">KoalaParty</span><span role="columnheader"
+        >{$t('home.compareOthers')}</span
+      >
+    </div>
+    {#each ['account', 'ads', 'tracking', 'chat', 'countdown', 'open'] as const as row (row)}<div
+        class="row"
+        role="row"
+      >
+        <span role="rowheader">{$t(`home.compare.${row}`)}</span>
+        <span role="cell" class="yes"
+          ><Check size={18} weight="bold" /><span class="sr-only">{$t('home.yes')}</span></span
+        >
+        <span role="cell" class="other"
+          ><Minus size={18} weight="bold" /><small>{$t(`home.compare.${row}.others`)}</small></span
+        >
+      </div>{/each}
+  </div>
+</section>
 <section class="features">
   <article>
-    <FilmSlate size={24} weight="duotone" /><b>Shared player</b><span>Play, pause, seek, and stay together.</span>
+    <FilmSlate size={24} weight="duotone" /><b>{$t('home.feature1')}</b><span>{$t('home.feature1Body')}</span>
   </article>
   <article>
-    <ListPlus size={24} weight="duotone" /><b>Open queue</b><span>Everyone can add and arrange videos by default.</span>
+    <ListPlus size={24} weight="duotone" /><b>{$t('home.feature2')}</b><span>{$t('home.feature2Body')}</span>
   </article>
   <article>
-    <ShieldCheck size={24} weight="duotone" /><b>Real privacy</b><span
-      >No KoalaParty analytics, ads, fingerprinting, or third-party fonts.</span
-    >
+    <ShieldCheck size={24} weight="duotone" /><b>{$t('home.feature3')}</b><span>{$t('home.feature3Body')}</span>
   </article>
   <article>
-    <GithubLogo size={24} weight="duotone" /><b>Public source</b><span
-      >Self-host with Go, SQLite, Docker, and Caddy.</span
-    >
+    <GithubLogo size={24} weight="duotone" /><b>{$t('home.feature4')}</b><span>{$t('home.feature4Body')}</span>
   </article>
 </section>
 <KoalaSyncPromo />
@@ -325,6 +373,101 @@
   .signals :global(svg) {
     color: var(--accent-primary);
   }
+  .showcase {
+    max-width: 1180px;
+    margin: 0 auto 4.5rem;
+    padding: 0 clamp(1rem, 4vw, 3rem);
+    display: grid;
+    grid-template-columns: 0.8fr 1.2fr;
+    gap: clamp(1.5rem, 5vw, 4rem);
+    align-items: center;
+  }
+  .showcase h2,
+  .compare h2 {
+    font-size: clamp(1.6rem, 3.4vw, 2.4rem);
+    margin: 0.3rem 0 1.2rem;
+  }
+  .steps {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 1.1rem;
+  }
+  .steps li {
+    display: flex;
+    gap: 0.9rem;
+    align-items: flex-start;
+  }
+  .steps li div {
+    display: grid;
+    gap: 0.2rem;
+  }
+  .steps li span:not(.step-icon) {
+    color: var(--text-muted);
+    font-size: 0.92rem;
+    line-height: 1.5;
+  }
+  .step-icon {
+    flex: 0 0 auto;
+    width: 2.6rem;
+    height: 2.6rem;
+    display: grid;
+    place-content: center;
+    border-radius: 12px;
+    background: var(--accent-muted);
+    color: var(--accent-primary);
+  }
+  .compare {
+    max-width: 860px;
+    margin: 0 auto 4.5rem;
+    padding: 0 clamp(1rem, 4vw, 3rem);
+    text-align: center;
+  }
+  .compare > p {
+    margin: 0 auto 1.5rem;
+    max-width: 38rem;
+  }
+  .compare-table {
+    text-align: left;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--surface-panel);
+  }
+  .compare-table .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) 0.6fr minmax(0, 1fr);
+    align-items: center;
+    gap: 0.8rem;
+    padding: 0.75rem 1.1rem;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .compare-table .row.head {
+    border-top: 0;
+    font-weight: 800;
+    background: var(--surface-elevated);
+  }
+  .compare-table .yes {
+    color: var(--success);
+  }
+  .compare-table .other {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--text-muted);
+  }
+  .compare-table small {
+    font-size: 0.8rem;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
   .features {
     max-width: 1180px;
     margin: 0 auto 4rem;
@@ -442,6 +585,18 @@
     }
     .features {
       grid-template-columns: 1fr 1fr;
+    }
+    .showcase {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .compare-table .row {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .compare-table .row > :nth-child(3) {
+      grid-column: 1 / -1;
+    }
+    .compare-table .row.head > :nth-child(3) {
+      display: none;
     }
     .section-heading {
       align-items: start;

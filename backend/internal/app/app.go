@@ -169,7 +169,7 @@ func Run() error {
 	mux.HandleFunc("POST /api/rooms/{roomId}/reports", reportLimiter.wrap(a.requireAuth(a.report)))
 	mux.HandleFunc("GET /api/discover", a.discover)
 	slugLimiter := newRateLimiter(60, time.Minute, a.trustedProxies)
-	mux.HandleFunc("GET /api/rooms/by-slug/{slug}", slugLimiter.wrap(a.roomBySlug))
+	mux.HandleFunc("GET /api/room-links/{slug}", slugLimiter.wrap(a.roomBySlug))
 	mux.HandleFunc("GET /api/rooms/{roomId}/bans", a.requireAuth(a.roomBans))
 	mux.HandleFunc("GET /api/account/queues", a.requireAuth(a.savedQueues))
 	mux.HandleFunc("POST /api/account/queues", a.requireAuth(a.savedQueues))
