@@ -700,8 +700,10 @@
     const active = new Set(room.members.filter((member) => member.active).map((member) => member.identityId));
     const slow = Object.entries(bufferingSince).filter(([id, since]) => active.has(id) && now - since > 2500);
     const pb = room.playback;
+    // Waiting only makes sense with company: never auto-pause a viewer who is alone.
     if (
       room.waitForAll &&
+      active.size > 1 &&
       pb.status === 'playing' &&
       !countdownEnd &&
       pb.media &&

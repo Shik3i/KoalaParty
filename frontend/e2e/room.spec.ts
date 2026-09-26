@@ -358,7 +358,7 @@ test('a rejected native playback command immediately restores the authoritative 
   let rejected = false;
   await page.route(/\/api\/rooms\/[^/]+\/commands$/, async (route) => {
     const request = route.request();
-    if (!rejected && request.method() === 'POST') {
+    if (!rejected && request.method() === 'POST' && request.postDataJSON()?.type === 'player.pause') {
       rejected = true;
       await route.fulfill({
         status: 503,
@@ -571,6 +571,8 @@ test('anonymous room persistence, shared sessions, idempotency and settings', as
       { id: roomId, videoId: E2E_VIDEO_ID },
     ),
   ).toBe(1);
+  // Remove only once the UI holds the latest revision, or the command is stale.
+  await expect(owner.locator('.queue li')).toHaveCount(2);
   await owner.locator('.queue .icon').first().click();
   await expect(owner.locator('.queue li')).toHaveCount(1);
   await owner.locator('.queue .icon').first().click();
