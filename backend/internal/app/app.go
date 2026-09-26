@@ -6,11 +6,13 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -254,15 +256,30 @@ func renderIndex(body []byte, path, publicOrigin string) []byte {
 	return []byte(page)
 }
 
+// staticName maps a URL path to a slash-separated name inside the web root.
+// Lookups go through an fs.FS rooted there, which rejects anything that could
+// leave it, so no request can reach files elsewhere.
+func staticName(urlPath string) (string, bool) {
+	name := strings.TrimPrefix(path.Clean("/"+urlPath), "/")
+	if name == "" {
+		name = "."
+	}
+	return name, fs.ValidPath(name)
+}
+
 func spaHandler(root, publicOrigin string) http.Handler {
 	files := http.FileServer(http.Dir(root))
+	site := os.DirFS(root)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			problem(w, 404, "not_found", "API route was not found.")
 			return
 		}
-		target := filepath.Join(root, filepath.Clean(r.URL.Path))
-		if info, e := os.Stat(target); e == nil && !info.IsDir() {
+		name, valid := staticName(r.URL.Path)
+		if !valid {
+			name = "."
+		}
+		if info, e := fs.Stat(site, name); valid && e == nil && !info.IsDir() {
 			switch {
 			case strings.HasPrefix(r.URL.Path, "/_app/immutable/"):
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")

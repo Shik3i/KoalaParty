@@ -438,6 +438,9 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 						_ = tx.Rollback()
 					}
 				}
+				if txErr != nil && a.logger != nil {
+					a.logger.Warn("recording member departure failed", "room_hash", shortHash(room), "error", txErr.Error())
+				}
 			}
 		}
 		if latest, e := a.snapshot(context.Background(), room, p.IdentityID); e == nil {

@@ -23,7 +23,17 @@ The production-like service is available at `http://127.0.0.1:8080`.
 
 ## Before a pull request
 
-Run the same checks as CI:
+Run every CI and CodeQL check locally with one command, before pushing:
+
+```sh
+scripts/ci-local.sh           # everything: backend, scripts, frontend, browser tests, Docker image, CodeQL
+scripts/ci-local.sh --quick   # skip npm ci, the Docker image and CodeQL
+scripts/ci-local.sh --only e2e
+```
+
+Browser tests run in the official Playwright Linux image with Chromium, Firefox and WebKit, exactly as in CI. The CodeQL step needs the `codeql-scan` command (a wrapper around the CodeQL CLI that analyzes any repository with GitHub's `security-and-quality` suite and skips findings dismissed on GitHub).
+
+The individual checks are:
 
 ```sh
 cd backend && gofmt -l . && go vet ./... && go test ./...
