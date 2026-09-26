@@ -101,6 +101,7 @@ type hub struct {
 	presenceBuckets map[string]rateBucket
 	chats           map[string][]chatMessage
 	presence        map[string]map[string]string
+	heatmaps        map[string]*heatmap
 	metrics         *runtimeMetrics
 }
 
@@ -130,6 +131,7 @@ func newHub(metrics ...*runtimeMetrics) *hub {
 		presenceBuckets: map[string]rateBucket{},
 		chats:           map[string][]chatMessage{},
 		presence:        map[string]map[string]string{},
+		heatmaps:        map[string]*heatmap{},
 		metrics:         runtime,
 	}
 }
@@ -186,6 +188,7 @@ func (h *hub) remove(room string, c *client) bool {
 		delete(h.rooms, room)
 		delete(h.chats, room)
 		delete(h.presence, room)
+		delete(h.heatmaps, room)
 	}
 	return lastForIdentity
 }
@@ -300,17 +303,6 @@ func (h *hub) broadcast(room string, s snapshot) {
 // reactionEmojis is the fixed reaction palette; anything else is rejected.
 var reactionEmojis = map[string]bool{"❤️": true, "😂": true, "🔥": true, "👀": true, "😴": true, "👏": true, "🎉": true, "😮": true, "😭": true, "🍿": true}
 
-func (h *hub) broadcastReaction(room, identity, emoji string) {
-	h.mu.RLock()
-	clients := make([]*client, 0, len(h.rooms[room]))
-	for c := range h.rooms[room] {
-		clients = append(clients, c)
-	}
-	h.mu.RUnlock()
-	for _, c := range clients {
-		c.enqueue(map[string]any{"type": "reaction", "identityId": identity, "emoji": emoji})
-	}
-}
 func (h *hub) allowIdentity(bucketMap map[string]rateBucket, identity string, limit int, window time.Duration, now time.Time) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -387,6 +379,9 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 	go c.writePump()
 	c.enqueue(map[string]any{"type": "chat.history", "messages": a.hub.chatHistory(room)})
 	c.enqueue(map[string]any{"type": "presence.all", "states": a.hub.presenceStates(room)})
+	if heat := a.hub.heatmapFor(room); heat != nil {
+		c.enqueue(heat)
+	}
 	if refreshed, snapshotErr := a.snapshot(r.Context(), room, p.IdentityID); snapshotErr == nil {
 		s = refreshed
 	}
@@ -470,7 +465,14 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 				continue
 			}
 			c.lastReaction = time.Now()
-			a.hub.broadcastReaction(room, p.IdentityID, payload.Emoji)
+			reaction := map[string]any{"type": "reaction", "identityId": p.IdentityID, "emoji": payload.Emoji}
+			if mediaID, position, playErr := a.currentPlayback(r.Context(), room); playErr == nil {
+				if bucket, counted := a.hub.recordReaction(room, mediaID, position); counted {
+					reaction["mediaId"] = mediaID
+					reaction["bucket"] = bucket
+				}
+			}
+			a.hub.send(room, reaction)
 			continue
 		}
 		if !c.allowCommand(time.Now()) || !a.hub.allowCommand(p.IdentityID, time.Now()) {

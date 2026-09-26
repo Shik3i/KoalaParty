@@ -168,6 +168,12 @@ func Run() error {
 	mux.HandleFunc("GET /api/rooms/{roomId}/ws", a.requireAuth(a.websocket))
 	mux.HandleFunc("POST /api/rooms/{roomId}/reports", reportLimiter.wrap(a.requireAuth(a.report)))
 	mux.HandleFunc("GET /api/discover", a.discover)
+	slugLimiter := newRateLimiter(60, time.Minute, a.trustedProxies)
+	mux.HandleFunc("GET /api/rooms/by-slug/{slug}", slugLimiter.wrap(a.roomBySlug))
+	mux.HandleFunc("GET /api/rooms/{roomId}/bans", a.requireAuth(a.roomBans))
+	mux.HandleFunc("GET /api/account/queues", a.requireAuth(a.savedQueues))
+	mux.HandleFunc("POST /api/account/queues", a.requireAuth(a.savedQueues))
+	mux.HandleFunc("DELETE /api/account/queues/{queueId}", a.requireAuth(a.deleteSavedQueue))
 	searchLimiter := newRateLimiter(40, time.Minute, a.trustedProxies)
 	mux.HandleFunc("GET /api/youtube/search", searchLimiter.wrap(a.requireAuth(a.youtubeSearch)))
 	mux.HandleFunc("GET /api/youtube/playlist", searchLimiter.wrap(a.requireAuth(a.youtubePlaylist)))
@@ -241,7 +247,7 @@ func renderIndex(body []byte, path, publicOrigin string) []byte {
 	if publicOrigin != "" {
 		page = strings.ReplaceAll(page, `content="/og-image.jpg"`, `content="`+publicOrigin+`/og-image.jpg"`)
 	}
-	if strings.HasPrefix(path, "/room/") {
+	if strings.HasPrefix(path, "/room/") || strings.HasPrefix(path, "/r/") {
 		page = strings.ReplaceAll(page, `content="`+defaultPreviewTitle+`"`, `content="`+roomPreviewTitle+`"`)
 		page = strings.ReplaceAll(page, `content="`+defaultPreviewDescription+`"`, `content="`+roomPreviewDescription+`"`)
 	}
