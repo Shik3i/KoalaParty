@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -116,7 +117,7 @@ func capFor(t string) string {
 		return "members.manage_permissions"
 	case "room.visibility":
 		return "room.manage_visibility"
-	case "room.sponsorblock", "room.rename":
+	case "room.sponsorblock", "room.rename", "room.slug", "room.mode", "room.wait", "room.countdown", "room.schedule":
 		return "room.manage_visibility"
 	case "room.transfer":
 		return "room.manage_ownership"
@@ -260,20 +261,34 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	case "player.play", "player.pause", "player.seek":
 		var in struct {
 			Position float64 `json:"position"`
+			// Countdown (play only) starts playback that many seconds from now so
+			// every viewer begins together; Reason "wait" (pause only) marks an
+			// automatic pause while someone buffers, which the room may lift again.
+			Countdown int    `json:"countdown"`
+			Reason    string `json:"reason"`
 		}
-		if json.Unmarshal(c.Payload, &in) != nil || math.IsNaN(in.Position) || math.IsInf(in.Position, 0) || in.Position < 0 || in.Position > 604800 {
+		if json.Unmarshal(c.Payload, &in) != nil || math.IsNaN(in.Position) || math.IsInf(in.Position, 0) || in.Position < 0 || in.Position > 604800 || in.Countdown < 0 || in.Countdown > 5 {
 			return snapshot{}, errors.New("invalid playback position")
 		}
 		status := "paused"
+		autoPaused := c.Type == "player.pause" && in.Reason == "wait"
+		startIn := 0
 		if c.Type == "player.play" {
 			status = "playing"
+			startIn = in.Countdown
 		}
 		if c.Type == "player.seek" {
 			_, e = tx.Exec("UPDATE playback_states SET position_seconds=?,revision=revision+1,updated_at=strftime('%Y-%m-%d %H:%M:%f','now'),updated_by_identity_id=? WHERE room_id=?", in.Position, p.IdentityID, room)
 		} else {
-			_, e = tx.Exec("UPDATE playback_states SET status=?,position_seconds=?,revision=revision+1,updated_at=strftime('%Y-%m-%d %H:%M:%f','now'),updated_by_identity_id=? WHERE room_id=?", status, in.Position, p.IdentityID, room)
+			_, e = tx.Exec("UPDATE playback_states SET status=?,position_seconds=?,auto_paused=?,revision=revision+1,updated_at="+anchorSQL(startIn)+",updated_by_identity_id=? WHERE room_id=?", status, in.Position, autoPaused, p.IdentityID, room)
 		}
 		payload["position"] = in.Position
+		if autoPaused {
+			payload["reason"] = "wait"
+		}
+		if startIn > 0 {
+			payload["countdown"] = startIn
+		}
 	case "player.rate":
 		// The rate carries the current position so the server can re-baseline it at the
 		// moment of the change — exactly like a seek — otherwise the stored position
@@ -510,6 +525,72 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 				activatedVideoID, e = advanceQueue(tx, room, p.IdentityID)
 			}
 		}
+	case "room.slug":
+		var in struct {
+			Slug string `json:"slug"`
+		}
+		if json.Unmarshal(c.Payload, &in) != nil {
+			return snapshot{}, errors.New("invalid room link")
+		}
+		slug, slugErr := normalizeSlug(in.Slug)
+		if slugErr != nil {
+			return snapshot{}, slugErr
+		}
+		if slug != "" {
+			var taken int
+			if e = tx.QueryRow("SELECT count(*) FROM rooms WHERE slug=? AND id<>?", slug, room).Scan(&taken); e != nil {
+				return snapshot{}, e
+			}
+			if taken > 0 {
+				return snapshot{}, reject("slug_taken", "That room link is already taken.")
+			}
+		}
+		_, e = tx.Exec("UPDATE rooms SET slug=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", nullable(slug), room)
+		payload["slug"] = slug
+	case "room.mode":
+		var in struct {
+			Mode string `json:"mode"`
+		}
+		if json.Unmarshal(c.Payload, &in) != nil || !roomModes[in.Mode] {
+			return snapshot{}, errors.New("invalid room mode")
+		}
+		_, e = tx.Exec("UPDATE rooms SET mode=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", in.Mode, room)
+		payload["mode"] = in.Mode
+	case "room.wait":
+		var in struct {
+			Enabled bool `json:"enabled"`
+		}
+		if json.Unmarshal(c.Payload, &in) != nil {
+			return snapshot{}, errors.New("invalid wait setting")
+		}
+		_, e = tx.Exec("UPDATE rooms SET wait_for_all=? WHERE id=?", in.Enabled, room)
+		payload["enabled"] = in.Enabled
+	case "room.countdown":
+		var in struct {
+			Seconds int `json:"seconds"`
+		}
+		if json.Unmarshal(c.Payload, &in) != nil || in.Seconds < 0 || in.Seconds > 5 {
+			return snapshot{}, errors.New("invalid countdown")
+		}
+		_, e = tx.Exec("UPDATE rooms SET countdown_seconds=? WHERE id=?", in.Seconds, room)
+		payload["seconds"] = in.Seconds
+	case "room.schedule":
+		var in struct {
+			At int64 `json:"at"`
+		}
+		if json.Unmarshal(c.Payload, &in) != nil || in.At < 0 {
+			return snapshot{}, errors.New("invalid schedule")
+		}
+		var scheduled any
+		if in.At > 0 {
+			at := time.UnixMilli(in.At).UTC()
+			if at.Before(time.Now().Add(-time.Minute)) || at.After(time.Now().AddDate(1, 0, 0)) {
+				return snapshot{}, reject("invalid_schedule", "Pick a time within the next year.")
+			}
+			scheduled = at.Format(time.RFC3339)
+		}
+		_, e = tx.Exec("UPDATE rooms SET scheduled_at=? WHERE id=?", scheduled, room)
+		payload["at"] = in.At
 	case "room.rename":
 		var in struct {
 			Name string `json:"name"`
@@ -686,11 +767,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		}
 	}
 	if len(enrichVideoIDs) > 0 && a.fetchTitle != nil {
-		go func() {
-			for _, videoID := range enrichVideoIDs {
-				a.enrichTitle(room, "YT"+videoID, videoID)
-			}
-		}()
+		go a.enrichTitles(enrichVideoIDs)
 	}
 	if a.segments != nil && activatedVideoID != "" {
 		go a.enrichSegments(room, activatedVideoID)
@@ -748,7 +825,7 @@ func addCurrentToHistory(tx *sql.Tx, room string) error {
 	if _, e := tx.Exec("INSERT INTO room_history(id,room_id,media_id) VALUES(?,?,?)", newID(10), room, mediaID.String); e != nil {
 		return e
 	}
-	_, e := tx.Exec(`DELETE FROM room_history WHERE id IN (SELECT id FROM room_history WHERE room_id=? ORDER BY played_at DESC LIMIT -1 OFFSET 20)`, room)
+	_, e := tx.Exec(`DELETE FROM room_history WHERE id IN (SELECT id FROM room_history WHERE room_id=? ORDER BY played_at DESC,rowid DESC LIMIT -1 OFFSET 20)`, room)
 	return e
 }
 func nullable(s string) any {
@@ -791,6 +868,11 @@ type queueAddition struct {
 // room state the sender saw. They must not fail just because someone else
 // played, seeked or joined a moment earlier.
 var revisionFreeCommands = map[string]bool{
+	"room.slug":         true,
+	"room.mode":         true,
+	"room.wait":         true,
+	"room.countdown":    true,
+	"room.schedule":     true,
 	"queue.add":         true,
 	"queue.play_now":    true,
 	"queue.remove":      true,
@@ -820,10 +902,15 @@ func cleanName(raw string) string {
 // or clears playback when mediaID is empty. Pending skip votes are discarded.
 func setCurrentMedia(tx *sql.Tx, room, actor, mediaID string, start float64) error {
 	status := "playing"
+	startIn := 0
 	if mediaID == "" {
 		status = "paused"
+	} else if e := tx.QueryRow("SELECT countdown_seconds FROM rooms WHERE id=?", room).Scan(&startIn); e != nil {
+		return e
 	}
-	if _, e := tx.Exec("UPDATE playback_states SET current_media_id=?,status=?,position_seconds=?,playback_rate=1,revision=revision+1,updated_at=strftime('%Y-%m-%d %H:%M:%f','now'),updated_by_identity_id=? WHERE room_id=?", nullable(mediaID), status, start, actor, room); e != nil {
+	// A new video starts after the room's countdown, so every player has loaded
+	// it and all viewers begin on the same frame.
+	if _, e := tx.Exec("UPDATE playback_states SET current_media_id=?,status=?,position_seconds=?,playback_rate=1,auto_paused=0,revision=revision+1,updated_at="+anchorSQL(startIn)+",updated_by_identity_id=? WHERE room_id=?", nullable(mediaID), status, start, actor, room); e != nil {
 		return e
 	}
 	_, e := tx.Exec("DELETE FROM skip_votes WHERE room_id=?", room)

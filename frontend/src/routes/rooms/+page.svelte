@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText, locale, t, type MessageKey } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { api, establish } from '$lib/api';
 
@@ -31,7 +32,7 @@
       }
       rooms = await api('/api/rooms');
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Could not load your rooms.';
+      error = errorText(e);
     } finally {
       loading = false;
     }
@@ -47,59 +48,69 @@
       await api(`/api/rooms/${room.id}${owner ? '' : '/membership'}`, { method: 'DELETE' });
       rooms = rooms.filter((candidate) => candidate.id !== room.id);
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Room action failed.';
+      error = errorText(e);
     } finally {
       pending = '';
     }
   }
 
   function date(value: string) {
-    return new Date(value.includes('T') ? value : `${value.replace(' ', 'T')}Z`).toLocaleString();
+    return new Date(value.includes('T') ? value : `${value.replace(' ', 'T')}Z`).toLocaleString($locale);
   }
 </script>
 
-<svelte:head><title>My rooms · KoalaParty</title></svelte:head>
+<svelte:head><title>{$t('nav.rooms')} · KoalaParty</title></svelte:head>
 <main class="page">
   <header class="title-row">
     <div>
-      <p class="eyebrow">Your library</p>
-      <h1>My rooms</h1>
+      <p class="eyebrow">{$t('rooms.eyebrow')}</p>
+      <h1>{$t('nav.rooms')}</h1>
     </div>
-    <a class="button" href="/">Create a room</a>
+    <a class="button" href="/">{$t('home.create')}</a>
   </header>
-  {#if loading}<div class="panel empty" role="status">Loading your rooms…</div>{:else if accountRequired}<div
+  {#if loading}<div class="panel empty" role="status">{$t('rooms.loading')}</div>{:else if accountRequired}<div
       class="panel empty"
     >
       <span>🔐</span>
-      <h2>Account required</h2>
-      <p>Create an account or log in to keep a room library across devices.</p>
-      <a class="button" href="/register">Create account</a><a class="button secondary" href="/login">Log in</a>
+      <h2>{$t('rooms.accountRequired')}</h2>
+      <p>{$t('rooms.accountRequiredBody')}</p>
+      <a class="button" href="/register">{$t('auth.createAccount')}</a><a class="button secondary" href="/login"
+        >{$t('auth.login')}</a
+      >
     </div>{:else if error && !rooms.length}<div class="panel empty" role="alert">
       <span>🌧️</span>
-      <h2>Could not load rooms</h2>
+      <h2>{$t('rooms.loadFailed')}</h2>
       <p>{error}</p>
-      <button onclick={load}>Try again</button>
+      <button onclick={load}>{$t('player.tryAgain')}</button>
     </div>{:else if !rooms.length}<section class="panel empty">
       <span>🪵</span>
-      <h2>No rooms yet</h2>
-      <p>Rooms you own or joined with this account will appear here on every device.</p>
-      <a class="button" href="/">Create a room</a>
+      <h2>{$t('rooms.empty')}</h2>
+      <p>{$t('rooms.emptyBody')}</p>
+      <a class="button" href="/">{$t('home.create')}</a>
     </section>{:else}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
-    <section class="grid" aria-label="Your rooms">
+    <section class="grid" aria-label={$t('rooms.yours')}>
       {#each rooms as room}
         <article class="panel room-card">
           <div class="room-icon" aria-hidden="true">{room.status === 'playing' ? '▶' : '🌿'}</div>
           <div class="room-copy">
-            <div class="badges"><span>{room.role}</span><span>{room.visibility.replace('_', '-')}</span></div>
+            <div class="badges">
+              <span>{$t(`role.${room.role}` as MessageKey)}</span><span
+                >{$t(`visibility.${room.visibility}` as MessageKey)}</span
+              >
+            </div>
             <h2><a href={`/room/${room.id}`}>{room.label}</a></h2>
-            <p>{room.title || 'Waiting for a video'}</p>
-            <small>Active {date(room.lastActiveAt)} · {room.participants} online</small>
+            <p>{room.title || $t('rooms.waiting')}</p>
+            <small>{$t('rooms.meta', { time: date(room.lastActiveAt), count: room.participants })}</small>
           </div>
           <div class="actions">
-            <a class="button secondary" href={`/room/${room.id}`}>Open</a>
+            <a class="button secondary" href={`/room/${room.id}`}>{$t('rooms.open')}</a>
             <button class="danger" disabled={pending === room.id} onclick={() => remove(room)}>
-              {pending === room.id ? 'Working…' : room.role === 'owner' ? 'Delete' : 'Leave'}
+              {pending === room.id
+                ? $t('rooms.working')
+                : room.role === 'owner'
+                  ? $t('rooms.delete')
+                  : $t('rooms.leave')}
             </button>
           </div>
         </article>

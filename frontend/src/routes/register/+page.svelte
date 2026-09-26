@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText, t } from '$lib/i18n';
   import { api } from '$lib/api';
   let username = '';
   let password = '';
@@ -15,17 +16,17 @@
       });
       location.href = '/account';
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Registration failed.';
+      error = errorText(e);
     } finally {
       submitting = false;
     }
   }
 </script>
 
-<svelte:head><title>Create account · KoalaParty</title></svelte:head>
+<svelte:head><title>{$t('auth.createAccount')} · KoalaParty</title></svelte:head>
 <main class="auth panel">
-  <h1>Keep your rooms</h1>
-  <p>Link this browser identity for cross-device access, private rooms, and friends.</p>
+  <h1>{$t('auth.keepRooms')}</h1>
+  <p>{$t('auth.keepRoomsBody')}</p>
   <form
     onsubmit={(e) => {
       e.preventDefault();
@@ -33,7 +34,7 @@
     }}
   >
     <label
-      >Username<input
+      >{$t('auth.username')}<input
         bind:value={username}
         minlength="3"
         maxlength="24"
@@ -42,7 +43,7 @@
         required
       /></label
     ><label
-      >Password<input
+      >{$t('auth.password')}<input
         type="password"
         bind:value={password}
         minlength="10"
@@ -51,10 +52,10 @@
         required
       /></label
     >{#if error}<p class="error" role="alert">{error}</p>{/if}<button disabled={submitting}
-      >{submitting ? 'Creating…' : 'Create account'}</button
+      >{submitting ? $t('home.creating') : $t('auth.createAccount')}</button
     >
   </form>
-  <p class="muted">No email is requested. Password recovery is unavailable.</p>
+  <p class="muted">{$t('auth.noEmail')}</p>
 </main>
 
 <style>

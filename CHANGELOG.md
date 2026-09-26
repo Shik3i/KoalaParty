@@ -4,6 +4,31 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-26
+
+### Added
+
+- German interface, detected from the browser and switchable in the header; the privacy policy is available in German.
+- Short room links (`/r/movie-night`) and a local QR code in a new invite dialog. Invite still copies the link at once.
+- Room modes — Party, Cinema (hosts control playback, everyone suggests and votes) and Host only — as permission presets; individual permissions still apply on top.
+- Countdown before every new video (0–5 s per room, default 3 s) so all players start on the same frame, plus “Wait for everyone”: the room pauses briefly while someone buffers and resumes together with a countdown.
+- Reaction heatmap on the progress bar, party recap with a shareable image, clickable timestamps in chat that jump everyone, saved queues for account holders, “Copy as links” for any queue, and scheduled parties with a countdown, calendar file, browser reminder and automatic start.
+- Ban list with unban in room settings, and anonymous display-name editing on the account page.
+- A new start page with a live, animated room demo, a three-step explanation and an honest comparison; YouTube links typed on the start page open a new room with the video.
+- CodeQL analysis for Go and TypeScript.
+
+### Changed
+
+- The room page is split into focused components (header, settings, queue, people, activity, player bar, dialogs).
+- Public discovery shows only generated room names, never custom names.
+- “Wait for everyone” stops waiting for a viewer after two stalls in five minutes, and never pauses someone watching alone. Scheduled parties start by the server clock.
+- Video titles are looked up in small parallel batches, only for videos without a known title, and each room is refreshed once per batch instead of once per video.
+- SQLite settings apply to every database connection, with `synchronous=NORMAL` for faster commits in WAL mode. Chat, presence and reactions reuse a session check from the last few seconds.
+
+### Fixed
+
+- Activity and history entries from the same second keep their real order.
+
 ## [0.13.0] - 2026-09-26
 
 ### Added

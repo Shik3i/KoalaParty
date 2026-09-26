@@ -1,7 +1,14 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { PaperPlaneRight, Plus } from 'phosphor-svelte';
-  import { participantNameParts, parseYouTubeInput, REACTION_EMOJIS, type ChatMessage } from '$lib/room';
+  import { locale, t } from '$lib/i18n';
+  import {
+    participantNameParts,
+    parseYouTubeInput,
+    REACTION_EMOJIS,
+    splitTimestamps,
+    type ChatMessage,
+  } from '$lib/room';
 
   let {
     messages,
@@ -12,7 +19,9 @@
     onSend,
     onReact,
     canAdd = false,
+    canSeek = false,
     onAddLink = () => {},
+    onSeek = () => {},
     inputEl = $bindable(null),
   }: {
     messages: ChatMessage[];
@@ -23,7 +32,9 @@
     onSend: (text: string) => boolean;
     onReact: (emoji: string) => void;
     canAdd?: boolean;
+    canSeek?: boolean;
     onAddLink?: (text: string) => void;
+    onSeek?: (seconds: number) => void;
     inputEl?: HTMLTextAreaElement | null;
   } = $props();
 
@@ -60,7 +71,7 @@
     }
   }
 
-  const time = (at: string) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = (at: string) => new Date(at).toLocaleTimeString($locale, { hour: '2-digit', minute: '2-digit' });
   const grouped = (index: number) =>
     index > 0 &&
     messages[index - 1].identityId === messages[index].identityId &&
@@ -68,10 +79,10 @@
 </script>
 
 <div class="chat">
-  <div class="messages" bind:this={list} onscroll={onScroll} aria-live="polite" aria-label="Chat history">
+  <div class="messages" bind:this={list} onscroll={onScroll} aria-live="polite" aria-label={$t('chat.history')}>
     {#if !messages.length}<div class="empty">
         <span>💬</span>
-        <p>Say hi! Chat is private to this room and disappears when everyone leaves.</p>
+        <p>{$t('chat.empty')}</p>
       </div>{/if}
     {#each messages as message, index (message.id)}{@const parts = participantNameParts(message.name)}
       <article class:mine={message.identityId === me} class:grouped={grouped(index)}>
@@ -80,19 +91,26 @@
               >{time(message.at)}</time
             >
           </header>{/if}
-        <p>{message.text}</p>
+        <p>
+          {#each splitTimestamps(message.text) as part, index (index)}{#if part.seconds !== undefined && canSeek}<button
+                type="button"
+                class="timestamp"
+                title={$t('chat.jumpTo', { time: part.text })}
+                onclick={() => onSeek(part.seconds!)}>{part.text}</button
+              >{:else}{part.text}{/if}{/each}
+        </p>
         {#if canAdd && parseYouTubeInput(message.text).videos.length}<button
             type="button"
             class="secondary add-link"
-            onclick={() => onAddLink(message.text)}><Plus size={13} weight="bold" />Add to queue</button
+            onclick={() => onAddLink(message.text)}><Plus size={13} weight="bold" />{$t('add.addToQueue')}</button
           >{/if}
       </article>{/each}
   </div>
-  <div class="quick-reactions" aria-label="Send a reaction">
+  <div class="quick-reactions" aria-label={$t('player.react')}>
     {#each REACTION_EMOJIS as emoji}<button
         type="button"
         class="ghost"
-        aria-label={`React ${emoji}`}
+        aria-label={$t('player.reactWith', { emoji })}
         onclick={() => onReact(emoji)}>{emoji}</button
       >{/each}
   </div>
@@ -103,17 +121,17 @@
       send();
     }}
   >
-    <label class="sr-only" for="chat-input">Chat message</label>
+    <label class="sr-only" for="chat-input">{$t('chat.message')}</label>
     <textarea
       id="chat-input"
       bind:this={inputEl}
       bind:value={text}
       rows="1"
       maxlength="500"
-      placeholder={!canChat ? 'You are muted in this room' : connected ? 'Message the room…' : 'Reconnecting…'}
+      placeholder={!canChat ? $t('chat.muted') : connected ? $t('chat.placeholder') : $t('room.reconnecting')}
       disabled={!canChat || !connected}
       onkeydown={onKeydown}></textarea>
-    <button aria-label="Send message" disabled={!canChat || !connected || !text.trim()}
+    <button aria-label={$t('chat.send')} disabled={!canChat || !connected || !text.trim()}
       ><PaperPlaneRight size={18} weight="fill" /></button
     >
   </form>
@@ -187,6 +205,22 @@
   }
   .quick-reactions button:hover {
     transform: scale(1.2);
+    background: var(--surface-hover);
+  }
+  .timestamp {
+    display: inline;
+    padding: 0 0.2rem;
+    border: 0;
+    border-radius: 4px;
+    background: var(--accent-muted);
+    color: var(--accent-primary);
+    font: inherit;
+    font-weight: 750;
+    box-shadow: none;
+    cursor: pointer;
+  }
+  .timestamp:hover {
+    transform: none;
     background: var(--surface-hover);
   }
   .add-link {

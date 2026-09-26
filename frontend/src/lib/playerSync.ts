@@ -1,3 +1,4 @@
+import { tNow } from '$lib/i18n';
 // The YouTube IFrame player states we react to.
 export const PLAYER_STATE = {
   ENDED: 0,
@@ -168,18 +169,18 @@ export function isCurrentVideoError(expectedVideoId: string | null, reportedVide
 export function playerErrorMessage(code: number): string {
   switch (code) {
     case 2:
-      return 'YouTube rejected this video request.';
+      return tNow('playerError.2');
     case 5:
-      return 'YouTube could not play this video in the embedded player.';
+      return tNow('playerError.5');
     case 100:
-      return 'This YouTube video no longer exists.';
+      return tNow('playerError.100');
     case 101:
     case 150:
-      return 'This video does not allow embedded playback.';
+      return tNow('playerError.150');
     case 153:
-      return 'YouTube could not verify the embedded player origin.';
+      return tNow('playerError.153');
     default:
-      return 'This video is unavailable or cannot be embedded.';
+      return tNow('playerError.unknown');
   }
 }
 

@@ -21,6 +21,7 @@
   } from '$lib/playerSync';
   import { createDiagnosticEvent, type DiagnosticEvent } from '$lib/diagnostics';
   import { loadYouTubeAPI } from '$lib/youtubeApi';
+  import { t, tNow } from '$lib/i18n';
   import type { SponsorSegment } from '$lib/room';
   let {
     enabled = false,
@@ -283,7 +284,7 @@
       if (retryCount < 1) {
         retryCurrentVideo('start_watchdog');
       } else {
-        playerError = 'YouTube did not start this video. Try again or skip it.';
+        playerError = tNow('playerError.notStarted');
         playerErrorCode = null;
       }
     }, START_TIMEOUT_MS);
@@ -378,11 +379,11 @@
     emitDiagnostic('initialize_started');
     try {
       await loadAPI();
-    } catch (error) {
+    } catch {
       if (disposed || generation !== playerGeneration) return;
       loading = false;
       failed = true;
-      playerError = error instanceof Error ? error.message : 'YouTube player could not be loaded.';
+      playerError = tNow('playerError.loadFailed');
       emitDiagnostic('initialize_failed', { message: playerError });
       return;
     }
@@ -451,7 +452,7 @@
             playerErrorCode = Number.isFinite(code) ? code : null;
             emitDiagnostic('error', { code: playerErrorCode });
             if (isRetryablePlayerError(code) && (status === 'playing' || code === 2) && retryCount < 1) {
-              playerError = 'Playback interrupted. Retrying…';
+              playerError = tNow('playerError.retrying');
               if (retryTimer) clearTimeout(retryTimer);
               const retry = ++retryGeneration;
               retryTimer = setTimeout(() => {
@@ -469,16 +470,16 @@
         if (generation !== playerGeneration || ready || disposed) return;
         failed = true;
         loading = false;
-        playerError = 'YouTube player did not initialize. Try again.';
+        playerError = tNow('playerError.initTimeout');
         emitDiagnostic('ready_timeout');
         player?.destroy?.();
         player = null;
       }, READY_TIMEOUT_MS);
-    } catch (error) {
+    } catch {
       loading = false;
       failed = true;
       player = null;
-      playerError = error instanceof Error ? error.message : 'YouTube player could not be initialized.';
+      playerError = tNow('playerError.initFailed');
       emitDiagnostic('initialize_failed', { message: playerError });
     }
   }
@@ -903,25 +904,22 @@
 <div class="player">
   <div class="player-host" bind:this={host}></div>
   {#if autoplayBlocked && !playerError}<div class="autoplay-scrim">
-      <button class="autoplay-prompt" aria-label="Join the party — play with sound" onclick={resumeAutoplay}
+      <button class="autoplay-prompt" aria-label={$t('player.joinAria')} onclick={resumeAutoplay}
         ><SpeakerHigh size={22} weight="fill" /><span
-          ><b>Join the party</b><small>Autoplay blocked — tap to watch with sound</small></span
+          ><b>{$t('player.join')}</b><small>{$t('player.autoplayBlocked')}</small></span
         ></button
       >
     </div>{/if}
   {#if playerError}<div class="player-error" role="alert">
       <span><Warning size={38} weight="fill" /></span>
       <p>{playerError}</p>
-      <small
-        >{playerErrorCode === 153
-          ? 'The embedded player identity could not be verified.'
-          : 'Playback can recover after a retry or a different video.'}</small
-      >
+      <small>{playerErrorCode === 153 ? $t('playerError.identity') : $t('playerError.recover')}</small>
       <div class="player-error-actions">
-        {#if player && ready}<button class="secondary" onclick={() => retryCurrentVideo('manual')}>Try again</button
-          >{:else}<button class="secondary" onclick={retryInitialization}>Reload player</button>{/if}
+        {#if player && ready}<button class="secondary" onclick={() => retryCurrentVideo('manual')}
+            >{$t('player.tryAgain')}</button
+          >{:else}<button class="secondary" onclick={retryInitialization}>{$t('player.reload')}</button>{/if}
         {#if onSkip && lastMediaId}<button class="secondary skip-broken" onclick={() => onSkip(lastMediaId!)}
-            ><SkipForward size={16} weight="fill" />Skip this video</button
+            ><SkipForward size={16} weight="fill" />{$t('player.skipBroken')}</button
           >{/if}
       </div>
     </div>{/if}
@@ -929,7 +927,7 @@
       <span
         >{#if hasQueue}<Hourglass size={40} weight="regular" />{:else}<Play size={40} weight="fill" />{/if}</span
       >
-      <p>{hasQueue ? 'Nothing playing right now.' : 'Add a YouTube video to start watching.'}</p>
+      <p>{hasQueue ? $t('player.nothingPlaying') : $t('player.addToStart')}</p>
     </div>{/if}
 </div>
 

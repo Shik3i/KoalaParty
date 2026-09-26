@@ -13,6 +13,8 @@ Privacy-first shared YouTube rooms. Synchronized playback, a collaborative queue
 - Ephemeral live chat, emoji reactions and join notices that also show over the video in fullscreen; nothing is stored.
 - Vote to skip, per-person presence (who is buffering or still needs to tap for sound), undo for removals, room names and self-chosen display names without an account.
 - Optional server-side YouTube search and playlist import with `KOALAPARTY_YOUTUBE_API_KEY`.
+- Countdown starts and “wait for everyone” so all viewers begin on the same frame, room modes (party, cinema, host only), short links with QR codes, scheduled parties, saved queues, a reaction heatmap and a shareable party recap.
+- English and German interface.
 - Server-authoritative play, pause, seek, queue, reorder, skip, and reconnect behavior.
 - Collaborative queue voting, shuffle, loop, duplicate protection, history, and ephemeral emoji reactions.
 - Room-synchronized playback speed and optional SponsorBlock skipping of sponsor/intro/outro segments for everyone at once.

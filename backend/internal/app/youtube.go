@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -30,65 +31,104 @@ func fallbackTitle(clientTitle, videoID string) string {
 	return title
 }
 
-// enrichTitle resolves the real oEmbed title in the background and, if it
-// differs from what is stored, updates the media row and rebroadcasts the room
-// so every client sees the proper title. Runs in its own goroutine; all failures
-// are silent and simply leave the placeholder in place.
-func (a *application) enrichTitle(room, mediaID, videoID string) {
+// titleLookupBatch bounds parallel oEmbed requests and how many titles are
+// collected before the affected rooms are rebroadcast once.
+const titleLookupBatch = 6
+
+// enrichTitles resolves real oEmbed titles in the background for videos that
+// still carry the placeholder, updates the media rows and rebroadcasts each
+// affected room once per batch, so importing a playlist does not flood viewers
+// with a snapshot per video. All failures are silent and keep the placeholder.
+func (a *application) enrichTitles(videoIDs []string) {
 	// This runs in its own goroutine, so an unrecovered panic here would crash the
 	// entire process (unlike a panic inside an HTTP handler, which net/http
 	// recovers per-request). Never let background work take the server down.
 	defer func() {
 		if recover() != nil {
-			loggerWithWriter(a.logger).Error("enrichTitle panic", "room_hash", shortHash(room))
+			loggerWithWriter(a.logger).Error("enrichTitles panic")
 		}
 	}()
 	if a.fetchTitle == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-	defer cancel()
-	title := a.fetchTitle(ctx, videoID)
-	if title == "" {
-		return
+	pending := make([]string, 0, len(videoIDs))
+	for _, videoID := range videoIDs {
+		var title string
+		// Titles already resolved for an earlier room need no second request.
+		if a.db.QueryRow("SELECT coalesce(title,'') FROM media_items WHERE id=?", "YT"+videoID).Scan(&title) == nil && title != fallbackTitle("", videoID) {
+			continue
+		}
+		pending = append(pending, videoID)
 	}
-	if len(title) > 200 {
-		title = strings.TrimSpace(title[:200])
+	for start := 0; start < len(pending); start += titleLookupBatch {
+		batch := pending[start:min(start+titleLookupBatch, len(pending))]
+		titles := make([]string, len(batch))
+		var wg sync.WaitGroup
+		for i, videoID := range batch {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer func() {
+					if recover() != nil {
+						loggerWithWriter(a.logger).Error("title lookup panic")
+					}
+				}()
+				ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+				defer cancel()
+				titles[i] = a.fetchTitle(ctx, videoID)
+			}()
+		}
+		wg.Wait()
+		affected := map[string]bool{}
+		for i, videoID := range batch {
+			title := titles[i]
+			if title == "" {
+				continue
+			}
+			if len(title) > 200 {
+				title = strings.TrimSpace(title[:200])
+			}
+			mediaID := "YT" + videoID
+			res, err := a.db.Exec("UPDATE media_items SET title=? WHERE id=? AND title<>?", title, mediaID, title)
+			if err != nil {
+				continue
+			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				continue
+			}
+			for _, room := range a.roomsShowingMedia(mediaID) {
+				affected[room] = true
+			}
+		}
+		for room := range affected {
+			if !a.hub.activeRoom(room) {
+				continue
+			}
+			if s, err := a.snapshot(context.Background(), room, ""); err == nil {
+				a.hub.broadcast(room, s)
+			}
+		}
 	}
-	res, err := a.db.Exec("UPDATE media_items SET title=? WHERE id=? AND title<>?", title, mediaID, title)
-	if err != nil {
-		return
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return
-	}
-	rows, err := a.db.QueryContext(ctx, `SELECT DISTINCT room_id FROM (
+}
+
+// roomsShowingMedia lists rooms whose current video or queue contains mediaID.
+func (a *application) roomsShowingMedia(mediaID string) []string {
+	rows, err := a.db.Query(`SELECT DISTINCT room_id FROM (
 		SELECT room_id FROM playback_states WHERE current_media_id=?
 		UNION SELECT room_id FROM room_queue_items WHERE media_id=?
 	)`, mediaID, mediaID)
 	if err != nil {
-		return
+		return nil
 	}
-	var affectedRooms []string
+	defer rows.Close()
+	var rooms []string
 	for rows.Next() {
-		var affectedRoom string
-		if rows.Scan(&affectedRoom) != nil {
-			rows.Close()
-			return
-		}
-		affectedRooms = append(affectedRooms, affectedRoom)
-	}
-	if rows.Close() != nil || rows.Err() != nil {
-		return
-	}
-	for _, affectedRoom := range affectedRooms {
-		if !a.hub.activeRoom(affectedRoom) {
-			continue
-		}
-		if s, snapshotErr := a.snapshot(ctx, affectedRoom, ""); snapshotErr == nil {
-			a.hub.broadcast(affectedRoom, s)
+		var room string
+		if rows.Scan(&room) == nil {
+			rooms = append(rooms, room)
 		}
 	}
+	return rooms
 }
 
 // fetchYouTubeTitle resolves the human-readable title for a video via YouTube's

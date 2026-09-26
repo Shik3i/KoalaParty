@@ -1,0 +1,115 @@
+/* Shared styles for the room page and its components. */
+.room-shell .icon-button {
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+}
+.room-shell .small-button {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.78rem;
+}
+.room-shell details {
+  position: relative;
+}
+.room-shell summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.4rem;
+}
+.room-shell summary::-webkit-details-marker {
+  display: none;
+}
+.room-shell .menu {
+  position: fixed;
+  right: 0;
+  top: 2rem;
+  width: 190px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
+  padding: 0.4rem;
+  border-radius: var(--radius-sm);
+  z-index: 60;
+  box-shadow: var(--shadow-panel);
+}
+.room-shell .menu button {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.85rem;
+}
+.room-shell .menu :is(svg) {
+  flex: 0 0 auto;
+}
+.room-shell .muted {
+  color: var(--text-muted);
+}
+.room-shell .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.room-shell .panel-empty {
+  text-align: center;
+  padding: 2.5rem 1rem;
+  color: var(--text-muted);
+}
+.room-shell .panel-empty span {
+  font-size: 2rem;
+}
+.room-shell .room-panel > header {
+  padding: 0.7rem 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.room-shell .room-panel h2 {
+  font-size: 0.95rem;
+  margin: 0;
+}
+/* Dialogs */
+.room-shell .modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  z-index: 80;
+}
+.room-shell .modal-scrim {
+  position: fixed;
+  inset: 0;
+  border: 0;
+  border-radius: 0;
+  background: rgba(5, 8, 6, 0.55);
+  cursor: default;
+}
+.room-shell .modal-scrim:hover {
+  background: rgba(5, 8, 6, 0.55);
+}
+.room-shell .modal {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 26rem;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  padding: 1.4rem;
+  display: grid;
+  gap: 1.1rem;
+}
+.room-shell .modal h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.room-shell .modal p {
+  margin: 0;
+  line-height: 1.5;
+}
+.room-shell .modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}

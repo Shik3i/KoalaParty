@@ -2,6 +2,7 @@
   import { fly } from 'svelte/transition';
   import { ClipboardText, MagnifyingGlass, Play, Plus, X, ArrowBendDownRight, Spinner } from 'phosphor-svelte';
   import { api } from '$lib/api';
+  import { errorText, t } from '$lib/i18n';
   import { formatDuration, looksLikeLink, parseYouTubeInput, type AddMode, type VideoRequest } from '$lib/room';
 
   interface SearchResult {
@@ -46,18 +47,18 @@
     !value.trim()
       ? ''
       : parsed.videos.length > 1
-        ? `${parsed.videos.length} videos found`
+        ? $t('add.videosFound', { count: parsed.videos.length })
         : parsed.playlistId && !parsed.videos.length
-          ? 'Playlist link'
+          ? $t('add.playlistLink')
           : parsed.videos.length === 1
             ? parsed.videos[0].start
-              ? `Starts at ${formatDuration(parsed.videos[0].start)}`
+              ? $t('add.startsAt', { time: formatDuration(parsed.videos[0].start) })
               : ''
             : isLink
-              ? 'That link does not point to a YouTube video'
+              ? $t('add.notYouTube')
               : searchEnabled
-                ? 'Press Enter to search YouTube'
-                : 'Paste a YouTube link',
+                ? $t('add.enterToSearch')
+                : $t('add.pasteLink'),
   );
 
   async function submit(mode: AddMode) {
@@ -87,11 +88,11 @@
       return;
     }
     if (isLink) {
-      onError('That link does not point to a YouTube video.');
+      onError($t('add.notYouTube'));
       return;
     }
     if (!searchEnabled) {
-      onError('Paste a YouTube link — search is not enabled on this server.');
+      onError($t('add.searchDisabled'));
       return;
     }
     await search();
@@ -106,7 +107,7 @@
       results = await api<SearchResult[]>(`/api/youtube/search?q=${encodeURIComponent(query)}`);
     } catch (e) {
       results = null;
-      onError(e instanceof Error ? e.message : 'Search failed.');
+      onError(errorText(e));
     } finally {
       searching = false;
     }
@@ -127,7 +128,7 @@
       else inputEl?.focus();
     } catch {
       inputEl?.focus();
-      onError('Clipboard access was blocked — press Ctrl+V (⌘V) in the box instead.');
+      onError($t('add.clipboardBlocked'));
     }
   }
 
@@ -155,7 +156,7 @@
 
 <div class="add-bar {variant}">
   <div class="field">
-    <label class="sr-only" for={inputId}>YouTube URL or search</label>
+    <label class="sr-only" for={inputId}>{$t('add.label')}</label>
     <span class="lead" aria-hidden="true"
       >{#if searching || busy}<Spinner
           size={18}
@@ -175,22 +176,22 @@
       disabled={!canAdd}
       placeholder={canAdd
         ? searchEnabled
-          ? 'Paste a YouTube link or search…'
-          : 'Paste a YouTube link…'
-        : 'You cannot add videos in this room'}
+          ? $t('add.placeholderSearch')
+          : $t('add.placeholder')
+        : $t('add.notAllowed')}
       onpaste={onPaste}
       onkeydown={onKeydown}
     />
     {#if value}<button
         type="button"
         class="ghost clear"
-        aria-label="Clear"
+        aria-label={$t('add.clear')}
         onclick={() => ((value = ''), (results = null))}><X size={16} weight="bold" /></button
       >{:else}<button
         type="button"
         class="ghost clear"
-        aria-label="Paste from clipboard"
-        title="Paste from clipboard"
+        aria-label={$t('add.paste')}
+        title={$t('add.paste')}
         disabled={!canAdd}
         onclick={paste}><ClipboardText size={18} weight="bold" /></button
       >{/if}
@@ -203,33 +204,33 @@
         type="button"
         onclick={() => submit('queue')}
         disabled={busy || !canAdd || (!parsed.videos.length && !parsed.playlistId)}
-        ><Plus size={16} weight="bold" />Add to queue</button
+        ><Plus size={16} weight="bold" />{$t('add.addToQueue')}</button
       >
       {#if parsed.videos.length}<button
           type="button"
           class="secondary"
-          title="Insert at the top of the queue (Alt+Enter)"
+          title={$t('add.playNextHint')}
           onclick={() => submit('next')}
-          disabled={busy || !canAdd}><ArrowBendDownRight size={16} weight="bold" />Play next</button
+          disabled={busy || !canAdd}><ArrowBendDownRight size={16} weight="bold" />{$t('add.playNext')}</button
         ><button
           type="button"
           class="secondary"
-          title="Start for everyone now (Shift+Enter)"
+          title={$t('add.playNowHint')}
           onclick={() => submit('now')}
-          disabled={busy || !canPlayNow}><Play size={16} weight="fill" />Play now</button
+          disabled={busy || !canPlayNow}><Play size={16} weight="fill" />{$t('add.playNow')}</button
         >{/if}
     </div>{/if}
   {#if hint}<p class="hint" aria-live="polite">{hint}</p>{/if}
   {#if results}<div class="results" transition:fly={{ y: -6, duration: 160 }}>
       <header>
-        <span>Results for “{searchedFor}”</span><button
+        <span>{$t('add.resultsFor', { query: searchedFor })}</span><button
           type="button"
           class="ghost"
-          aria-label="Close search results"
+          aria-label={$t('add.closeResults')}
           onclick={() => (results = null)}><X size={14} weight="bold" /></button
         >
       </header>
-      {#if !results.length}<p class="muted">No embeddable videos found.</p>{/if}
+      {#if !results.length}<p class="muted">{$t('add.noResults')}</p>{/if}
       <ul>
         {#each results as result (result.videoId)}<li>
             <img src={result.thumbnail} alt="" loading="lazy" />
@@ -241,14 +242,14 @@
               <button
                 type="button"
                 class="ghost"
-                aria-label={`Add ${result.title} to the queue`}
-                title="Add to queue"
+                aria-label={$t('add.addTitle', { title: result.title })}
+                title={$t('add.addToQueue')}
                 onclick={() => addResult(result, 'queue')}><Plus size={16} weight="bold" /></button
               ><button
                 type="button"
                 class="ghost"
-                aria-label={`Play ${result.title} now`}
-                title="Play now"
+                aria-label={$t('add.playTitle', { title: result.title })}
+                title={$t('add.playNow')}
                 disabled={!canPlayNow}
                 onclick={() => addResult(result, 'now')}><Play size={16} weight="fill" /></button
               >

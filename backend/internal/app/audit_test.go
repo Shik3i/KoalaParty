@@ -183,7 +183,7 @@ func TestMetadataPanicLogsExcludeRawIdentifiers(t *testing.T) {
 			a.fetchTitle = func(context.Context, string) string { panic("private-panic-payload") }
 			a.segments = newSegmentCache(func(context.Context, string) []sponsorSegment { panic("private-panic-payload") })
 			if worker == "title" {
-				a.enrichTitle(room, "media", "video")
+				a.enrichTitles([]string{"video"})
 			} else {
 				a.enrichSegments(room, "video")
 			}
@@ -191,7 +191,7 @@ func TestMetadataPanicLogsExcludeRawIdentifiers(t *testing.T) {
 			if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
 				t.Fatal(err)
 			}
-			if entry["room_hash"] != shortHash(room) || strings.Contains(logs.String(), room) || strings.Contains(logs.String(), "private-panic-payload") {
+			if (worker != "title" && entry["room_hash"] != shortHash(room)) || strings.Contains(logs.String(), room) || strings.Contains(logs.String(), "private-panic-payload") {
 				t.Fatalf("unsafe panic log: %s", logs.String())
 			}
 		})

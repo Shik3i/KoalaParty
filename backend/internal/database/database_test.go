@@ -12,7 +12,7 @@ func TestMigrationFromEmptyDatabase(t *testing.T) {
 	}
 	defer db.Close()
 	var version int
-	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 9 {
+	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 10 {
 		t.Fatalf("migration version=%d err=%v", version, e)
 	}
 	var rateColumn int
@@ -51,6 +51,10 @@ func TestMigrationFromEmptyDatabase(t *testing.T) {
 	if e = db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='skip_votes'").Scan(&skipVotes); e != nil || skipVotes != 1 {
 		t.Fatalf("skip vote table missing: count=%d err=%v", skipVotes, e)
 	}
+	var partyColumns int
+	if e = db.QueryRow("SELECT (SELECT count(*) FROM pragma_table_info('rooms') WHERE name IN ('slug','mode','wait_for_all','countdown_seconds','scheduled_at'))+(SELECT count(*) FROM pragma_table_info('playback_states') WHERE name='auto_paused')+(SELECT count(*) FROM sqlite_master WHERE type='table' AND name='saved_queues')").Scan(&partyColumns); e != nil || partyColumns != 7 {
+		t.Fatalf("party feature schema missing: count=%d err=%v", partyColumns, e)
+	}
 }
 
 func TestReportLimitMigrationResolvesLegacyDuplicates(t *testing.T) {
@@ -65,7 +69,15 @@ func TestReportLimitMigrationResolvesLegacyDuplicates(t *testing.T) {
 		DROP TABLE skip_votes;
 		ALTER TABLE rooms DROP COLUMN name;
 		ALTER TABLE room_queue_items DROP COLUMN start_seconds;
-		DELETE FROM schema_migrations WHERE version IN (7, 8, 9);
+		DROP INDEX rooms_slug_idx;
+		DROP TABLE saved_queues;
+		ALTER TABLE rooms DROP COLUMN slug;
+		ALTER TABLE rooms DROP COLUMN mode;
+		ALTER TABLE rooms DROP COLUMN wait_for_all;
+		ALTER TABLE rooms DROP COLUMN countdown_seconds;
+		ALTER TABLE rooms DROP COLUMN scheduled_at;
+		ALTER TABLE playback_states DROP COLUMN auto_paused;
+		DELETE FROM schema_migrations WHERE version IN (7, 8, 9, 10);
 		INSERT INTO identities(id,secret_hash,display_name,avatar_seed) VALUES('owner','hash','Owner','owner');
 		INSERT INTO rooms(id,owner_identity_id) VALUES('AAAAAAAAAAAAAAAA','owner');
 		INSERT INTO room_reports(id,room_id,reporter_identity_id,reason) VALUES

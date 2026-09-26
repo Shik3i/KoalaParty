@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -58,9 +58,13 @@ type playback struct {
 	UpdatedAt string           `json:"updatedAt"`
 	// SkipVotes counts votes to skip the current video; SkipNeeded is the
 	// majority of connected people required. SkipVoted is personalized.
-	SkipVotes  int      `json:"skipVotes"`
-	SkipNeeded int      `json:"skipNeeded"`
-	SkipVoted  bool     `json:"skipVoted"`
+	SkipVotes  int  `json:"skipVotes"`
+	SkipNeeded int  `json:"skipNeeded"`
+	SkipVoted  bool `json:"skipVoted"`
+	// StartsAt (server Unix ms) is set while a countdown runs: the video is
+	// "playing" but everyone holds at Position until then.
+	StartsAt   int64    `json:"startsAt"`
+	AutoPaused bool     `json:"autoPaused"`
 	skipVoters []string `json:"-"`
 }
 type event struct {
@@ -86,6 +90,11 @@ type snapshot struct {
 	Revision           int64       `json:"revision"`
 	PublicRoomsEnabled bool        `json:"publicRoomsEnabled"`
 	SearchEnabled      bool        `json:"searchEnabled"`
+	Slug               string      `json:"slug"`
+	Mode               string      `json:"mode"`
+	WaitForAll         bool        `json:"waitForAll"`
+	CountdownSeconds   int         `json:"countdownSeconds"`
+	ScheduledAt        int64       `json:"scheduledAt"`
 	// ServerTime is the server clock (Unix ms) at which Playback.Position was
 	// extrapolated, so clients can anchor it independent of network latency.
 	ServerTime        int64 `json:"serverTime"`
@@ -210,7 +219,7 @@ func (a *application) roomPreviews(w http.ResponseWriter, r *http.Request, p pri
 		}
 		if status == "playing" {
 			if updated, parseErr := time.Parse("2006-01-02 15:04:05", updatedAt); parseErr == nil {
-				position += time.Since(updated.UTC()).Seconds() * playbackRate
+				position += max(0, time.Since(updated.UTC()).Seconds()) * playbackRate
 			}
 		}
 		out = append(out, map[string]any{"id": id, "label": displayLabel(id, name), "title": title, "thumbnail": thumbnail, "status": status, "position": position, "participants": a.hub.activeCount(id)})
@@ -321,10 +330,17 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 	defer tx.Rollback()
 	s.allowedIdentities = map[string]bool{}
 	var name sql.NullString
-	if e := tx.QueryRowContext(ctx, "SELECT visibility,revision,queue_loop,sponsorblock_enabled,name FROM rooms WHERE id=?", id).Scan(&s.Visibility, &s.Revision, &s.QueueLoop, &s.SponsorBlock, &name); e != nil {
+	var slug, scheduledAt sql.NullString
+	if e := tx.QueryRowContext(ctx, "SELECT visibility,revision,queue_loop,sponsorblock_enabled,name,slug,mode,wait_for_all,countdown_seconds,scheduled_at FROM rooms WHERE id=?", id).Scan(&s.Visibility, &s.Revision, &s.QueueLoop, &s.SponsorBlock, &name, &slug, &s.Mode, &s.WaitForAll, &s.CountdownSeconds, &scheduledAt); e != nil {
 		return s, e
 	}
 	s.Label = displayLabel(id, name)
+	s.Slug = slug.String
+	if scheduledAt.Valid {
+		if at, parseErr := time.Parse(time.RFC3339, scheduledAt.String); parseErr == nil {
+			s.ScheduledAt = at.UnixMilli()
+		}
+	}
 	rows, e := tx.QueryContext(ctx, "SELECT i.id,i.display_name,m.role,i.account_id,"+roomAccessSQL+" FROM room_members m JOIN identities i ON i.id=m.identity_id JOIN rooms r ON r.id=m.room_id WHERE m.room_id=? ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,i.display_name", id)
 	if e != nil {
 		return s, e
@@ -341,7 +357,7 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 		m.AccountLinked = account.Valid
 		s.allowedIdentities[m.IdentityID] = eligible
 		for _, c := range memberCapabilities {
-			m.Permissions[c] = true
+			m.Permissions[c] = modeAllows(s.Mode, c)
 		}
 		s.Members = append(s.Members, m)
 	}
@@ -405,7 +421,7 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 		return s, e
 	}
 	q.Close()
-	historyRows, e := tx.QueryContext(ctx, `SELECT m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,'') FROM room_history h JOIN media_items m ON m.id=h.media_id WHERE h.room_id=? ORDER BY h.played_at DESC LIMIT 20`, id)
+	historyRows, e := tx.QueryContext(ctx, `SELECT m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,'') FROM room_history h JOIN media_items m ON m.id=h.media_id WHERE h.room_id=? ORDER BY h.played_at DESC,h.rowid DESC LIMIT 20`, id)
 	if e != nil {
 		return s, e
 	}
@@ -423,7 +439,7 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 	}
 	historyRows.Close()
 	var mid, title, thumb, provider sql.NullString
-	if e = tx.QueryRowContext(ctx, `SELECT p.status,p.position_seconds,p.playback_rate,p.revision,p.updated_at,m.id,m.provider_media_id,m.title,m.thumbnail_url FROM playback_states p LEFT JOIN media_items m ON m.id=p.current_media_id WHERE p.room_id=?`, id).Scan(&s.Playback.Status, &s.Playback.Position, &s.Playback.Rate, &s.Playback.Revision, &s.Playback.UpdatedAt, &mid, &provider, &title, &thumb); e != nil {
+	if e = tx.QueryRowContext(ctx, `SELECT p.status,p.position_seconds,p.playback_rate,p.revision,p.updated_at,p.auto_paused,m.id,m.provider_media_id,m.title,m.thumbnail_url FROM playback_states p LEFT JOIN media_items m ON m.id=p.current_media_id WHERE p.room_id=?`, id).Scan(&s.Playback.Status, &s.Playback.Position, &s.Playback.Rate, &s.Playback.Revision, &s.Playback.UpdatedAt, &s.Playback.AutoPaused, &mid, &provider, &title, &thumb); e != nil {
 		return s, e
 	}
 	// Always emit an array, never null: a nil slice would marshal to JSON null and
@@ -464,10 +480,15 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 		if updated, err := time.Parse("2006-01-02 15:04:05", s.Playback.UpdatedAt); err == nil {
 			// Media advances `rate` seconds per wall-clock second while playing, so the
 			// elapsed-time extrapolation must scale by the playback rate.
-			s.Playback.Position += now.Sub(updated.UTC()).Seconds() * s.Playback.Rate
+			// A future anchor is a countdown: hold at the position until it starts.
+			if elapsed := now.Sub(updated.UTC()); elapsed > 0 {
+				s.Playback.Position += elapsed.Seconds() * s.Playback.Rate
+			} else {
+				s.Playback.StartsAt = updated.UTC().UnixMilli()
+			}
 		}
 	}
-	er, e := tx.QueryContext(ctx, `SELECT e.id,coalesce(e.actor_identity_id,''),coalesce(i.display_name,''),e.event_type,e.payload_json,e.created_at FROM room_events e LEFT JOIN identities i ON i.id=e.actor_identity_id WHERE e.room_id=? ORDER BY e.created_at DESC LIMIT 200`, id)
+	er, e := tx.QueryContext(ctx, `SELECT e.id,coalesce(e.actor_identity_id,''),coalesce(i.display_name,''),e.event_type,e.payload_json,e.created_at FROM room_events e LEFT JOIN identities i ON i.id=e.actor_identity_id WHERE e.room_id=? ORDER BY e.created_at DESC,e.rowid DESC LIMIT 200`, id)
 	if e != nil {
 		return s, e
 	}
@@ -489,6 +510,8 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 		return s, e
 	}
 	er.Close()
-	sort.Slice(s.Events, func(i, j int) bool { return s.Events[i].CreatedAt < s.Events[j].CreatedAt })
+	// Timestamps have one-second resolution; the insertion order breaks ties, so
+	// reverse the newest-first rows instead of re-sorting by time.
+	slices.Reverse(s.Events)
 	return s, tx.Commit()
 }

@@ -9,7 +9,19 @@
   import '../lib/styles/base.css';
   import { onMount } from 'svelte';
   import { page } from '$app/state';
-  import { Compass, FilmSlate, UsersThree, UserCircle, ShieldStar, Sun, Moon, Monitor, Palette } from 'phosphor-svelte';
+  import {
+    Compass,
+    FilmSlate,
+    UsersThree,
+    UserCircle,
+    ShieldStar,
+    Sun,
+    Moon,
+    Monitor,
+    Palette,
+    Translate,
+  } from 'phosphor-svelte';
+  import { LOCALES, locale, setLocale, t, type Locale } from '$lib/i18n';
   import { applyTheme, initialTheme, applyDesign, initialDesign, designs, type Theme, type Design } from '$lib/theme';
   import { establish, type Principal } from '$lib/api';
   let { children } = $props();
@@ -39,11 +51,11 @@
     design = next;
     applyDesign(next);
   }
-  const themeOptions: { value: Theme; label: string }[] = [
-    { value: 'system', label: 'System theme' },
-    { value: 'light', label: 'Light theme' },
-    { value: 'dark', label: 'Dark theme' },
-  ];
+  const themeOptions = $derived([
+    { value: 'system' as Theme, label: $t('layout.themeSystem') },
+    { value: 'light' as Theme, label: $t('layout.themeLight') },
+    { value: 'dark' as Theme, label: $t('layout.themeDark') },
+  ]);
   const current = (path: string) => (path === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(path));
 </script>
 
@@ -52,31 +64,45 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d1b15" />
 </svelte:head>
 <svelte:window onscroll={() => (compactHeader = window.scrollY > 28)} />
-<a class="skip" href="#main">Skip to content</a>
+<a class="skip" href="#main">{$t('layout.skip')}</a>
 <header class="site-header" class:compact={compactHeader}>
   <a class="brand" href="/"><img src="/icons/koalaparty-192.png" alt="" /> KoalaParty</a>
-  <nav aria-label="Main navigation">
+  <nav aria-label={$t('layout.mainNav')}>
     <a href="/discover" aria-current={current('/discover') ? 'page' : undefined}
-      ><Compass size={17} weight="bold" />Discover</a
+      ><Compass size={17} weight="bold" />{$t('nav.discover')}</a
     ><a href="/rooms" aria-current={current('/rooms') ? 'page' : undefined}
-      ><FilmSlate size={17} weight="bold" />My rooms</a
+      ><FilmSlate size={17} weight="bold" />{$t('nav.rooms')}</a
     ><a href="/friends" aria-current={current('/friends') ? 'page' : undefined}
-      ><UsersThree size={17} weight="bold" />Friends</a
+      ><UsersThree size={17} weight="bold" />{$t('nav.friends')}</a
     >{#if principal?.isAdmin}<a href="/admin" aria-current={current('/admin') ? 'page' : undefined}
         ><ShieldStar size={17} weight="bold" />Admin</a
       >{/if}<a href="/account" aria-current={current('/account') ? 'page' : undefined}
-      ><UserCircle size={17} weight="bold" />Account</a
+      ><UserCircle size={17} weight="bold" />{$t('nav.account')}</a
     >
   </nav>
   <div class="appearance">
-    <label class="design" title="Color design">
+    <label class="design language" title={$t('common.language')}>
+      <Translate size={16} weight="bold" aria-hidden="true" />
+      <select
+        aria-label={$t('common.language')}
+        value={$locale}
+        onchange={(e) => setLocale(e.currentTarget.value as Locale)}
+      >
+        {#each LOCALES as option (option.value)}<option value={option.value}>{option.label}</option>{/each}
+      </select>
+    </label>
+    <label class="design" title={$t('layout.design')}>
       <Palette size={16} weight="bold" aria-hidden="true" />
-      <span class="sr-only">Color design</span>
-      <select aria-label="Color design" value={design} onchange={(e) => setDesign(e.currentTarget.value as Design)}>
+      <span class="sr-only">{$t('layout.design')}</span>
+      <select
+        aria-label={$t('layout.design')}
+        value={design}
+        onchange={(e) => setDesign(e.currentTarget.value as Design)}
+      >
         {#each designs as option}<option value={option.value}>{option.label}</option>{/each}
       </select>
     </label>
-    <div class="theme" role="group" aria-label="Theme">
+    <div class="theme" role="group" aria-label={$t('layout.theme')}>
       {#each themeOptions as option}<button
           type="button"
           class:active={theme === option.value}
@@ -98,18 +124,20 @@
     {#snippet failed(_error, reset)}
       <main class="boundary-error" data-error-kind={_error instanceof Error ? 'unexpected' : 'unknown'}>
         <img class="boundary-mark" src="/icons/koalaparty-192.png" alt="" />
-        <h1>Something hiccuped</h1>
-        <p>An unexpected error interrupted the page. Your room is safe — try again.</p>
+        <h1>{$t('layout.errorTitle')}</h1>
+        <p>{$t('layout.errorBody')}</p>
         <div class="boundary-actions">
-          <button onclick={reset}>Try again</button><a class="button secondary" href="/">Back home</a>
+          <button onclick={reset}>{$t('player.tryAgain')}</button><a class="button secondary" href="/"
+            >{$t('common.backHome')}</a
+          >
         </div>
       </main>
     {/snippet}
   </svelte:boundary>
 </div>
 <footer>
-  <span>KoalaParty · MIT licensed · No KoalaParty analytics. No ads.</span><span
-    ><a href="/privacy">Privacy</a> · <a href="https://koalastuff.net/legal">Imprint</a> ·
+  <span>{$t('layout.footer')}</span><span
+    ><a href="/privacy">{$t('layout.privacy')}</a> · <a href="https://koalastuff.net/legal">{$t('layout.imprint')}</a> ·
     <a href="https://github.com/Shik3i/KoalaParty" target="_blank" rel="noopener noreferrer">GitHub</a> ·
     <a href="https://sync.koalastuff.net/" target="_blank" rel="noopener noreferrer">KoalaSync</a>{#if version}
       ·
@@ -348,6 +376,10 @@
   @media (max-width: 430px) {
     .design {
       display: none;
+    }
+    /* The language switch stays reachable on phones. */
+    .design.language {
+      display: inline-flex;
     }
   }
 </style>

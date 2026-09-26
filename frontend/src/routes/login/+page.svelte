@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText, t } from '$lib/i18n';
   let username = '';
   let password = '';
   let error = '';
@@ -14,7 +15,7 @@
         body: JSON.stringify({ username: username.trim(), password }),
       });
       if (!r.ok) {
-        let message = r.statusText || 'Login failed.';
+        let message = r.statusText || $t('auth.loginFailed');
         try {
           message = ((await r.json()) as { message?: string }).message || message;
         } catch {
@@ -24,29 +25,34 @@
       }
       location.href = '/account';
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Login failed.';
+      error = errorText(e);
     } finally {
       submitting = false;
     }
   }
 </script>
 
-<svelte:head><title>Log in · KoalaParty</title></svelte:head>
+<svelte:head><title>{$t('auth.login')} · KoalaParty</title></svelte:head>
 <main class="auth panel">
-  <h1>Welcome back</h1>
+  <h1>{$t('auth.welcomeBack')}</h1>
   <form
     onsubmit={(e) => {
       e.preventDefault();
       submit();
     }}
   >
-    <label>Username<input bind:value={username} autocomplete="username" required /></label><label
-      >Password<input type="password" bind:value={password} autocomplete="current-password" required /></label
+    <label>{$t('auth.username')}<input bind:value={username} autocomplete="username" required /></label><label
+      >{$t('auth.password')}<input
+        type="password"
+        bind:value={password}
+        autocomplete="current-password"
+        required
+      /></label
     >{#if error}<p class="error" role="alert">{error}</p>{/if}<button disabled={submitting}
-      >{submitting ? 'Logging in…' : 'Log in'}</button
-    ><a href="/register">Create an account</a>
+      >{submitting ? $t('auth.loggingIn') : $t('auth.login')}</button
+    ><a href="/register">{$t('auth.createInstead')}</a>
   </form>
-  <p class="muted">Password recovery is not available in this release.</p>
+  <p class="muted">{$t('auth.noRecovery')}</p>
 </main>
 
 <style>

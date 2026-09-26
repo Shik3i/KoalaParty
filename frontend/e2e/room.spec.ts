@@ -53,6 +53,8 @@ const E2E_START_VIDEO_ID = 'startx12345';
 // Fresh rooms start empty and play the first added video immediately. Most
 // scenarios begin from the previous baseline: a paused, cued video.
 async function cueVideo(page: Page, roomId: string) {
+  // Playback scenarios assert exact start behaviour; the countdown has its own test.
+  expect((await command(page, roomId, 'room.countdown', { seconds: 0 })).status).toBe(200);
   expect((await command(page, roomId, 'queue.play_now', { videoId: E2E_START_VIDEO_ID })).status).toBe(200);
   expect((await command(page, roomId, 'player.pause', { position: 0 })).status).toBe(200);
   await page.waitForFunction(
@@ -356,7 +358,7 @@ test('a rejected native playback command immediately restores the authoritative 
   let rejected = false;
   await page.route(/\/api\/rooms\/[^/]+\/commands$/, async (route) => {
     const request = route.request();
-    if (!rejected && request.method() === 'POST') {
+    if (!rejected && request.method() === 'POST' && request.postDataJSON()?.type === 'player.pause') {
       rejected = true;
       await route.fulfill({
         status: 503,
@@ -569,6 +571,8 @@ test('anonymous room persistence, shared sessions, idempotency and settings', as
       { id: roomId, videoId: E2E_VIDEO_ID },
     ),
   ).toBe(1);
+  // Remove only once the UI holds the latest revision, or the command is stale.
+  await expect(owner.locator('.queue li')).toHaveCount(2);
   await owner.locator('.queue .icon').first().click();
   await expect(owner.locator('.queue li')).toHaveCount(1);
   await owner.locator('.queue .icon').first().click();
@@ -815,7 +819,7 @@ test('account room library, private invitations, transfer and room deletion work
   await owner.getByRole('link', { name: 'Open' }).click();
   await owner.getByRole('button', { name: 'Room settings' }).click();
   await owner.getByLabel('Visibility').selectOption('private');
-  await expect(owner.locator('.visibility')).toHaveText('private');
+  await expect(owner.locator('.visibility')).toHaveText('Private');
 
   await register(member, memberName);
   await member.goto(roomURL);
@@ -830,7 +834,7 @@ test('account room library, private invitations, transfer and room deletion work
   await owner.getByRole('button', { name: 'Transfer', exact: true }).click();
   await owner.getByRole('alertdialog').getByRole('button', { name: 'Transfer' }).click();
   await member.getByRole('tab', { name: 'People' }).click();
-  await expect(member.getByText('owner', { exact: true })).toBeVisible();
+  await expect(member.getByText('Owner', { exact: true })).toBeVisible();
 
   await owner.getByRole('button', { name: 'Leave room' }).click();
   await owner.getByRole('alertdialog').getByRole('button', { name: 'Leave room' }).click();
@@ -954,5 +958,51 @@ test('paste anywhere, live chat and vote-to-skip work between viewers', async ({
     E2E_QUEUE_VIDEO_ID,
   );
   await expect(member.getByRole('tab', { name: 'Activity' })).toBeVisible();
+  await Promise.all([ownerContext.close(), memberContext.close()]);
+});
+
+test('short links, countdown starts, cinema mode and the German interface', async ({ browser }) => {
+  const ownerContext = await browser.newContext();
+  const memberContext = await browser.newContext({ locale: 'de-DE' });
+  for (const context of [ownerContext, memberContext]) {
+    await context.route('**/iframe_api', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI }),
+    );
+  }
+  const owner = await ownerContext.newPage();
+  await owner.goto('/');
+  await owner.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await expect(owner).toHaveURL(/\/room\/([A-Z2-7]{16})$/);
+  const roomId = owner.url().split('/').at(-1)!;
+
+  // New videos count down so every player starts on the same frame.
+  expect((await command(owner, roomId, 'queue.play_now', { videoId: E2E_START_VIDEO_ID })).status).toBe(200);
+  await expect(owner.locator('.countdown')).toBeVisible();
+  await expect(owner.locator('.countdown')).toBeHidden({ timeout: 6_000 });
+  await expect(owner.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+
+  const slug = `e2e-${randomUUID().slice(0, 8)}`;
+  await owner.getByRole('button', { name: 'Invite', exact: true }).click();
+  await expect(owner.getByRole('dialog', { name: 'Invite friends' }).locator('.qr svg')).toBeVisible();
+  await owner.locator('#room-slug').fill(slug);
+  await owner.getByRole('button', { name: 'Save short link' }).click();
+  await expect(owner.getByRole('dialog').locator('.link-row input')).toHaveValue(new RegExp(`/r/${slug}$`));
+  await owner.getByRole('button', { name: 'Done' }).click();
+
+  // A German browser gets the German interface and follows the short link.
+  const member = await memberContext.newPage();
+  await member.goto(`/r/${slug}`);
+  await expect(member).toHaveURL(new RegExp(`/room/${roomId}$`));
+  await expect(member.getByRole('tab', { name: /Leute/ })).toBeVisible();
+  await expect(member.getByRole('button', { name: 'Pausieren', exact: true })).toBeEnabled();
+
+  await owner.getByRole('button', { name: 'Room settings' }).click();
+  await owner.getByRole('radio', { name: /Cinema/ }).click();
+  await expect(owner.getByRole('radio', { name: /Cinema/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(member.getByRole('button', { name: 'Pausieren', exact: true })).toBeDisabled();
+  await expect(member.locator('.social-toasts')).toContainText('Kino');
+
+  await member.getByRole('combobox', { name: 'Sprache' }).selectOption('en');
+  await expect(member.getByRole('tab', { name: /People/ })).toBeVisible();
   await Promise.all([ownerContext.close(), memberContext.close()]);
 });

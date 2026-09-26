@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText, t, type MessageKey } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
   type Friend = { username: string; status: string; direction: string };
@@ -13,7 +14,7 @@
       error = '';
       list = await api('/api/friends');
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Friends unavailable.';
+      error = errorText(e);
     } finally {
       loading = false;
     }
@@ -28,7 +29,7 @@
       username = '';
       await load();
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Request failed.';
+      error = errorText(e);
     } finally {
       pending = '';
     }
@@ -41,17 +42,17 @@
       await api(`/api/friends/${encodeURIComponent(user)}/${value}`, { method: 'POST' });
       await load();
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Request failed.';
+      error = errorText(e);
     } finally {
       pending = '';
     }
   }
 </script>
 
-<svelte:head><title>Friends · KoalaParty</title></svelte:head>
+<svelte:head><title>{$t('nav.friends')} · KoalaParty</title></svelte:head>
 <main class="page">
-  <h1>Friends</h1>
-  <p>Accepted friends can join your friends-only rooms.</p>
+  <h1>{$t('nav.friends')}</h1>
+  <p>{$t('friends.body')}</p>
   <form
     class="panel send"
     onsubmit={(e) => {
@@ -59,28 +60,43 @@
       send();
     }}
   >
-    <label>Username<input bind:value={username} minlength="3" maxlength="24" pattern="[A-Za-z0-9_]+" required /></label
-    ><button disabled={!!pending}>{pending === 'send' ? 'Sending…' : 'Send request'}</button>
+    <label
+      >{$t('auth.username')}<input
+        bind:value={username}
+        minlength="3"
+        maxlength="24"
+        pattern="[A-Za-z0-9_]+"
+        required
+      /></label
+    ><button disabled={!!pending}>{pending === 'send' ? $t('friends.sending') : $t('friends.send')}</button>
   </form>
   {#if error && list.length}<p class="error" role="alert">{error}</p>{/if}
   {#if error && !list.length}<section class="panel empty error-state" role="alert">
-      <h2>Could not load friends</h2>
+      <h2>{$t('friends.loadFailed')}</h2>
       <p class="error">{error}</p>
-      <button onclick={load}>Try again</button>
+      <button onclick={load}>{$t('player.tryAgain')}</button>
     </section>{:else}<section class="panel list">
-      {#if loading}<p class="muted" role="status">Loading friends…</p>{:else if !list.length}<p class="muted">
-          No friend relationships yet.
+      {#if loading}<p class="muted" role="status">{$t('friends.loading')}</p>{:else if !list.length}<p class="muted">
+          {$t('friends.empty')}
         </p>{/if}{#each list as friend}<article>
-          <div><b>{friend.username}</b><small>{friend.status} · {friend.direction}</small></div>
+          <div>
+            <b>{friend.username}</b><small
+              >{$t(`friends.status.${friend.status}` as MessageKey)} · {$t(
+                `friends.direction.${friend.direction}` as MessageKey,
+              )}</small
+            >
+          </div>
           <div class="row">
             {#if friend.status === 'pending' && friend.direction === 'incoming'}<button
                 disabled={!!pending}
-                onclick={() => action(friend.username, 'accept')}>Accept</button
+                onclick={() => action(friend.username, 'accept')}>{$t('friends.accept')}</button
               ><button class="secondary" disabled={!!pending} onclick={() => action(friend.username, 'decline')}
-                >Decline</button
+                >{$t('friends.decline')}</button
               >{/if}<button class="ghost" disabled={!!pending} onclick={() => action(friend.username, 'remove')}
-              >Remove</button
-            ><button class="ghost" disabled={!!pending} onclick={() => action(friend.username, 'block')}>Block</button>
+              >{$t('friends.remove')}</button
+            ><button class="ghost" disabled={!!pending} onclick={() => action(friend.username, 'block')}
+              >{$t('friends.block')}</button
+            >
           </div>
         </article>{/each}
     </section>{/if}

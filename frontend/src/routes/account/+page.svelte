@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText, locale, t } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { api, establish, type Principal } from '$lib/api';
 
@@ -22,7 +23,7 @@
       displayName = me.displayName;
       if (me.accountId) sessions = await api('/api/account/sessions');
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Identity unavailable.';
+      error = errorText(e);
     } finally {
       loading = false;
     }
@@ -38,7 +39,7 @@
       await action();
       notice = success;
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Account action failed.';
+      error = errorText(e);
     } finally {
       pending = '';
     }
@@ -50,7 +51,7 @@
       async () => {
         me = await api('/api/account/profile', { method: 'PATCH', body: JSON.stringify({ displayName }) });
       },
-      'Display name updated.',
+      $t('account.nameUpdated'),
     );
   }
 
@@ -63,7 +64,7 @@
         newPassword = '';
         sessions = sessions.filter((session) => session.current);
       },
-      'Password changed.',
+      $t('account.passwordChanged'),
     );
   }
 
@@ -74,7 +75,7 @@
         await api(`/api/account/sessions/${id}`, { method: 'DELETE' });
         sessions = sessions.filter((session) => session.id !== id);
       },
-      'Session revoked.',
+      $t('account.sessionRevoked'),
     );
   }
 
@@ -85,7 +86,7 @@
         await api('/api/account/sessions', { method: 'DELETE' });
         sessions = sessions.filter((session) => session.current);
       },
-      'All other sessions revoked.',
+      $t('account.othersRevoked'),
     );
   }
 
@@ -101,7 +102,7 @@
   }
 
   async function deleteAccount() {
-    if (!confirm('Delete your account, revoke every session, and anonymize retained room history?')) return;
+    if (!confirm($t('account.confirmDelete'))) return;
     await run(
       'delete',
       async () => {
@@ -114,53 +115,78 @@
   }
 
   function date(value: string) {
-    return new Date(value.includes('T') ? value : `${value.replace(' ', 'T')}Z`).toLocaleString();
+    return new Date(value.includes('T') ? value : `${value.replace(' ', 'T')}Z`).toLocaleString($locale);
   }
 </script>
 
-<svelte:head><title>Account · KoalaParty</title></svelte:head>
+<svelte:head><title>{$t('nav.account')} · KoalaParty</title></svelte:head>
 <main class="page">
-  <h1>Account</h1>
-  {#if loading}<p class="muted" role="status">Loading identity…</p>{:else if error && !me}<section
+  <h1>{$t('nav.account')}</h1>
+  {#if loading}<p class="muted" role="status">{$t('account.loading')}</p>{:else if error && !me}<section
       class="panel error-state"
       role="alert"
     >
-      <h2>Could not load account</h2>
+      <h2>{$t('account.loadFailed')}</h2>
       <p class="error">{error}</p>
-      <button onclick={load}>Try again</button>
+      <button onclick={load}>{$t('player.tryAgain')}</button>
     </section>{:else if me}
     <section class="panel card">
       <div class="avatar">{me.displayName.slice(0, 1).toUpperCase()}</div>
       <div>
         <h2>{me.displayName}</h2>
-        <p class="muted">{me.accountId ? 'Linked account' : 'Persistent anonymous identity'}</p>
+        <p class="muted">{me.accountId ? $t('account.linked') : $t('account.anonymous')}</p>
       </div>
-      <button class="secondary logout" disabled={pending === 'logout'} onclick={logout}>Log out</button>
+      <button class="secondary logout" disabled={pending === 'logout'} onclick={logout}>{$t('account.logout')}</button>
     </section>
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     {#if notice}<p class="success" role="status">{notice}</p>{/if}
-    {#if !me.accountId}<section class="panel notice">
-        <h2>Protect your rooms</h2>
-        <p>
-          This identity belongs only to this browser. Create an account before clearing storage to preserve ownership.
-        </p>
-        <a class="button" href="/register">Create account</a><a class="button secondary" href="/login">Log in</a>
+    {#if !me.accountId}<section class="panel section">
+        <h2>{$t('account.profile')}</h2>
+        <form
+          onsubmit={(e) => {
+            e.preventDefault();
+            saveProfile();
+          }}
+        >
+          <label
+            >{$t('account.displayName')}<input bind:value={displayName} minlength="1" maxlength="32" required /></label
+          >
+          <button disabled={!!pending}
+            >{pending === 'profile' ? $t('account.saving') : $t('account.saveProfile')}</button
+          >
+        </form>
+      </section>
+      <section class="panel notice">
+        <h2>{$t('account.protect')}</h2>
+        <p>{$t('account.protectBody')}</p>
+        <a class="button" href="/register">{$t('auth.createAccount')}</a><a class="button secondary" href="/login"
+          >{$t('auth.login')}</a
+        >
       </section>{:else}
       <div class="grid">
         <section class="panel section">
-          <h2>Profile</h2>
+          <h2>{$t('account.profile')}</h2>
           <form
             onsubmit={(e) => {
               e.preventDefault();
               saveProfile();
             }}
           >
-            <label>Display name<input bind:value={displayName} minlength="1" maxlength="32" required /></label>
-            <button disabled={!!pending}>{pending === 'profile' ? 'Saving…' : 'Save profile'}</button>
+            <label
+              >{$t('account.displayName')}<input
+                bind:value={displayName}
+                minlength="1"
+                maxlength="32"
+                required
+              /></label
+            >
+            <button disabled={!!pending}
+              >{pending === 'profile' ? $t('account.saving') : $t('account.saveProfile')}</button
+            >
           </form>
         </section>
         <section class="panel section">
-          <h2>Change password</h2>
+          <h2>{$t('account.changePassword')}</h2>
           <form
             onsubmit={(e) => {
               e.preventDefault();
@@ -168,7 +194,7 @@
             }}
           >
             <label
-              >Current password<input
+              >{$t('account.currentPassword')}<input
                 type="password"
                 bind:value={currentPassword}
                 autocomplete="current-password"
@@ -176,7 +202,7 @@
               /></label
             >
             <label
-              >New password<input
+              >{$t('account.newPassword')}<input
                 type="password"
                 bind:value={newPassword}
                 minlength="10"
@@ -185,57 +211,63 @@
                 required
               /></label
             >
-            <button disabled={!!pending}>{pending === 'password' ? 'Changing…' : 'Change password'}</button>
+            <button disabled={!!pending}
+              >{pending === 'password' ? $t('account.changing') : $t('account.changePassword')}</button
+            >
           </form>
         </section>
       </div>
       <section class="panel section">
         <div class="section-title">
           <div>
-            <h2>Active sessions</h2>
-            <p>Devices currently signed in to this account.</p>
+            <h2>{$t('account.sessions')}</h2>
+            <p>{$t('account.sessionsBody')}</p>
           </div>
           <button class="secondary" disabled={!!pending || sessions.length < 2} onclick={revokeOthers}
-            >Log out other devices</button
+            >{$t('account.logoutOthers')}</button
           >
         </div>
         {#if !sessions.length}
           <p class="muted" role="status">
-            No active sessions were returned. Reload the page to re-establish this device.
+            {$t('account.noSessions')}
           </p>
         {:else}
           <ul class="sessions">
             {#each sessions as session}<li>
                 <div>
-                  <b>{session.current ? 'This device' : 'Signed-in device'}</b><small
-                    >Created {date(session.createdAt)} · expires {date(session.expiresAt)}</small
+                  <b>{session.current ? $t('account.thisDevice') : $t('account.otherDevice')}</b><small
+                    >{$t('account.sessionDates', {
+                      created: date(session.createdAt),
+                      expires: date(session.expiresAt),
+                    })}</small
                   >
                 </div>
                 {#if !session.current}<button class="ghost" disabled={!!pending} onclick={() => revoke(session.id)}
-                    >Revoke</button
+                    >{$t('settings.revoke')}</button
                   >{/if}
               </li>{/each}
           </ul>
         {/if}
       </section>
       <section class="panel section danger-zone">
-        <h2>Delete account</h2>
-        <p>
-          Revokes every session, anonymizes retained identity references, and closes rooms still owned by this account.
-          Transfer rooms you want to keep first.
-        </p>
+        <h2>{$t('account.delete')}</h2>
+        <p>{$t('account.deleteBody')}</p>
         <label
-          >Confirm password<input type="password" bind:value={deletePassword} autocomplete="current-password" /></label
+          >{$t('account.confirmPassword')}<input
+            type="password"
+            bind:value={deletePassword}
+            autocomplete="current-password"
+          /></label
         >
         <button class="danger" disabled={!!pending || !deletePassword} onclick={deleteAccount}
-          >{pending === 'delete' ? 'Deleting…' : 'Delete account permanently'}</button
+          >{pending === 'delete' ? $t('account.deleting') : $t('account.deleteForever')}</button
         >
       </section>
     {/if}
     <section class="panel notice">
-      <h2>Local identity</h2>
+      <h2>{$t('account.localIdentity')}</h2>
       <p class="muted">ID: {me.identityId}</p>
-      <p>There is no anonymous recovery key and no browser fingerprinting.</p>
+      <p>{$t('account.localIdentityBody')}</p>
     </section>
   {/if}
 </main>

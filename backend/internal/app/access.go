@@ -31,14 +31,22 @@ func roomAccess(ctx context.Context, q accessQueryer, room, identity string) boo
 }
 
 func roleAndAllowed(ctx context.Context, q accessQueryer, room, identity, capability string) (string, bool) {
-	var role string
-	var allowed bool
-	err := q.QueryRowContext(ctx, `SELECT m.role,
-		CASE WHEN m.role IN ('owner','admin') THEN 1 ELSE coalesce((SELECT allowed FROM room_permissions
-		WHERE room_id=r.id AND identity_id=i.id AND permission=?),1) END
+	var role, mode string
+	var override sql.NullBool
+	err := q.QueryRowContext(ctx, `SELECT m.role,r.mode,(SELECT allowed FROM room_permissions
+		WHERE room_id=r.id AND identity_id=i.id AND permission=?)
 		FROM room_members m JOIN rooms r ON r.id=m.room_id JOIN identities i ON i.id=m.identity_id
-		WHERE r.id=? AND i.id=? AND `+roomAccessSQL, capability, room, identity).Scan(&role, &allowed)
-	return role, err == nil && allowed
+		WHERE r.id=? AND i.id=? AND `+roomAccessSQL, capability, room, identity).Scan(&role, &mode, &override)
+	if err != nil {
+		return role, false
+	}
+	if role == "owner" || role == "admin" {
+		return role, true
+	}
+	if override.Valid {
+		return role, override.Bool
+	}
+	return role, modeAllows(mode, capability)
 }
 
 func (a *application) refreshRoomAccess(ctx context.Context, room string) {
