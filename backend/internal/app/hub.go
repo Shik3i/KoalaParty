@@ -291,7 +291,16 @@ func (h *hub) disconnectSessions(sessionHashes []string) {
 		h.disconnectSession(sessionHash)
 	}
 }
+
+// broadcastEvents is how many of the newest events a broadcast carries; a
+// client's first snapshot has the full list and merges these in.
+const broadcastEvents = 30
+
 func (h *hub) broadcast(room string, s snapshot) {
+	if len(s.Events) > broadcastEvents {
+		s.Events = s.Events[len(s.Events)-broadcastEvents:]
+		s.EventsPartial = true
+	}
 	h.mu.RLock()
 	clients := make([]*client, 0, len(h.rooms[room]))
 	for c := range h.rooms[room] {
@@ -392,6 +401,8 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 	if refreshed, snapshotErr := a.snapshot(r.Context(), room, p.IdentityID); snapshotErr == nil {
 		s = refreshed
 	}
+	// The newcomer needs the full activity list; everyone else only the news.
+	c.enqueue(map[string]any{"type": "snapshot", "payload": s.forIdentity(c.identity)})
 	a.hub.broadcast(room, s)
 	expiryTimer := time.AfterFunc(max(time.Until(p.SessionExpires), 0), func() {
 		c.shutdown()
@@ -463,6 +474,10 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 		}
 		if cmd.Type == "presence.state" {
 			a.handlePresence(c, room, p, cmd)
+			continue
+		}
+		if cmd.Type == "media.duration" {
+			a.handleDuration(r.Context(), c, room, p, cmd)
 			continue
 		}
 		if cmd.Type == "reaction.send" {

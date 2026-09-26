@@ -12,7 +12,7 @@ func TestMigrationFromEmptyDatabase(t *testing.T) {
 	}
 	defer db.Close()
 	var version int
-	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 10 {
+	if e = db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&version); e != nil || version != 11 {
 		t.Fatalf("migration version=%d err=%v", version, e)
 	}
 	var rateColumn int
@@ -77,7 +77,9 @@ func TestReportLimitMigrationResolvesLegacyDuplicates(t *testing.T) {
 		ALTER TABLE rooms DROP COLUMN countdown_seconds;
 		ALTER TABLE rooms DROP COLUMN scheduled_at;
 		ALTER TABLE playback_states DROP COLUMN auto_paused;
-		DELETE FROM schema_migrations WHERE version IN (7, 8, 9, 10);
+		ALTER TABLE media_items DROP COLUMN duration_seconds;
+		ALTER TABLE room_queue_items DROP COLUMN pinned;
+		DELETE FROM schema_migrations WHERE version IN (7, 8, 9, 10, 11);
 		INSERT INTO identities(id,secret_hash,display_name,avatar_seed) VALUES('owner','hash','Owner','owner');
 		INSERT INTO rooms(id,owner_identity_id) VALUES('AAAAAAAAAAAAAAAA','owner');
 		INSERT INTO room_reports(id,room_id,reporter_identity_id,reason) VALUES
