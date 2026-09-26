@@ -4,6 +4,8 @@
   import {
     DRIFT_SOFT_SECONDS,
     driftAction,
+    nudgeDone,
+    nudgeRateFor,
     nextSeekLead,
     isCurrentVideoError,
     isLocalTimelineJump,
@@ -49,6 +51,7 @@
     onDiagnosticEvent = () => {},
     onPresence = () => {},
     showEmpty = true,
+    preload = false,
   }: {
     enabled?: boolean;
     videoId?: string | null;
@@ -75,6 +78,9 @@
     onDiagnosticEvent?: (event: DiagnosticEvent) => void;
     onPresence?: (state: 'playing' | 'paused' | 'buffering' | 'blocked' | 'idle') => void;
     showEmpty?: boolean;
+    // A countdown is running: load and buffer the paused video so everyone can
+    // start the moment it ends.
+    preload?: boolean;
   } = $props();
   let host: HTMLDivElement;
   // Tell the room what this viewer's player is doing so others can see who is
@@ -146,6 +152,13 @@
   let initialLoadPosition: number | null = null;
   let initialLoadRevision = 0;
   let handledSyncRequest = 0;
+  // Buffering a video that waits for a countdown: loaded, then paused at once.
+  let preloading = false;
+  let preloadTarget = 0;
+  // A temporary speed-up or slow-down that catches up a small drift.
+  let nudgeRate = 0;
+  let nudgeStart = 0;
+  let nudgeStartDrift = 0;
 
   function emitDiagnostic(event: string, details: Record<string, string | number | boolean | null> = {}) {
     onDiagnosticEvent(
@@ -359,11 +372,19 @@
   // Bring the player's playback speed in line with the authoritative rate. Guarded so
   // the resulting onPlaybackRateChange is recognised as our own and not relayed back.
   function applyRate() {
+    nudgeRate = 0;
     const target = rate || 1;
     if (Math.abs((player.getPlaybackRate?.() ?? 1) - target) > 0.01) {
       guard();
       player.setPlaybackRate?.(target);
     }
+  }
+
+  function endNudge() {
+    if (!nudgeRate) return;
+    nudgeRate = 0;
+    guard();
+    player?.setPlaybackRate?.(rate || 1);
   }
 
   type YTWindow = Window & { YT?: any };
@@ -488,6 +509,18 @@
   // back to the authoritative state instead of emitting.
   function handleStateChange(state: number) {
     playerState = state;
+    // A preloading video pauses as soon as it starts buffering or playing; it
+    // keeps downloading while paused and starts without delay after the countdown.
+    if (preloading && (state === BUFFERING || state === PLAYING)) {
+      preloading = false;
+      guard(1500);
+      player.pauseVideo?.();
+      player.seekTo?.(preloadTarget, true);
+      prevTime = preloadTarget;
+      prevWall = Date.now();
+      emitDiagnostic('preloaded');
+      return;
+    }
     const iframeVideo = player?.getVideoData?.()?.video_id ?? '';
     if (iframeVideo === lastVideo && (state === PLAYING || state === PAUSED)) {
       confirmedVideo = lastVideo;
@@ -545,6 +578,7 @@
   // change inside the guard window is our own setPlaybackRate echo and is ignored.
   function handleRateChange(newRate: number) {
     if (!ready || !lastVideo || Date.now() < guardUntil) return;
+    if (nudgeRate && Math.abs(newRate - nudgeRate) < 0.01) return;
     if (Math.abs(newRate - (rate || 1)) < 0.01) return;
     if (canControl) onRate(newRate, currentTime());
     else {
@@ -713,11 +747,40 @@
     // Tiers are chosen by the room's state: a viewer whose autoplay is blocked is
     // locally paused while the room plays and must not be re-aligned every poll.
     const roomPlaying = status === 'playing';
+    if (nudgeRate) {
+      if (nudgeDone(drift, nudgeStartDrift, roomPlaying && state === PLAYING, now - nudgeStart)) {
+        emitDiagnostic('nudge_ended', { drift });
+        endNudge();
+        lastSoftCorrection = now;
+      }
+      if (Math.abs(drift) <= DRIFT_MAX) return;
+      endNudge();
+    }
     softDriftSince = roomPlaying && Math.abs(drift) > DRIFT_SOFT_SECONDS ? (softDriftSince ?? now) : null;
     if (
       driftAction({ drift, playing: roomPlaying, now, softSince: softDriftSince, lastSoftCorrection }) === 'correct'
     ) {
       if (roomPlaying && Math.abs(drift) <= DRIFT_MAX) lastSoftCorrection = now;
+      // A small drift while playing is caught up by a brief speed change; only
+      // when the player offers no suitable rate does it seek.
+      const nudge =
+        roomPlaying && state === PLAYING && Math.abs(drift) <= DRIFT_MAX
+          ? nudgeRateFor(drift, rate || 1, player.getAvailablePlaybackRates?.())
+          : null;
+      if (nudge) {
+        softDriftSince = null;
+        guard(600);
+        player.setPlaybackRate?.(nudge);
+        if (Math.abs((player.getPlaybackRate?.() ?? nudge) - nudge) < 0.01) {
+          nudgeRate = nudge;
+          nudgeStart = now;
+          nudgeStartDrift = drift;
+          correctedAt = now;
+          emitDiagnostic('nudge_started', { drift, rate: nudge });
+          return;
+        }
+        player.setPlaybackRate?.(rate || 1);
+      }
       softDriftSince = null;
       const target = roomPlaying && state === PLAYING ? expected + seekLead * (rate || 1) : expected;
       measureSeekResidual = roomPlaying && state === PLAYING;
@@ -791,6 +854,8 @@
         // synchronously emit ENDED/PAUSED while clearing a video.
         lastVideo = null;
         lastMediaId = null;
+        preloading = false;
+        nudgeRate = 0;
         confirmedVideo = null;
         endedMediaId = null;
         initialLoadPosition = null;
@@ -847,10 +912,15 @@
       const request = { videoId, startSeconds: target };
       initialLoadPosition = target;
       initialLoadRevision = playbackRevision;
+      preloading = false;
       if (status === 'playing') {
         player.loadVideoById(request);
         scheduleAutoplayCheck();
         scheduleStartWatchdog('media_load');
+      } else if (preload) {
+        preloading = true;
+        preloadTarget = target;
+        player.loadVideoById(request);
       } else player.cueVideoById(request);
       applyRate();
       prevTime = target;
@@ -861,6 +931,8 @@
     }
     // A confirmed change arrived: stop suppressing correction and realign now.
     if (playbackRevision !== initialLoadRevision) initialLoadPosition = null;
+    preloading = false;
+    endNudge();
     localSeekUntil = 0;
     applyRate();
     if (Math.abs(currentTime() - target) > DRIFT_MAX) {

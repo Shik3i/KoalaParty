@@ -25,6 +25,7 @@
   import { anchorTime, measureClockOffset } from '$lib/clock';
   import {
     automaticEndDelay,
+    mergeEvents,
     formatDuration,
     parseYouTubeInput,
     participantNameParts,
@@ -362,6 +363,8 @@
   }
   function updateRoom(next: Snapshot) {
     if (room && next.revision < room.revision) return;
+    // Broadcasts carry only the newest activity; keep what this viewer already has.
+    if (next.eventsPartial && room) next = { ...next, events: mergeEvents(room.events, next.events) };
     const pb = next.playback;
     const mediaId = pb.media?.id ?? '';
     if (mediaId !== playbackAnchor.mediaId && seekTimer) {
@@ -419,9 +422,30 @@
     if (playbackAnchor.status !== 'playing' || !playbackAnchor.mediaId) return;
     progressTimer = setInterval(() => (nowTick = Date.now()), 500);
   }
+  let reportedDurationFor = '';
   function handleDuration(duration: number) {
     mediaDuration = duration;
     updateMediaPosition();
+    // Tell the server how long the video is, once, so a room left playing stops
+    // its clock at the end instead of counting on for hours.
+    const media = room?.playback.media;
+    if (
+      media &&
+      duration > 0 &&
+      !room?.playback.duration &&
+      reportedDurationFor !== media.id &&
+      can('queue.skip') &&
+      socket?.readyState === WebSocket.OPEN
+    ) {
+      reportedDurationFor = media.id;
+      socket.send(
+        JSON.stringify({
+          type: 'media.duration',
+          requestId: randomUUID(),
+          payload: { mediaId: media.id, duration },
+        }),
+      );
+    }
   }
   function showNotice(
     message: string,
@@ -1338,7 +1362,8 @@
     const from = ids.indexOf(itemId);
     if (from < 0 || to < 0 || to >= ids.length || from === to) return;
     ids.splice(to, 0, ids.splice(from, 1)[0]);
-    command('queue.reorder', { itemIds: ids });
+    // Moving to the top means "play next", which votes must not undo.
+    command('queue.reorder', to === 0 ? { itemIds: ids, pin: itemId } : { itemIds: ids });
   }
   async function removeItem(item: QueueItem) {
     if (!room) return;
@@ -1532,6 +1557,7 @@
               playbackRevision={room.playback.revision}
               {syncRequest}
               status={countdownEnd ? 'paused' : room.playback.status}
+              preload={!!countdownEnd}
               position={playbackAnchor.position}
               positionAt={playbackAnchor.at}
               rate={playbackAnchor.rate}

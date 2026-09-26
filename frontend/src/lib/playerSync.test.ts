@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  nudgeDone,
+  nudgeRateFor,
   PLAYER_STATE,
   isCurrentVideoError,
   driftAction,
@@ -251,5 +253,23 @@ describe('adaptive seek lead', () => {
     expect(nextSeekLead(1.4, -1)).toBe(1.5);
     expect(nextSeekLead(0.2, 0.9)).toBe(0);
     expect(nextSeekLead(0.5, 12)).toBe(0.5);
+  });
+});
+
+describe('rate nudging', () => {
+  const rates = [0.25, 0.5, 0.75, 0.9, 0.95, 1, 1.05, 1.1, 1.25, 1.5, 2];
+  it('speeds up when behind and slows down when ahead, within offered rates', () => {
+    expect(nudgeRateFor(-0.8, 1, rates)).toBe(1.1);
+    expect(nudgeRateFor(0.8, 1, rates)).toBe(0.9);
+    expect(nudgeRateFor(-0.8, 1, [0.5, 1, 1.5, 2])).toBeNull();
+    expect(nudgeRateFor(-0.8, 1, undefined)).toBeNull();
+    expect(nudgeRateFor(-0.8, 2, [1.75, 2])).toBeNull();
+  });
+  it('stops once in sync, on overshoot, when paused or after a while', () => {
+    expect(nudgeDone(-0.6, -1, true, 1000)).toBe(false);
+    expect(nudgeDone(-0.1, -1, true, 1000)).toBe(true);
+    expect(nudgeDone(0.3, -1, true, 1000)).toBe(true);
+    expect(nudgeDone(-0.6, -1, false, 1000)).toBe(true);
+    expect(nudgeDone(-0.6, -1, true, 25_000)).toBe(true);
   });
 });

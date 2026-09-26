@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"regexp"
 	"strings"
@@ -286,4 +287,22 @@ func (a *application) currentPlayback(ctx context.Context, room string) (string,
 		}
 	}
 	return media.String, position, nil
+}
+
+// handleDuration stores the current video's length the first time a viewer
+// who may skip reports it, so the server can stop its clock at the end.
+func (a *application) handleDuration(ctx context.Context, c *client, room string, p principal, cmd command) {
+	var in struct {
+		MediaID  string  `json:"mediaId"`
+		Duration float64 `json:"duration"`
+	}
+	if json.Unmarshal(cmd.Payload, &in) != nil || in.MediaID == "" || math.IsNaN(in.Duration) || in.Duration <= 0 || in.Duration > 604800 {
+		c.enqueue(map[string]any{"type": "error", "requestId": cmd.RequestID, "code": "invalid_command", "message": "Invalid duration."})
+		return
+	}
+	if _, allowed := roleAndAllowed(ctx, a.db, room, p.IdentityID, "queue.skip"); !allowed {
+		return
+	}
+	_, _ = a.db.ExecContext(ctx, `UPDATE media_items SET duration_seconds=? WHERE id=? AND duration_seconds IS NULL
+		AND EXISTS (SELECT 1 FROM playback_states WHERE room_id=? AND current_media_id=?)`, in.Duration, in.MediaID, room, in.MediaID)
 }

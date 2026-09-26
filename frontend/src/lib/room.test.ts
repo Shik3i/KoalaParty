@@ -6,6 +6,7 @@ import {
   formatActivity,
   formatDuration,
   looksLikeLink,
+  mergeEvents,
   parseStartTime,
   parseYouTube,
   parseYouTubeInput,
@@ -224,5 +225,14 @@ describe('chat timestamps', () => {
     ]);
     expect(splitTimestamps('score 3:0 or 12:345 or 1:2:3')).toEqual([{ text: 'score 3:0 or 12:345 or 1:2:3' }]);
     expect(splitTimestamps('')).toEqual([]);
+  });
+});
+
+describe('partial event broadcasts', () => {
+  const ev = (id: string) => ({ id, type: 'x', payload: {}, createdAt: '' });
+  it('appends only unseen events and keeps the newest ones', () => {
+    const merged = mergeEvents([ev('a'), ev('b')], [ev('b'), ev('c')]);
+    expect(merged.map((event) => event.id)).toEqual(['a', 'b', 'c']);
+    expect(mergeEvents([ev('a'), ev('b')], [ev('c')], 2).map((event) => event.id)).toEqual(['b', 'c']);
   });
 });

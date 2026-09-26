@@ -180,6 +180,7 @@ export const de: Record<MessageKey, string> = {
   'queue.emptyHint': 'Füge oben YouTube-Links ein – oder irgendwo mit Strg+V.',
   'queue.noMatch': 'Kein Video passt zu „{query}“.',
   'queue.from': 'ab {time}',
+  'queue.nextBadge': 'Als Nächstes',
   'queue.voteFor': 'Für {title} stimmen',
   'queue.voteHint': 'Abstimmen – die meisten Stimmen laufen zuerst',
   'queue.itemMore': 'Weitere Aktionen für {title}',

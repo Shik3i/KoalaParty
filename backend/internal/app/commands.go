@@ -356,7 +356,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			eventType = "media.activated"
 			activatedVideoID = added[0].VideoID
 		} else {
-			e = insertQueueItems(tx, room, p.IdentityID, added, insertAt)
+			e = insertQueueItems(tx, room, p.IdentityID, added, insertAt, insertAt != nil && *insertAt == 0)
 			if e == nil {
 				// An idle room starts the first added video right away instead of
 				// leaving it waiting behind an extra "play" click.
@@ -394,9 +394,15 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 	case "queue.reorder":
 		var in struct {
 			ItemIDs []string `json:"itemIds"`
+			// Pin marks the item moved to the top with "play next" so votes
+			// cannot push it back.
+			Pin string `json:"pin"`
 		}
 		if json.Unmarshal(c.Payload, &in) != nil {
 			return snapshot{}, errors.New("invalid queue order")
+		}
+		if in.Pin != "" && !contains(in.ItemIDs, in.Pin) {
+			return snapshot{}, errors.New("unknown queue item")
 		}
 		var count int
 		if e = tx.QueryRow("SELECT count(*) FROM room_queue_items WHERE room_id=?", room).Scan(&count); e != nil {
@@ -426,6 +432,10 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 					}
 				}
 			}
+		}
+		if e == nil && in.Pin != "" {
+			_, e = tx.Exec("UPDATE room_queue_items SET pinned=1 WHERE room_id=? AND id=?", room, in.Pin)
+			payload["next"] = true
 		}
 	case "queue.shuffle":
 		rows, queryErr := tx.Query("SELECT id FROM room_queue_items WHERE room_id=? ORDER BY random()", room)
@@ -480,6 +490,9 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			eventType = "media.ended"
 			payload["position"] = endedPosition
 			payload["duration"] = endedDuration
+			if _, e = tx.Exec("UPDATE media_items SET duration_seconds=? WHERE id=? AND duration_seconds IS NULL", endedDuration, conditionalSkipMediaID); e != nil {
+				return snapshot{}, e
+			}
 		}
 		var loop bool
 		_ = tx.QueryRow("SELECT queue_loop FROM rooms WHERE id=?", room).Scan(&loop)
@@ -922,7 +935,7 @@ func setCurrentMedia(tx *sql.Tx, room, actor, mediaID string, start float64) err
 func advanceQueue(tx *sql.Tx, room, actor string) (string, error) {
 	var mediaID, queueItemID string
 	var start float64
-	e := tx.QueryRow("SELECT q.id,q.media_id,q.start_seconds FROM room_queue_items q LEFT JOIN queue_votes v ON v.queue_item_id=q.id WHERE q.room_id=? GROUP BY q.id ORDER BY count(v.identity_id) DESC,q.position LIMIT 1", room).Scan(&queueItemID, &mediaID, &start)
+	e := tx.QueryRow("SELECT q.id,q.media_id,q.start_seconds FROM room_queue_items q LEFT JOIN queue_votes v ON v.queue_item_id=q.id WHERE q.room_id=? GROUP BY q.id ORDER BY q.pinned DESC,count(v.identity_id) DESC,q.position LIMIT 1", room).Scan(&queueItemID, &mediaID, &start)
 	if errors.Is(e, sql.ErrNoRows) {
 		return "", setCurrentMedia(tx, room, actor, "", 0)
 	}
@@ -942,7 +955,8 @@ func advanceQueue(tx *sql.Tx, room, actor string) (string, error) {
 }
 
 // insertQueueItems appends items, or inserts them before index `at` when given.
-func insertQueueItems(tx *sql.Tx, room, actor string, items []queueAddition, at *int) error {
+// Pinned items ("play next") play before voted ones.
+func insertQueueItems(tx *sql.Tx, room, actor string, items []queueAddition, at *int, pinned bool) error {
 	rows, e := tx.Query("SELECT id FROM room_queue_items WHERE room_id=? ORDER BY position", room)
 	if e != nil {
 		return e
@@ -967,7 +981,7 @@ func insertQueueItems(tx *sql.Tx, room, actor string, items []queueAddition, at 
 	newIDs := make([]string, 0, len(items))
 	for i, item := range items {
 		id := newID(10)
-		if _, e = tx.Exec("INSERT INTO room_queue_items(id,room_id,media_id,position,added_by_identity_id,start_seconds) VALUES(?,?,?,?,?,?)", id, room, "YT"+item.VideoID, 2000000+i, actor, item.Start); e != nil {
+		if _, e = tx.Exec("INSERT INTO room_queue_items(id,room_id,media_id,position,added_by_identity_id,start_seconds,pinned) VALUES(?,?,?,?,?,?,?)", id, room, "YT"+item.VideoID, 2000000+i, actor, item.Start, pinned); e != nil {
 			return e
 		}
 		newIDs = append(newIDs, id)

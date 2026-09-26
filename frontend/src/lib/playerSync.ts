@@ -238,3 +238,34 @@ export function nextSeekLead(currentLead: number, residualDrift: number): number
   const next = currentLead - residualDrift * 0.7;
   return Math.min(MAX_SEEK_LEAD_SECONDS, Math.max(0, Math.round(next * 100) / 100));
 }
+
+// Small drift while playing is best caught up by playing slightly faster or
+// slower than the room for a few seconds, which viewers barely notice, instead
+// of a seek that stalls to buffer. Only rates the player offers are used
+// (YouTube rounds anything else); without a close one the caller seeks instead.
+export const NUDGE_FACTOR = 0.1;
+export function nudgeRateFor(drift: number, baseRate: number, available: number[] | undefined): number | null {
+  if (!Number.isFinite(drift) || drift === 0 || !available?.length) return null;
+  const base = baseRate || 1;
+  const wanted = drift < 0 ? base * (1 + NUDGE_FACTOR) : base * (1 - NUDGE_FACTOR);
+  let best: number | null = null;
+  for (const candidate of available) {
+    const helps = drift < 0 ? candidate > base : candidate < base;
+    if (!helps || Math.abs(candidate - base) > base * 0.15) continue;
+    if (best === null || Math.abs(candidate - wanted) < Math.abs(best - wanted)) best = candidate;
+  }
+  return best;
+}
+
+// A nudge ends once the viewer is (nearly) back in sync, overshoots, the player
+// stops playing, or it has run for too long.
+export const NUDGE_SETTLED_SECONDS = 0.15;
+export const NUDGE_MAX_MS = 20_000;
+export function nudgeDone(drift: number, startDrift: number, playing: boolean, elapsedMs: number): boolean {
+  return (
+    !playing ||
+    elapsedMs > NUDGE_MAX_MS ||
+    Math.abs(drift) < NUDGE_SETTLED_SECONDS ||
+    Math.sign(drift) !== Math.sign(startDrift)
+  );
+}

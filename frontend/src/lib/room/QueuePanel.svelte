@@ -217,7 +217,9 @@
             ><DotsSixVertical size={16} weight="bold" /></span
           >{/if}<img src={item.media.thumbnail} alt="" loading="lazy" />
         <div>
-          <b title={item.media.title}>{item.media.title}</b><small
+          {#if item.next}<span class="next-badge">{$t('queue.nextBadge')}</span>{/if}<b title={item.media.title}
+            >{item.media.title}</b
+          ><small
             >{i + 1}{item.addedBy ? ` · ${participantNameParts(item.addedBy).label}` : ''}{item.start
               ? ` · ${$t('queue.from', { time: formatDuration(item.start) })}`
               : ''}</small
@@ -329,6 +331,17 @@
     gap: 0.2rem;
   }
   .queue-tools .active,
+  .next-badge {
+    display: inline-block;
+    margin-right: 6px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--accent-primary);
+    color: var(--surface-page);
+    font-size: 0.7rem;
+    font-weight: 700;
+    vertical-align: middle;
+  }
   .vote.active {
     color: var(--accent-primary);
     background: var(--surface-hover);

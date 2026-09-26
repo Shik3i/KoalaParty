@@ -14,6 +14,8 @@ export interface QueueItem {
   voted: boolean;
   addedBy: string;
   start: number;
+  // Placed with "play next": plays before voted items.
+  next?: boolean;
 }
 export interface Member {
   identityId: string;
@@ -71,6 +73,8 @@ export interface Snapshot {
     skipVoted: boolean;
     startsAt?: number;
     autoPaused?: boolean;
+    // The current video's length once someone reported it, else 0.
+    duration?: number;
   };
   events: Activity[];
   revision: number;
@@ -82,8 +86,17 @@ export interface Snapshot {
   waitForAll?: boolean;
   countdownSeconds?: number;
   scheduledAt?: number;
+  // Broadcasts carry only the newest events; merge them into the known list.
+  eventsPartial?: boolean;
 }
 export type RoomMode = 'party' | 'cinema' | 'host';
+// Adds the newest events of a partial broadcast to the known list, oldest first,
+// keeping at most `limit` entries.
+export function mergeEvents(known: Activity[], incoming: Activity[], limit = 200): Activity[] {
+  const seen = new Set(known.map((event) => event.id));
+  const merged = [...known, ...incoming.filter((event) => !seen.has(event.id))];
+  return merged.length > limit ? merged.slice(merged.length - limit) : merged;
+}
 // Reaction palette, in keyboard order (1–9, then 0). Must match the server.
 export const REACTION_EMOJIS = ['❤️', '😂', '🔥', '👀', '😮', '👏', '🎉', '😭', '🍿', '😴'];
 export interface ChatMessage {
