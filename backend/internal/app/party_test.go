@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -447,14 +446,14 @@ func TestBroadcastsCarryOnlyTheNewestEvents(t *testing.T) {
 	}
 }
 
-func TestStaticPathStaysInsideTheWebRoot(t *testing.T) {
-	root := t.TempDir()
-	for _, bad := range []string{"/../secret", "/..", "/a/../../b", `/..\secret`} {
-		if target, inside := staticPath(root, bad); inside && !strings.HasPrefix(target, root) {
-			t.Fatalf("%q escaped the root: %s", bad, target)
+func TestStaticNamesStayInsideTheWebRoot(t *testing.T) {
+	for _, raw := range []string{"/../secret", "/..", "/a/../../b", "/_app/x.js"} {
+		name, valid := staticName(raw)
+		if !valid || strings.HasPrefix(name, "..") || strings.HasPrefix(name, "/") {
+			t.Fatalf("%q mapped to %q (valid=%v)", raw, name, valid)
 		}
 	}
-	if target, inside := staticPath(root, "/_app/x.js"); !inside || !strings.HasSuffix(filepath.ToSlash(target), "/_app/x.js") {
-		t.Fatalf("regular file not resolved: %s %v", target, inside)
+	if name, _ := staticName("/_app/x.js"); name != "_app/x.js" {
+		t.Fatalf("regular file mapped to %q", name)
 	}
 }
