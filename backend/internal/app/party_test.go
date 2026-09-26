@@ -457,3 +457,12 @@ func TestStaticNamesStayInsideTheWebRoot(t *testing.T) {
 		t.Fatalf("regular file mapped to %q", name)
 	}
 }
+
+func TestLogValuesCannotForgeLines(t *testing.T) {
+	if got := logValue("id\r\nlevel=ERROR msg=forged"); strings.ContainsAny(got, "\r\n") {
+		t.Fatalf("line break kept: %q", got)
+	}
+	if logMethod("GET") != "GET" || logMethod("BREW\n") != "other" || logCommandType("queue.add") != "queue.add" || logCommandType("x\ny") != "unknown" {
+		t.Fatal("log helpers let unexpected values through")
+	}
+}

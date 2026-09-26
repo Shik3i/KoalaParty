@@ -11,7 +11,8 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 - Countdown preloading now really buffers: the video pauses once its first data arrived instead of at the first loading signal, which cancelled the download.
 - Smooth drift correction now engages with real YouTube players, which accept in-between speeds such as 1.1× but apply them a moment later; only a player that ignores the speed falls back to seeking.
 - A queue-vote browser test waits for the owner's own queue before voting.
-- Code-scanning findings: a failed loop re-queue or departure record is no longer silently ignored, static files resolve strictly inside the web root, logs record only known HTTP methods and command types, and request IDs no longer have a `Math.random` fallback.
+- Code-scanning findings: a failed loop re-queue or departure record is no longer silently ignored, static files resolve strictly inside the web root, logs record only known HTTP methods and command types, and request IDs no longer have a `Math.random` fallback. Log values are stripped of line breaks and anonymous names use unbiased cryptographic randomness.
+- `scripts/ci-local.sh` runs every CI and CodeQL check locally, with the browser tests in the Playwright Linux image; text files are checked out with LF on every OS.
 
 The 0.15.0 tag was not published because its release check hit that flaky test; 0.15.1 contains everything listed for 0.15.0.
 

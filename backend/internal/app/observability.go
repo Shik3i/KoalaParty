@@ -188,9 +188,9 @@ func requestLogging(logger *slog.Logger, metrics *runtimeMetrics, next http.Hand
 			level = slog.LevelWarn
 		}
 		logger.LogAttrs(r.Context(), level, "http request",
-			slog.String("request_id", id),
+			slog.String("request_id", logValue(id)),
 			slog.String("method", logMethod(r.Method)),
-			slog.String("route", r.Pattern),
+			slog.String("route", logValue(r.Pattern)),
 			slog.Int("status", status),
 			slog.Int("bytes", recorder.bytes),
 			slog.Int64("duration_ms", time.Since(started).Milliseconds()),
@@ -207,7 +207,7 @@ func (a *application) logCommand(ctx context.Context, room string, p principal, 
 		return
 	}
 	attrs := []slog.Attr{
-		slog.String("request_id", requestIDFromContext(ctx)),
+		slog.String("request_id", logValue(requestIDFromContext(ctx))),
 		slog.String("command_request_hash", shortHash(c.RequestID)),
 		slog.String("command", logCommandType(c.Type)),
 		slog.String("room_hash", shortHash(room)),
@@ -215,9 +215,15 @@ func (a *application) logCommand(ctx context.Context, room string, p principal, 
 		slog.String("outcome", outcome),
 	}
 	if code != "" {
-		attrs = append(attrs, slog.String("error_code", code))
+		attrs = append(attrs, slog.String("error_code", logValue(code)))
 	}
 	a.logger.LogAttrs(ctx, slog.LevelInfo, "room command", attrs...)
+}
+
+// logValue strips line breaks so a client-supplied value (such as a request ID
+// header) can never forge extra log lines, whatever the log format.
+func logValue(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, "\n", ""), "\r", "")
 }
 
 // logMethod and logCommandType keep client-chosen strings out of the logs:
@@ -225,7 +231,7 @@ func (a *application) logCommand(ctx context.Context, room string, p principal, 
 func logMethod(method string) string {
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions:
-		return method
+		return logValue(method)
 	}
 	return "other"
 }
@@ -234,7 +240,7 @@ func logCommandType(kind string) string {
 	if capFor(kind) == "" {
 		return "unknown"
 	}
-	return kind
+	return logValue(kind)
 }
 
 func commandErrorCode(err error) string {

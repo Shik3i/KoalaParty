@@ -87,11 +87,21 @@ const nameAdjectives = [
   'Cheerful', 'Curious', 'Mellow', 'Nimble', 'Plucky', 'Jolly', 'Breezy', 'Dapper',
   'Snug', 'Wild',
 ];
+// The name travels together with the device secret, so it is drawn from the
+// same cryptographic source rather than Math.random.
+function randomIndex(length: number): number {
+  // Rejection sampling keeps every index equally likely.
+  const limit = Math.floor(0x1_0000_0000 / length) * length;
+  const value = new Uint32Array(1);
+  do crypto.getRandomValues(value);
+  while (value[0] >= limit);
+  return value[0] % length;
+}
 function pick<T>(items: T[]): T {
-  return items[Math.floor(Math.random() * items.length)];
+  return items[randomIndex(items.length)];
 }
 function randomDisplayName(): string {
-  const i = Math.floor(Math.random() * nameAnimals.length);
+  const i = randomIndex(nameAnimals.length);
   const emoji = nameEmojis[i];
   const name = `${emoji} ${pick(nameAdjectives)} ${nameAnimals[i]}`;
   // Keep generated names compact even though the server's hard limit is 32 characters.
