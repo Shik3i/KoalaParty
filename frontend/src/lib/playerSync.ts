@@ -241,20 +241,16 @@ export function nextSeekLead(currentLead: number, residualDrift: number): number
 
 // Small drift while playing is best caught up by playing slightly faster or
 // slower than the room for a few seconds, which viewers barely notice, instead
-// of a seek that stalls to buffer. Only rates the player offers are used
-// (YouTube rounds anything else); without a close one the caller seeks instead.
+// of a seek that stalls to buffer. The YouTube player accepts such in-between
+// rates although getAvailablePlaybackRates() lists only quarter steps; the
+// caller verifies the rate took effect and seeks instead if it did not.
 export const NUDGE_FACTOR = 0.1;
-export function nudgeRateFor(drift: number, baseRate: number, available: number[] | undefined): number | null {
-  if (!Number.isFinite(drift) || drift === 0 || !available?.length) return null;
+export function nudgeRateFor(drift: number, baseRate: number): number | null {
+  if (!Number.isFinite(drift) || drift === 0) return null;
   const base = baseRate || 1;
-  const wanted = drift < 0 ? base * (1 + NUDGE_FACTOR) : base * (1 - NUDGE_FACTOR);
-  let best: number | null = null;
-  for (const candidate of available) {
-    const helps = drift < 0 ? candidate > base : candidate < base;
-    if (!helps || Math.abs(candidate - base) > base * 0.15) continue;
-    if (best === null || Math.abs(candidate - wanted) < Math.abs(best - wanted)) best = candidate;
-  }
-  return best;
+  const wanted = Math.round(base * (drift < 0 ? 1 + NUDGE_FACTOR : 1 - NUDGE_FACTOR) * 100) / 100;
+  const clamped = Math.min(2, Math.max(0.25, wanted));
+  return Math.abs(clamped - base) < 0.01 ? null : clamped;
 }
 
 // A nudge ends once the viewer is (nearly) back in sync, overshoots, the player
