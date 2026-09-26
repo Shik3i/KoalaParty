@@ -4,6 +4,8 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-26
+
 ### Added
 
 - German interface, detected from the browser and switchable in the header; the privacy policy is available in German.
