@@ -2,6 +2,8 @@
 
 `make verify` runs backend race tests and static analysis plus frontend formatting, lint, type checks, unit tests, and production build. CI also builds the Docker image. Automated browser tests cover application synchronization and automatic privacy-enhanced YouTube API loading on room entry; the isolated-browser real YouTube smoke test below is mandatory before every release tag. The player also records a bounded local diagnostic ring (never uploaded automatically), handles YouTube autoplay blocking, retries one transient start failure, watches for a stuck start, and re-requests playback after online/visibility recovery. Use **Copy diagnostics** in a room when a browser-specific playback failure needs investigation.
 
+`scripts/ci-local.sh` runs all of the following locally, including the three-browser Playwright suite inside the official Playwright Linux container and a local CodeQL scan (`codeql-scan`), so a push is never the first test.
+
 Exact commands:
 
 ```sh

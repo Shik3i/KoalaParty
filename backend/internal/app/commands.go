@@ -505,7 +505,9 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 			if currentMedia.Valid {
 				var pos int
 				_ = tx.QueryRow("SELECT coalesce(max(position),-1)+1 FROM room_queue_items WHERE room_id=?", room).Scan(&pos)
-				_, e = tx.Exec("INSERT INTO room_queue_items(id,room_id,media_id,position,added_by_identity_id) VALUES(?,?,?,?,?)", newID(10), room, currentMedia.String, pos, p.IdentityID)
+				if _, e = tx.Exec("INSERT INTO room_queue_items(id,room_id,media_id,position,added_by_identity_id) VALUES(?,?,?,?,?)", newID(10), room, currentMedia.String, pos, p.IdentityID); e != nil {
+					return snapshot{}, e
+				}
 			}
 		}
 		activatedVideoID, e = advanceQueue(tx, room, p.IdentityID)

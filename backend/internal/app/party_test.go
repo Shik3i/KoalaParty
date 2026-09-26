@@ -445,3 +445,24 @@ func TestBroadcastsCarryOnlyTheNewestEvents(t *testing.T) {
 		t.Fatal("the source snapshot must stay complete")
 	}
 }
+
+func TestStaticNamesStayInsideTheWebRoot(t *testing.T) {
+	for _, raw := range []string{"/../secret", "/..", "/a/../../b", "/_app/x.js"} {
+		name, valid := staticName(raw)
+		if !valid || strings.HasPrefix(name, "..") || strings.HasPrefix(name, "/") {
+			t.Fatalf("%q mapped to %q (valid=%v)", raw, name, valid)
+		}
+	}
+	if name, _ := staticName("/_app/x.js"); name != "_app/x.js" {
+		t.Fatalf("regular file mapped to %q", name)
+	}
+}
+
+func TestLogValuesCannotForgeLines(t *testing.T) {
+	if got := logValue("id\r\nlevel=ERROR msg=forged"); strings.ContainsAny(got, "\r\n") {
+		t.Fatalf("line break kept: %q", got)
+	}
+	if logMethod("GET") != "GET" || logMethod("BREW\n") != "other" || logCommandType("queue.add") != "queue.add" || logCommandType("x\ny") != "unknown" {
+		t.Fatal("log helpers let unexpected values through")
+	}
+}

@@ -56,18 +56,12 @@ export function randomUUID(): string {
       // Fall through to manual implementation.
     }
   }
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-    const b = crypto.getRandomValues(new Uint8Array(16));
-    b[6] = (b[6] & 0x0f) | 0x40;
-    b[8] = (b[8] & 0x3f) | 0x80;
-    const h = Array.from(b, (x) => x.toString(16).padStart(2, '0'));
-    return `${h[0]}${h[1]}${h[2]}${h[3]}-${h[4]}${h[5]}-${h[6]}${h[7]}-${h[8]}${h[9]}-${h[10]}${h[11]}${h[12]}${h[13]}${h[14]}${h[15]}`;
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  // getRandomValues is available in every supported browser, secure context or not.
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0'));
+  return `${h[0]}${h[1]}${h[2]}${h[3]}-${h[4]}${h[5]}-${h[6]}${h[7]}-${h[8]}${h[9]}-${h[10]}${h[11]}${h[12]}${h[13]}${h[14]}${h[15]}`;
 }
 // Playful anonymous names. nameEmojis and nameAnimals are index-aligned so the
 // emoji always matches the animal. Kept in sync with the backend room-label
@@ -93,11 +87,21 @@ const nameAdjectives = [
   'Cheerful', 'Curious', 'Mellow', 'Nimble', 'Plucky', 'Jolly', 'Breezy', 'Dapper',
   'Snug', 'Wild',
 ];
+// The name travels together with the device secret, so it is drawn from the
+// same cryptographic source rather than Math.random.
+function randomIndex(length: number): number {
+  // Rejection sampling keeps every index equally likely.
+  const limit = Math.floor(0x1_0000_0000 / length) * length;
+  const value = new Uint32Array(1);
+  do crypto.getRandomValues(value);
+  while (value[0] >= limit);
+  return value[0] % length;
+}
 function pick<T>(items: T[]): T {
-  return items[Math.floor(Math.random() * items.length)];
+  return items[randomIndex(items.length)];
 }
 function randomDisplayName(): string {
-  const i = Math.floor(Math.random() * nameAnimals.length);
+  const i = randomIndex(nameAnimals.length);
   const emoji = nameEmojis[i];
   const name = `${emoji} ${pick(nameAdjectives)} ${nameAnimals[i]}`;
   // Keep generated names compact even though the server's hard limit is 32 characters.

@@ -1,1 +1,10 @@
+# Check out text files with LF on every OS so formatters (gofmt, Prettier) see
+# the same bytes locally as in CI.
+* text=auto eol=lf
 *.go text eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary

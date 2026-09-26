@@ -159,6 +159,8 @@
   let nudgeRate = 0;
   let nudgeStart = 0;
   let nudgeStartDrift = 0;
+  // Set once this player ignored a rate request; small drift is then sought away.
+  let nudgeUnsupported = false;
 
   function emitDiagnostic(event: string, details: Record<string, string | number | boolean | null> = {}) {
     onDiagnosticEvent(
@@ -269,7 +271,7 @@
     }
     emitDiagnostic('forced_resync', { reason, drift });
     if (status === 'playing') recoverPlayback(reason);
-    else if (player.getPlayerState?.() !== PAUSED && player.getPlayerState?.() !== PLAYER_STATE.ENDED) {
+    else if (!preloading && player.getPlayerState?.() !== PAUSED && player.getPlayerState?.() !== PLAYER_STATE.ENDED) {
       player.pauseVideo?.();
     }
     onDiagnostics({ drift: 0, state: status === 'playing' ? 'playing' : 'paused', correctedAt });
@@ -378,6 +380,41 @@
       guard();
       player.setPlaybackRate?.(target);
     }
+  }
+
+  function iframeVideoIs(id: string | null) {
+    return !!id && player?.getVideoData?.()?.video_id === id;
+  }
+  // A preloading video pauses once its first data arrived (or it started): it
+  // keeps downloading while paused and starts without delay after the countdown.
+  // Pausing at the very first BUFFERING signal would cancel the download.
+  let preloadTimer: ReturnType<typeof setInterval> | null = null;
+  function startPreloadWatch() {
+    stopPreloadWatch();
+    const startedAt = Date.now();
+    preloadTimer = setInterval(() => {
+      if (!preloading || !player || Date.now() - startedAt > 8000) {
+        stopPreloadWatch();
+        return;
+      }
+      const state = player.getPlayerState?.();
+      const loaded = player.getVideoLoadedFraction?.() ?? 0;
+      if (iframeVideoIs(lastVideo) && (state === PLAYING || (state === BUFFERING && loaded > 0))) finishPreload();
+    }, 50);
+  }
+  function stopPreloadWatch() {
+    if (preloadTimer) clearInterval(preloadTimer);
+    preloadTimer = null;
+  }
+  function finishPreload() {
+    preloading = false;
+    stopPreloadWatch();
+    guard(1500);
+    player.pauseVideo?.();
+    if (Math.abs(currentTime() - preloadTarget) > 0.3) player.seekTo?.(preloadTarget, true);
+    prevTime = preloadTarget;
+    prevWall = Date.now();
+    emitDiagnostic('preloaded');
   }
 
   function endNudge() {
@@ -509,16 +546,8 @@
   // back to the authoritative state instead of emitting.
   function handleStateChange(state: number) {
     playerState = state;
-    // A preloading video pauses as soon as it starts buffering or playing; it
-    // keeps downloading while paused and starts without delay after the countdown.
-    if (preloading && (state === BUFFERING || state === PLAYING)) {
-      preloading = false;
-      guard(1500);
-      player.pauseVideo?.();
-      player.seekTo?.(preloadTarget, true);
-      prevTime = preloadTarget;
-      prevWall = Date.now();
-      emitDiagnostic('preloaded');
+    if (preloading && state === PLAYING && iframeVideoIs(lastVideo)) {
+      finishPreload();
       return;
     }
     const iframeVideo = player?.getVideoData?.()?.video_id ?? '';
@@ -747,39 +776,47 @@
     // Tiers are chosen by the room's state: a viewer whose autoplay is blocked is
     // locally paused while the room plays and must not be re-aligned every poll.
     const roomPlaying = status === 'playing';
+    let seekInstead = false;
     if (nudgeRate) {
-      if (nudgeDone(drift, nudgeStartDrift, roomPlaying && state === PLAYING, now - nudgeStart)) {
-        emitDiagnostic('nudge_ended', { drift });
+      // The iframe applies and reports a new rate asynchronously, so a player
+      // that ignored the request is recognised a moment later, not right away.
+      if (now - nudgeStart > 1200 && Math.abs((player.getPlaybackRate?.() ?? nudgeRate) - nudgeRate) > 0.01) {
+        emitDiagnostic('nudge_unsupported', { drift });
+        nudgeUnsupported = true;
         endNudge();
-        lastSoftCorrection = now;
+        seekInstead = true;
+      } else {
+        if (nudgeDone(drift, nudgeStartDrift, roomPlaying && state === PLAYING, now - nudgeStart)) {
+          emitDiagnostic('nudge_ended', { drift });
+          endNudge();
+          lastSoftCorrection = now;
+        }
+        if (Math.abs(drift) <= DRIFT_MAX) return;
+        endNudge();
       }
-      if (Math.abs(drift) <= DRIFT_MAX) return;
-      endNudge();
     }
     softDriftSince = roomPlaying && Math.abs(drift) > DRIFT_SOFT_SECONDS ? (softDriftSince ?? now) : null;
     if (
+      seekInstead ||
       driftAction({ drift, playing: roomPlaying, now, softSince: softDriftSince, lastSoftCorrection }) === 'correct'
     ) {
       if (roomPlaying && Math.abs(drift) <= DRIFT_MAX) lastSoftCorrection = now;
-      // A small drift while playing is caught up by a brief speed change; only
-      // when the player offers no suitable rate does it seek.
+      // A small drift while playing is caught up by a brief speed change; a
+      // player that does not accept it seeks instead.
       const nudge =
-        roomPlaying && state === PLAYING && Math.abs(drift) <= DRIFT_MAX
-          ? nudgeRateFor(drift, rate || 1, player.getAvailablePlaybackRates?.())
+        !seekInstead && !nudgeUnsupported && roomPlaying && state === PLAYING && Math.abs(drift) <= DRIFT_MAX
+          ? nudgeRateFor(drift, rate || 1)
           : null;
       if (nudge) {
         softDriftSince = null;
         guard(600);
         player.setPlaybackRate?.(nudge);
-        if (Math.abs((player.getPlaybackRate?.() ?? nudge) - nudge) < 0.01) {
-          nudgeRate = nudge;
-          nudgeStart = now;
-          nudgeStartDrift = drift;
-          correctedAt = now;
-          emitDiagnostic('nudge_started', { drift, rate: nudge });
-          return;
-        }
-        player.setPlaybackRate?.(rate || 1);
+        nudgeRate = nudge;
+        nudgeStart = now;
+        nudgeStartDrift = drift;
+        correctedAt = now;
+        emitDiagnostic('nudge_started', { drift, rate: nudge });
+        return;
       }
       softDriftSince = null;
       const target = roomPlaying && state === PLAYING ? expected + seekLead * (rate || 1) : expected;
@@ -818,6 +855,7 @@
       disposed = true;
       playerGeneration += 1;
       stopMonitor();
+      stopPreloadWatch();
       clearRecoveryTimers();
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
@@ -921,6 +959,7 @@
         preloading = true;
         preloadTarget = target;
         player.loadVideoById(request);
+        startPreloadWatch();
       } else player.cueVideoById(request);
       applyRate();
       prevTime = target;
@@ -931,7 +970,11 @@
     }
     // A confirmed change arrived: stop suppressing correction and realign now.
     if (playbackRevision !== initialLoadRevision) initialLoadPosition = null;
-    preloading = false;
+    // Keep buffering a countdown video; any other change ends the preload.
+    if (status === 'playing' || !preload) {
+      preloading = false;
+      stopPreloadWatch();
+    }
     endNudge();
     localSeekUntil = 0;
     applyRate();
@@ -945,7 +988,9 @@
     else {
       autoplayBlocked = false;
       const state = player.getPlayerState?.();
-      if (state !== PAUSED && state !== PLAYER_STATE.ENDED) player.pauseVideo?.();
+      // Pausing a video that is still starting to load would cancel the preload;
+      // it pauses itself as soon as it begins to buffer.
+      if (!preloading && state !== PAUSED && state !== PLAYER_STATE.ENDED) player.pauseVideo?.();
     }
   }
   $effect(() => {

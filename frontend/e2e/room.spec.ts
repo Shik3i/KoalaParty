@@ -617,6 +617,7 @@ test('personalized queue votes, mini-player and advancing pause positions', asyn
   await owner.getByLabel('YouTube URL').fill(`https://youtu.be/${E2E_QUEUE_VIDEO_ID}`);
   await owner.getByRole('button', { name: 'Add to queue' }).click();
   await expect(member.locator('.queue li')).toHaveCount(1);
+  await expect(owner.locator('.queue li')).toHaveCount(1);
   const ownerVote = owner.locator('.queue .vote');
   const memberVote = member.locator('.queue .vote');
   await ownerVote.click();

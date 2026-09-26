@@ -27,7 +27,8 @@ export default defineConfig({
     gracefulShutdown: { signal: 'SIGINT', timeout: 1000 },
     env: {
       KOALAPARTY_ADDR: ':4187',
-      KOALAPARTY_DB: '../frontend/e2e.db',
+      // scripts/ci-local.sh keeps the database off the Docker bind mount.
+      KOALAPARTY_DB: process.env.KOALAPARTY_E2E_DB ?? '../frontend/e2e.db',
       KOALAPARTY_WEB_ROOT: '../frontend/build',
       KOALAPARTY_TRUSTED_ORIGINS: 'http://127.0.0.1:4187',
       KOALAPARTY_E2E: 'true',
