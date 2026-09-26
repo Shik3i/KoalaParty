@@ -189,7 +189,7 @@ func requestLogging(logger *slog.Logger, metrics *runtimeMetrics, next http.Hand
 		}
 		logger.LogAttrs(r.Context(), level, "http request",
 			slog.String("request_id", id),
-			slog.String("method", r.Method),
+			slog.String("method", logMethod(r.Method)),
 			slog.String("route", r.Pattern),
 			slog.Int("status", status),
 			slog.Int("bytes", recorder.bytes),
@@ -209,7 +209,7 @@ func (a *application) logCommand(ctx context.Context, room string, p principal, 
 	attrs := []slog.Attr{
 		slog.String("request_id", requestIDFromContext(ctx)),
 		slog.String("command_request_hash", shortHash(c.RequestID)),
-		slog.String("command", c.Type),
+		slog.String("command", logCommandType(c.Type)),
 		slog.String("room_hash", shortHash(room)),
 		slog.String("identity_hash", shortHash(p.IdentityID)),
 		slog.String("outcome", outcome),
@@ -218,6 +218,23 @@ func (a *application) logCommand(ctx context.Context, room string, p principal, 
 		attrs = append(attrs, slog.String("error_code", code))
 	}
 	a.logger.LogAttrs(ctx, slog.LevelInfo, "room command", attrs...)
+}
+
+// logMethod and logCommandType keep client-chosen strings out of the logs:
+// anything unexpected is recorded as "other" or "unknown".
+func logMethod(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions:
+		return method
+	}
+	return "other"
+}
+
+func logCommandType(kind string) string {
+	if capFor(kind) == "" {
+		return "unknown"
+	}
+	return kind
 }
 
 func commandErrorCode(err error) string {

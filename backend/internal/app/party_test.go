@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -443,5 +444,17 @@ func TestBroadcastsCarryOnlyTheNewestEvents(t *testing.T) {
 	}
 	if len(s.Events) <= broadcastEvents || s.EventsPartial {
 		t.Fatal("the source snapshot must stay complete")
+	}
+}
+
+func TestStaticPathStaysInsideTheWebRoot(t *testing.T) {
+	root := t.TempDir()
+	for _, bad := range []string{"/../secret", "/..", "/a/../../b", `/..\secret`} {
+		if target, inside := staticPath(root, bad); inside && !strings.HasPrefix(target, root) {
+			t.Fatalf("%q escaped the root: %s", bad, target)
+		}
+	}
+	if target, inside := staticPath(root, "/_app/x.js"); !inside || !strings.HasSuffix(filepath.ToSlash(target), "/_app/x.js") {
+		t.Fatalf("regular file not resolved: %s %v", target, inside)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -254,6 +255,21 @@ func renderIndex(body []byte, path, publicOrigin string) []byte {
 	return []byte(page)
 }
 
+// staticPath maps a URL path to a file below root and reports whether the
+// result stays inside root, so no request can reach files elsewhere.
+func staticPath(root, urlPath string) (string, bool) {
+	base, err := filepath.Abs(root)
+	if err != nil {
+		return "", false
+	}
+	target := filepath.Join(base, filepath.FromSlash(path.Clean("/"+urlPath)))
+	rel, err := filepath.Rel(base, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", false
+	}
+	return target, true
+}
+
 func spaHandler(root, publicOrigin string) http.Handler {
 	files := http.FileServer(http.Dir(root))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -261,8 +277,8 @@ func spaHandler(root, publicOrigin string) http.Handler {
 			problem(w, 404, "not_found", "API route was not found.")
 			return
 		}
-		target := filepath.Join(root, filepath.Clean(r.URL.Path))
-		if info, e := os.Stat(target); e == nil && !info.IsDir() {
+		target, inside := staticPath(root, r.URL.Path)
+		if info, e := os.Stat(target); inside && e == nil && !info.IsDir() {
 			switch {
 			case strings.HasPrefix(r.URL.Path, "/_app/immutable/"):
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
