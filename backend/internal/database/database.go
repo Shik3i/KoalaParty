@@ -17,7 +17,15 @@ import (
 var migrations embed.FS
 
 func Open(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", path)
+	// Connection pragmas travel in the DSN so a connection the pool re-opens gets
+	// them too. synchronous=NORMAL is the recommended, crash-safe setting for WAL
+	// and avoids an fsync on every room command.
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	dsn := path + separator + "_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}

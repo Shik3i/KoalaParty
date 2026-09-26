@@ -27,7 +27,14 @@ type client struct {
 	logger       *slog.Logger
 	metrics      *runtimeMetrics
 	roomHash     string
+	lastAuth     time.Time
 }
+
+// lightMessages are frequent, low-impact messages that may reuse a recent
+// session check instead of querying the database for every one.
+var lightMessages = map[string]bool{"chat.send": true, "presence.state": true, "reaction.send": true}
+
+const lightAuthWindow = 5 * time.Second
 
 func (c *client) enqueue(v any) bool {
 	select {
@@ -436,14 +443,19 @@ func (a *application) websocket(w http.ResponseWriter, r *http.Request, p princi
 			c.enqueue(map[string]any{"type": "error", "code": "invalid_json", "message": "Invalid command JSON."})
 			continue
 		}
-		current, authErr := a.principalBySessionHash(c.sessionHash)
-		if authErr != nil || current.IdentityID != c.identity {
-			c.enqueue(map[string]any{"type": "error", "requestId": cmd.RequestID, "code": "session_expired", "message": "Session expired or was revoked."})
-			return
-		}
-		p = current
-		if !roomAccess(r.Context(), a.db, room, p.IdentityID) {
-			return
+		// Frequent chat, presence and reaction messages may reuse a check from the
+		// last few seconds; revocations, kicks and bans disconnect sockets directly.
+		if !lightMessages[cmd.Type] || time.Since(c.lastAuth) > lightAuthWindow {
+			current, authErr := a.principalBySessionHash(c.sessionHash)
+			if authErr != nil || current.IdentityID != c.identity {
+				c.enqueue(map[string]any{"type": "error", "requestId": cmd.RequestID, "code": "session_expired", "message": "Session expired or was revoked."})
+				return
+			}
+			p = current
+			if !roomAccess(r.Context(), a.db, room, p.IdentityID) {
+				return
+			}
+			c.lastAuth = time.Now()
 		}
 		if cmd.Type == "chat.send" {
 			a.handleChat(r.Context(), c, room, p, cmd)

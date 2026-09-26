@@ -1,10 +1,13 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -261,5 +264,72 @@ func TestPublicDiscoveryNeverShowsCustomRoomNames(t *testing.T) {
 	a.discover(w, httptest.NewRequest("GET", "/api/discover", nil))
 	if w.Code != 200 || strings.Contains(w.Body.String(), "Unmoderated text") || !strings.Contains(w.Body.String(), roomLabel(room)) {
 		t.Fatalf("discover exposed a custom name: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSameSecondEventsKeepInsertionOrder(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "323e4567-e89b-42d3-a456-426614174031", strings.Repeat("q", 43))
+	room := createTestRoom(t, a, cookie, owner)
+	names := []string{"one", "two", "three", "four", "five", "six"}
+	for _, name := range names {
+		if _, err := roomCommandAs(t, a, room, owner, "room.rename", map[string]string{"name": name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := a.snapshot(t.Context(), room, owner.IdentityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range s.Events {
+		if e.Type == "room.rename" {
+			got = append(got, e.Payload["name"].(string))
+		}
+	}
+	if strings.Join(got, ",") != strings.Join(names, ",") {
+		t.Fatalf("events out of order: %v", got)
+	}
+}
+
+func TestTitleLookupsSkipKnownTitlesAndBatchBroadcasts(t *testing.T) {
+	a := testApp(t)
+	var mu sync.Mutex
+	lookups := map[string]int{}
+	a.fetchTitle = func(_ context.Context, id string) string {
+		mu.Lock()
+		defer mu.Unlock()
+		lookups[id]++
+		return "Title " + id
+	}
+	cookie, owner := exchange(t, a, "323e4567-e89b-42d3-a456-426614174032", strings.Repeat("r", 43))
+	room := createTestRoom(t, a, cookie, owner)
+	ids := []string{}
+	for i := range 8 {
+		ids = append(ids, fmt.Sprintf("vid%08d", i))
+	}
+	items := []map[string]string{}
+	for _, id := range ids {
+		items = append(items, map[string]string{"videoId": id})
+	}
+	if _, err := roomCommandAs(t, a, room, owner, "queue.add", map[string]any{"items": items}); err != nil {
+		t.Fatal(err)
+	}
+	a.enrichTitles(ids)
+	a.enrichTitles(ids)
+	s, _ := a.snapshot(t.Context(), room, owner.IdentityID)
+	for _, item := range s.Queue {
+		if item.Media.Title != "Title "+item.Media.ProviderID {
+			t.Fatalf("title not enriched: %+v", item.Media)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, id := range ids {
+		// The background lookup from queue.add may race the explicit calls, but a
+		// resolved title is never requested again.
+		if lookups[id] < 1 || lookups[id] > 2 {
+			t.Fatalf("%s looked up %d times", id, lookups[id])
+		}
 	}
 }

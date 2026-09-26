@@ -19,6 +19,13 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 - The room page is split into focused components (header, settings, queue, people, activity, player bar, dialogs).
 - Public discovery shows only generated room names, never custom names.
+- “Wait for everyone” stops waiting for a viewer after two stalls in five minutes, and never pauses someone watching alone. Scheduled parties start by the server clock.
+- Video titles are looked up in small parallel batches, only for videos without a known title, and each room is refreshed once per batch instead of once per video.
+- SQLite settings apply to every database connection, with `synchronous=NORMAL` for faster commits in WAL mode. Chat, presence and reactions reuse a session check from the last few seconds.
+
+### Fixed
+
+- Activity and history entries from the same second keep their real order.
 
 ## [0.13.0] - 2026-09-26
 

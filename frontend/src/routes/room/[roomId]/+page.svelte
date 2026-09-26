@@ -102,6 +102,7 @@
   // Wait-for-everyone bookkeeping: when each person started buffering.
   let bufferingSince: Record<string, number> = {};
   let lastAutoWait = 0;
+  let waitLog: Record<string, number[]> = {};
   let autoPausedAt = 0;
   let scheduleStartedFor = 0;
   let reminderTimer: ReturnType<typeof setTimeout> | null = null;
@@ -698,7 +699,12 @@
     if (!room || !connected || !isCoordinator()) return;
     const now = Date.now();
     const active = new Set(room.members.filter((member) => member.active).map((member) => member.identityId));
-    const slow = Object.entries(bufferingSince).filter(([id, since]) => active.has(id) && now - since > 2500);
+    // Someone whose connection keeps stalling would otherwise pause the room every
+    // few seconds; after two waits in five minutes the party carries on without them.
+    const patient = (id: string) => (waitLog[id] ?? []).filter((at) => now - at < 300_000).length < 2;
+    const slow = Object.entries(bufferingSince).filter(
+      ([id, since]) => active.has(id) && now - since > 2500 && patient(id),
+    );
     const pb = room.playback;
     // Waiting only makes sense with company: never auto-pause a viewer who is alone.
     if (
@@ -711,6 +717,7 @@
       now - lastAutoWait > 20_000
     ) {
       lastAutoWait = now;
+      for (const [id] of slow) waitLog[id] = [...(waitLog[id] ?? []).filter((at) => now - at < 300_000), now];
       void command(
         'player.pause',
         { position: livePosition(), reason: 'wait' },
@@ -718,7 +725,7 @@
       );
     } else if (pb.status === 'paused' && pb.autoPaused && pb.media) {
       if (!autoPausedAt) autoPausedAt = now;
-      const stillBuffering = Object.keys(bufferingSince).some((id) => active.has(id));
+      const stillBuffering = Object.keys(bufferingSince).some((id) => active.has(id) && patient(id));
       // Resume together once everyone is ready, but never wait forever.
       if ((!stillBuffering && now - autoPausedAt > 1000) || now - autoPausedAt > 20_000) {
         autoPausedAt = 0;
@@ -729,11 +736,13 @@
         );
       }
     } else autoPausedAt = 0;
-    // Start a scheduled party on time if something is queued.
+    // Start a scheduled party on time (server clock) if something is queued. The
+    // window tolerates background tabs whose timers browsers slow to once a minute.
+    const serverNow = now + (clockOffset ?? 0);
     if (
       room.scheduledAt &&
-      now >= room.scheduledAt &&
-      now - room.scheduledAt < 60_000 &&
+      serverNow >= room.scheduledAt &&
+      serverNow - room.scheduledAt < 5 * 60_000 &&
       !pb.media &&
       room.queue.length &&
       scheduleStartedFor !== room.scheduledAt

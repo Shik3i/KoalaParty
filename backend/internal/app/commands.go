@@ -767,11 +767,7 @@ func (a *application) applyCommand(ctx context.Context, room string, p principal
 		}
 	}
 	if len(enrichVideoIDs) > 0 && a.fetchTitle != nil {
-		go func() {
-			for _, videoID := range enrichVideoIDs {
-				a.enrichTitle(room, "YT"+videoID, videoID)
-			}
-		}()
+		go a.enrichTitles(enrichVideoIDs)
 	}
 	if a.segments != nil && activatedVideoID != "" {
 		go a.enrichSegments(room, activatedVideoID)
@@ -829,7 +825,7 @@ func addCurrentToHistory(tx *sql.Tx, room string) error {
 	if _, e := tx.Exec("INSERT INTO room_history(id,room_id,media_id) VALUES(?,?,?)", newID(10), room, mediaID.String); e != nil {
 		return e
 	}
-	_, e := tx.Exec(`DELETE FROM room_history WHERE id IN (SELECT id FROM room_history WHERE room_id=? ORDER BY played_at DESC LIMIT -1 OFFSET 20)`, room)
+	_, e := tx.Exec(`DELETE FROM room_history WHERE id IN (SELECT id FROM room_history WHERE room_id=? ORDER BY played_at DESC,rowid DESC LIMIT -1 OFFSET 20)`, room)
 	return e
 }
 func nullable(s string) any {

@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -421,7 +421,7 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 		return s, e
 	}
 	q.Close()
-	historyRows, e := tx.QueryContext(ctx, `SELECT m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,'') FROM room_history h JOIN media_items m ON m.id=h.media_id WHERE h.room_id=? ORDER BY h.played_at DESC LIMIT 20`, id)
+	historyRows, e := tx.QueryContext(ctx, `SELECT m.id,m.provider_media_id,coalesce(m.title,''),coalesce(m.thumbnail_url,'') FROM room_history h JOIN media_items m ON m.id=h.media_id WHERE h.room_id=? ORDER BY h.played_at DESC,h.rowid DESC LIMIT 20`, id)
 	if e != nil {
 		return s, e
 	}
@@ -488,7 +488,7 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 			}
 		}
 	}
-	er, e := tx.QueryContext(ctx, `SELECT e.id,coalesce(e.actor_identity_id,''),coalesce(i.display_name,''),e.event_type,e.payload_json,e.created_at FROM room_events e LEFT JOIN identities i ON i.id=e.actor_identity_id WHERE e.room_id=? ORDER BY e.created_at DESC LIMIT 200`, id)
+	er, e := tx.QueryContext(ctx, `SELECT e.id,coalesce(e.actor_identity_id,''),coalesce(i.display_name,''),e.event_type,e.payload_json,e.created_at FROM room_events e LEFT JOIN identities i ON i.id=e.actor_identity_id WHERE e.room_id=? ORDER BY e.created_at DESC,e.rowid DESC LIMIT 200`, id)
 	if e != nil {
 		return s, e
 	}
@@ -510,6 +510,8 @@ func (a *application) snapshot(ctx context.Context, id, me string) (snapshot, er
 		return s, e
 	}
 	er.Close()
-	sort.Slice(s.Events, func(i, j int) bool { return s.Events[i].CreatedAt < s.Events[j].CreatedAt })
+	// Timestamps have one-second resolution; the insertion order breaks ties, so
+	// reverse the newest-first rows instead of re-sorting by time.
+	slices.Reverse(s.Events)
 	return s, tx.Commit()
 }
