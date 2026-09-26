@@ -980,6 +980,9 @@ test('short links, countdown starts, cinema mode and the German interface', asyn
   await expect(owner.locator('.countdown')).toBeVisible();
   await expect(owner.locator('.countdown')).toBeHidden({ timeout: 6_000 });
   await expect(owner.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  // "Play next" is marked and stays ahead of voted videos.
+  expect((await command(owner, roomId, 'queue.add', { videoId: E2E_QUEUE_VIDEO_ID, position: 0 })).status).toBe(200);
+  await expect(owner.locator('.queue li').first().locator('.next-badge')).toHaveText('Up next');
 
   const slug = `e2e-${randomUUID().slice(0, 8)}`;
   await owner.getByRole('button', { name: 'Invite', exact: true }).click();

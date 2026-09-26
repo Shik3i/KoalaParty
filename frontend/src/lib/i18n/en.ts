@@ -185,6 +185,7 @@ export const en = {
   'queue.emptyHint': 'Paste YouTube links above — or anywhere with Ctrl+V.',
   'queue.noMatch': 'No queued video matches “{query}”.',
   'queue.from': 'from {time}',
+  'queue.nextBadge': 'Up next',
   'queue.voteFor': 'Vote for {title}',
   'queue.voteHint': 'Vote — most-voted plays first',
   'queue.itemMore': 'More actions for {title}',

@@ -4,6 +4,18 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- “Play next” now really plays next: such items are marked “Up next” and play before voted videos.
+- Videos buffer during the countdown, so everyone starts at once without a loading pause.
+- Small drift is caught up with a brief, barely noticeable speed change where YouTube offers a suitable rate, instead of a seek that stalls.
+- The server learns each video's length, so a room left playing stops at the end and room previews no longer count past it.
+
+### Changed
+
+- Room updates carry only the newest 30 activity entries instead of 200, which shrinks every broadcast.
+- Frontend dependencies updated (Vite, SvelteKit, Svelte, Vitest 5, jsdom 30, Playwright 1.63, ESLint and more). TypeScript stays on 6 until svelte-check supports TypeScript 7; Dependabot now skips that major update.
+
 ## [0.14.0] - 2026-09-26
 
 ### Added

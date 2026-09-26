@@ -333,3 +333,115 @@ func TestTitleLookupsSkipKnownTitlesAndBatchBroadcasts(t *testing.T) {
 		}
 	}
 }
+
+func TestPlayNextBeatsVotesUntilPlayed(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "323e4567-e89b-42d3-a456-426614174041", strings.Repeat("s", 43))
+	room := createTestRoom(t, a, cookie, owner)
+	for _, id := range []string{"aaaaaaaaaa1", "bbbbbbbbbb2", "ccccccccccc"} {
+		if _, err := roomCommandAs(t, a, room, owner, "queue.add", map[string]string{"videoId": id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, _ := a.snapshot(t.Context(), room, owner.IdentityID)
+	// aaaaaaaaaa1 started playing; bbbbbbbbbb2 and ccccccccccc are queued.
+	var voted string
+	for _, item := range s.Queue {
+		if item.Media.ProviderID == "ccccccccccc" {
+			voted = item.ID
+		}
+	}
+	if _, err := roomCommandAs(t, a, room, owner, "queue.vote", map[string]string{"itemId": voted}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := roomCommandAs(t, a, room, owner, "queue.add", map[string]any{"videoId": "ddddddddddd", "position": 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Queue[0].Media.ProviderID != "ddddddddddd" || !s.Queue[0].Next || s.Queue[1].Media.ProviderID != "ccccccccccc" {
+		t.Fatalf("play next must lead the queue ahead of votes: %+v", s.Queue)
+	}
+	// Moving an item to the top with a pin works the same way.
+	ids := []string{}
+	for _, item := range s.Queue {
+		ids = append(ids, item.ID)
+	}
+	last := ids[len(ids)-1]
+	order := append([]string{last}, ids[:len(ids)-1]...)
+	if s, err = roomCommandAs(t, a, room, owner, "queue.reorder", map[string]any{"itemIds": order, "pin": last}); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Queue[0].Next && !s.Queue[1].Next {
+		t.Fatalf("pinned items lost: %+v", s.Queue)
+	}
+	if _, err = roomCommandAs(t, a, room, owner, "queue.reorder", map[string]any{"itemIds": order, "pin": "unknown"}); err == nil {
+		t.Fatal("pinning an unknown item must fail")
+	}
+	s, err = roomCommandAs(t, a, room, owner, "queue.skip", map[string]any{})
+	if err != nil || s.Playback.Media == nil || s.Playback.Media.ProviderID == "ccccccccccc" {
+		t.Fatalf("a pinned item must play before the voted one: %+v %v", s.Playback.Media, err)
+	}
+}
+
+func TestReportedDurationStopsTheClockAtTheEnd(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "323e4567-e89b-42d3-a456-426614174042", strings.Repeat("t", 43))
+	_, guest := exchange(t, a, "323e4567-e89b-42d3-a456-426614174043", strings.Repeat("u", 43))
+	room := createTestRoom(t, a, cookie, owner)
+	if _, err := roomCommandAs(t, a, room, owner, "room.countdown", map[string]int{"seconds": 0}); err != nil {
+		t.Fatal(err)
+	}
+	// The test room starts with a cued video; play it.
+	if _, err := roomCommandAs(t, a, room, owner, "player.play", map[string]float64{"position": 0}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.joinAndSnapshot(t.Context(), room, guest); err != nil {
+		t.Fatal(err)
+	}
+	report := func(p principal, media string, duration float64) {
+		raw, _ := json.Marshal(map[string]any{"mediaId": media, "duration": duration})
+		a.handleDuration(t.Context(), &client{send: make(chan any, 4), done: make(chan struct{})}, room, p, command{Type: "media.duration", Payload: raw})
+	}
+	if _, err := roomCommandAs(t, a, room, owner, "member.permission", map[string]any{"identityId": guest.IdentityID, "permission": "queue.skip", "allowed": false}); err != nil {
+		t.Fatal(err)
+	}
+	report(guest, "YTjNQXAC9IVRw", 1)
+	report(owner, "YTother00000", 5)
+	s, _ := a.snapshot(t.Context(), room, owner.IdentityID)
+	if s.Playback.Duration != 0 {
+		t.Fatalf("unauthorised or foreign duration stored: %v", s.Playback.Duration)
+	}
+	report(owner, "YTjNQXAC9IVRw", 30)
+	report(owner, "YTjNQXAC9IVRw", 2)
+	if _, err := a.db.Exec("UPDATE playback_states SET updated_at=strftime('%Y-%m-%d %H:%M:%f','now','-1 hour') WHERE room_id=?", room); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = a.snapshot(t.Context(), room, owner.IdentityID)
+	if s.Playback.Duration != 30 || s.Playback.Position != 30 {
+		t.Fatalf("duration=%v position=%v, want both 30", s.Playback.Duration, s.Playback.Position)
+	}
+}
+
+func TestBroadcastsCarryOnlyTheNewestEvents(t *testing.T) {
+	a := testApp(t)
+	cookie, owner := exchange(t, a, "323e4567-e89b-42d3-a456-426614174044", strings.Repeat("v", 43))
+	room := createTestRoom(t, a, cookie, owner)
+	for i := range broadcastEvents + 5 {
+		if _, err := roomCommandAs(t, a, room, owner, "room.rename", map[string]string{"name": fmt.Sprintf("n%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, _ := a.snapshot(t.Context(), room, owner.IdentityID)
+	c := &client{identity: owner.IdentityID, send: make(chan any, 4), done: make(chan struct{})}
+	a.hub.mu.Lock()
+	a.hub.rooms[room] = map[*client]struct{}{c: {}}
+	a.hub.mu.Unlock()
+	a.hub.broadcast(room, s)
+	got := (<-c.send).(map[string]any)["payload"].(snapshot)
+	if !got.EventsPartial || len(got.Events) != broadcastEvents || got.Events[len(got.Events)-1].ID != s.Events[len(s.Events)-1].ID {
+		t.Fatalf("partial=%v events=%d", got.EventsPartial, len(got.Events))
+	}
+	if len(s.Events) <= broadcastEvents || s.EventsPartial {
+		t.Fatal("the source snapshot must stay complete")
+	}
+}
