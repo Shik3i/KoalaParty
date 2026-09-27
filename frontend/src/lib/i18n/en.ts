@@ -133,6 +133,7 @@ export const en = {
   'playerError.initTimeout': 'YouTube player did not initialize. Try again.',
   'playerError.initFailed': 'YouTube player could not be initialized.',
   'playerError.identity': 'The embedded player identity could not be verified.',
+  'playerError.permanent': "This video can't play here. Skip it or pick another one.",
   'playerError.recover': 'Playback can recover after a retry or a different video.',
 
   // Add box
@@ -360,6 +361,7 @@ export const en = {
 
   // Notices
   'notice.nowPlaying': 'Now playing for everyone',
+  'notice.queueDone': 'The queue is done. Want a look back?',
   'notice.added': 'Added to the queue',
   'notice.addedMany': 'Added {count} videos to the queue',
   'notice.queuedNext': 'Queued to play next',

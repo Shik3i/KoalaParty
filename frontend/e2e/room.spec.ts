@@ -182,6 +182,9 @@ test('ended fullscreen playback is not restarted and its iframe is torn down', a
   await createRoomWithVideo(page);
   await page.getByRole('button', { name: 'Play', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  // The room's own fullscreen player must close once nothing is left to watch.
+  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
 
   const automaticSkip = page.waitForResponse((response) => {
     if (!response.url().endsWith('/commands') || response.request().method() !== 'POST') return false;
@@ -197,6 +200,7 @@ test('ended fullscreen playback is not restarted and its iframe is torn down', a
   });
   expect((await automaticSkip).status()).toBe(200);
   await expect(page.getByText('Start the party')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(false);
   expect(
     await page.evaluate(() => {
       const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
@@ -383,6 +387,34 @@ test('a rejected native playback command immediately restores the authoritative 
     { playCalls: playCallsBeforeFailure },
   );
   expect(rejected).toBe(true);
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+});
+
+test('a blocked YouTube API load is retried cleanly with Reload player', async ({ page }) => {
+  let blocked = false;
+  await page.route('**/iframe_api', (route) => {
+    // The first request fails like a content blocker or a network drop would.
+    if (!blocked) {
+      blocked = true;
+      return route.abort('blockedbyclient');
+    }
+    return route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeYouTubeAPI });
+  });
+  await page.goto('/');
+  await page.locator('.hero').getByRole('button', { name: 'Create a room' }).click();
+  await expect(page).toHaveURL(/\/room\/[A-Z2-7]{16}$/);
+  const roomId = page.url().split('/').at(-1)!;
+  expect((await command(page, roomId, 'room.countdown', { seconds: 0 })).status).toBe(200);
+  expect((await command(page, roomId, 'queue.play_now', { videoId: E2E_START_VIDEO_ID })).status).toBe(200);
+  const error = page.locator('.player-error');
+  await expect(error).toContainText('The YouTube player could not be loaded');
+  await error.getByRole('button', { name: 'Reload player' }).click();
+  await expect(error).toBeHidden();
+  await expect(page.locator('script[src*="youtube.com/iframe_api"]')).toHaveCount(1);
+  expect(blocked).toBe(true);
+  await page.waitForFunction(
+    () => !!(window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer?.videoId,
+  );
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
 });
 

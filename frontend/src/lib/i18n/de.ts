@@ -130,6 +130,7 @@ export const de: Record<MessageKey, string> = {
   'playerError.initTimeout': 'Der YouTube-Player ist nicht gestartet. Versuch es noch einmal.',
   'playerError.initFailed': 'Der YouTube-Player konnte nicht gestartet werden.',
   'playerError.identity': 'Die Identität des eingebetteten Players konnte nicht bestätigt werden.',
+  'playerError.permanent': 'Dieses Video lässt sich hier nicht abspielen. Überspring es oder nimm ein anderes.',
   'playerError.recover': 'Nach einem erneuten Versuch oder mit einem anderen Video klappt es meist wieder.',
 
   'add.label': 'YouTube-Link oder Suche',
@@ -348,6 +349,7 @@ export const de: Record<MessageKey, string> = {
   'recap.share': 'Teilen',
 
   'notice.nowPlaying': 'Läuft jetzt für alle',
+  'notice.queueDone': 'Die Warteschlange ist durch. Lust auf einen Rückblick?',
   'notice.added': 'Zur Warteschlange hinzugefügt',
   'notice.addedMany': '{count} Videos zur Warteschlange hinzugefügt',
   'notice.queuedNext': 'Läuft als Nächstes',

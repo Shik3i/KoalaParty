@@ -62,7 +62,8 @@ frontend() {
 e2e() {
   command -v docker >/dev/null || { echo "docker is required for browser tests"; return 1; }
   cd "$ROOT/frontend" || return 1
-  [ -d build ] || npm run build || return 1
+  # Always test the current sources, never a stale build.
+  npm run build || return 1
   local version
   version="$(node -p "require('./node_modules/@playwright/test/package.json').version")" || return 1
   # The E2E server runs inside the Linux container; SQLite is pure Go, so a
