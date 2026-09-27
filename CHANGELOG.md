@@ -4,6 +4,13 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.15.3] - 2026-09-27
+
+### Fixed
+
+- A room reopened after its video ended while nobody watched no longer plays the start of the finished video for a few seconds: the end is reported right away and the next video starts directly.
+- The release smoke test checks that a finished video is never replayed.
+
 ## [0.15.2] - 2026-09-27
 
 ### Fixed

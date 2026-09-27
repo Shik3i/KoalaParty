@@ -467,19 +467,26 @@ for (const reloadState of [1, 3, 'seek-feedback']) {
     await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
     expect((await command(page, roomId, 'player.seek', { position: 100 })).status).toBe(200);
 
-    const recoveredEnd = page.waitForResponse((response) => {
-      if (!response.url().endsWith('/commands') || response.request().method() !== 'POST') return false;
-      const body = response.request().postDataJSON();
-      return body.type === 'playback.ended' && body.payload.position === 100 && body.payload.duration === 100;
-    });
+    // The end may be reported just before or right after the reload; either way
+    // the room must record it exactly once and move on.
     await page.reload();
-    expect((await recoveredEnd).status()).toBe(200);
+    await expect
+      .poll(async () => {
+        const room = await page.evaluate(async (id) => fetch(`/api/rooms/${id}`).then((r) => r.json()), roomId);
+        const ends = room.events.filter(
+          (e: { type: string; payload: { position?: number; duration?: number } }) =>
+            e.type === 'media.ended' && e.payload.position === 100 && e.payload.duration === 100,
+        );
+        return { ends: ends.length, current: room.playback.media?.providerId };
+      })
+      .toEqual({ ends: 1, current: E2E_QUEUE_VIDEO_ID });
     await expect(page.locator('.queue li')).toHaveCount(0);
     await expect
       .poll(() =>
         page.evaluate(() => {
-          const player = (window as Window & { __koalaFakePlayer: FakePlayerHarness }).__koalaFakePlayer;
-          return { videoId: player.videoId, playing: player.playCalls > 0 };
+          // The finished video is never loaded again, so the player may not exist yet.
+          const player = (window as Window & { __koalaFakePlayer?: FakePlayerHarness }).__koalaFakePlayer;
+          return { videoId: player?.videoId, playing: (player?.playCalls ?? 0) > 0 };
         }),
       )
       .toEqual({ videoId: E2E_QUEUE_VIDEO_ID, playing: true });
