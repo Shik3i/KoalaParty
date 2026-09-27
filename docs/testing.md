@@ -19,9 +19,17 @@ The Playwright suite runs in Chromium, Firefox, and WebKit. It uses isolated bro
 
 `scripts/verify-release.test.mjs` covers strict stable SemVer tag parsing and exact changelog-section extraction. CI also runs `govulncheck`, `npm audit --audit-level=high`, a Docker build, `/api/ready`, and `/api/version` against a clean container. Release jobs repeat the test gates before publishing.
 
-## Manual YouTube smoke test
+## YouTube smoke test
 
-Run this against the exact production build in an isolated browser before creating a release tag. Record the viewport and measured player/iframe bounds; visual inspection alone is insufficient.
+Run this against the exact production build before creating a release tag. `scripts/smoke-youtube.mjs` automates every step below with the real YouTube player in Chromium (two viewers, measured bounds, sync offsets and pause frames); start the image locally and run it:
+
+```sh
+docker build -t koalaparty:rc .
+docker run -d --name kp-smoke -e KOALAPARTY_PRODUCTION=false   -e KOALAPARTY_TRUSTED_ORIGINS=http://127.0.0.1:18090 -p 127.0.0.1:18090:8080 koalaparty:rc
+BASE=http://127.0.0.1:18090 node scripts/smoke-youtube.mjs
+```
+
+The checklist it covers, which can also be walked through by hand in an isolated browser (record the viewport and measured player/iframe bounds; visual inspection alone is insufficient):
 
 1. Open one room in two browser tabs or profiles and confirm the privacy-enhanced YouTube player loads in both.
 2. Start an embeddable real video with **Play now**. Confirm both players advance together, then pause from the second tab and verify both remain at the same stable position.

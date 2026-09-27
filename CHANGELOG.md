@@ -4,6 +4,21 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-09-27
+
+### Fixed
+
+- A room reopened after its video ended while nobody watched now moves on to the next video instead of looping the finished one.
+- The room's fullscreen player closes when the last video ends instead of leaving an empty black screen.
+- Paused viewers are aligned to the same frame (within 0.08 s), and small drift while playing is caught up from 0.12 s with a brief speed change.
+- The party recap is offered as a notice with a button instead of a dialog that blocked adding the next video.
+- Videos that can never play here say so instead of suggesting that a retry usually helps.
+- The local CI script always tests a fresh frontend build.
+
+### Added
+
+- `scripts/smoke-youtube.mjs` runs the release smoke test with the real YouTube player, and a browser test covers retrying a blocked YouTube API load with **Reload player**.
+
 ## [0.15.1] - 2026-09-26
 
 ### Fixed

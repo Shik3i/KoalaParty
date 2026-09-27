@@ -2,7 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import { Play, Warning, Hourglass, SkipForward, SpeakerHigh } from 'phosphor-svelte';
   import {
-    DRIFT_SOFT_SECONDS,
+    softDriftThreshold,
     driftAction,
     nudgeDone,
     nudgeRateFor,
@@ -382,6 +382,14 @@
     }
   }
 
+  function loadedAtEnd(): boolean {
+    const duration = normalizedDuration(player?.getDuration?.() ?? 0);
+    return (
+      initialLoadPosition !== null &&
+      duration > 0 &&
+      initialLoadPosition >= duration - Math.max(1, Math.min(5, duration * 0.01))
+    );
+  }
   function iframeVideoIs(id: string | null) {
     return !!id && player?.getVideoData?.()?.video_id === id;
   }
@@ -575,7 +583,9 @@
       guarded: Date.now() < guardUntil,
       ready,
       hasVideo: !!lastVideo,
-      videoMatches: iframeVideo === lastVideo && confirmedVideo === lastVideo,
+      // A video loaded at its very end may report ENDED before it ever played;
+      // that is still this media's natural end.
+      videoMatches: iframeVideo === lastVideo && (confirmedVideo === lastVideo || loadedAtEnd()),
       currentTime: currentTime(),
       duration: normalizedDuration(player?.getDuration?.() ?? 0),
       canControl,
@@ -795,10 +805,18 @@
         endNudge();
       }
     }
-    softDriftSince = roomPlaying && Math.abs(drift) > DRIFT_SOFT_SECONDS ? (softDriftSince ?? now) : null;
+    const canNudge = !nudgeUnsupported;
+    softDriftSince = roomPlaying && Math.abs(drift) > softDriftThreshold(canNudge) ? (softDriftSince ?? now) : null;
     if (
       seekInstead ||
-      driftAction({ drift, playing: roomPlaying, now, softSince: softDriftSince, lastSoftCorrection }) === 'correct'
+      driftAction({
+        drift,
+        playing: roomPlaying,
+        now,
+        softSince: softDriftSince,
+        lastSoftCorrection,
+        nudge: canNudge,
+      }) === 'correct'
     ) {
       if (roomPlaying && Math.abs(drift) <= DRIFT_MAX) lastSoftCorrection = now;
       // A small drift while playing is caught up by a brief speed change; a
@@ -1030,7 +1048,13 @@
   {#if playerError}<div class="player-error" role="alert">
       <span><Warning size={38} weight="fill" /></span>
       <p>{playerError}</p>
-      <small>{playerErrorCode === 153 ? $t('playerError.identity') : $t('playerError.recover')}</small>
+      <small
+        >{playerErrorCode === 153
+          ? $t('playerError.identity')
+          : playerErrorCode !== null && !isRetryablePlayerError(playerErrorCode)
+            ? $t('playerError.permanent')
+            : $t('playerError.recover')}</small
+      >
       <div class="player-error-actions">
         {#if player && ready}<button class="secondary" onclick={() => retryCurrentVideo('manual')}
             >{$t('player.tryAgain')}</button

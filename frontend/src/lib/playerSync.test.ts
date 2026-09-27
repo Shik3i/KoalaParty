@@ -105,6 +105,8 @@ describe('playback recovery', () => {
   it('recognizes an ended server clock that YouTube wrapped to the beginning after reload', () => {
     expect(isWrappedEndedPlayback('playing', 1.2, 100.4, 100)).toBe(true);
     expect(isWrappedEndedPlayback('playing', 3, 635, 635)).toBe(true);
+    // The server clock stopped at a reported length slightly below this player's.
+    expect(isWrappedEndedPlayback('playing', 1, 19.021, 19.061)).toBe(true);
   });
 
   it('does not confuse ordinary playback, a local seek or a paused room with a wrapped end', () => {
@@ -232,7 +234,8 @@ describe('tiered drift correction', () => {
   it('corrects hard drift immediately and small paused drift precisely', () => {
     expect(driftAction({ ...base, drift: 2.1, playing: true })).toBe('correct');
     expect(driftAction({ ...base, drift: -0.5, playing: false })).toBe('correct');
-    expect(driftAction({ ...base, drift: 0.2, playing: false })).toBe('none');
+    expect(driftAction({ ...base, drift: 0.2, playing: false })).toBe('correct');
+    expect(driftAction({ ...base, drift: 0.05, playing: false })).toBe('none');
   });
   it('only corrects sustained moderate drift while playing, with a cooldown', () => {
     expect(driftAction({ ...base, drift: 1.1, playing: true })).toBe('none');
@@ -241,7 +244,19 @@ describe('tiered drift correction', () => {
     expect(driftAction({ ...base, drift: 1.1, playing: true, softSince: 97_000, lastSoftCorrection: 95_000 })).toBe(
       'none',
     );
-    expect(driftAction({ ...base, drift: 0.4, playing: true, softSince: 90_000 })).toBe('none');
+    expect(driftAction({ ...base, drift: 0.25, playing: true, softSince: 90_000 })).toBe('none');
+    expect(driftAction({ ...base, drift: 0.4, playing: true, softSince: 90_000 })).toBe('correct');
+  });
+  it('catches up smaller drift sooner and more often when the player accepts speed nudges', () => {
+    expect(driftAction({ ...base, drift: 0.15, playing: true, softSince: 90_000 })).toBe('none');
+    expect(driftAction({ ...base, drift: 0.15, playing: true, softSince: 90_000, nudge: true })).toBe('correct');
+    expect(driftAction({ ...base, drift: 0.1, playing: true, softSince: 90_000, nudge: true })).toBe('none');
+    expect(
+      driftAction({ ...base, drift: 0.2, playing: true, softSince: 90_000, nudge: true, lastSoftCorrection: 94_000 }),
+    ).toBe('correct');
+    expect(
+      driftAction({ ...base, drift: 0.2, playing: true, softSince: 90_000, nudge: true, lastSoftCorrection: 97_000 }),
+    ).toBe('none');
   });
 });
 
@@ -266,7 +281,8 @@ describe('rate nudging', () => {
   });
   it('stops once in sync, on overshoot, when paused or after a while', () => {
     expect(nudgeDone(-0.6, -1, true, 1000)).toBe(false);
-    expect(nudgeDone(-0.1, -1, true, 1000)).toBe(true);
+    expect(nudgeDone(-0.1, -1, true, 1000)).toBe(false);
+    expect(nudgeDone(-0.04, -1, true, 1000)).toBe(true);
     expect(nudgeDone(0.3, -1, true, 1000)).toBe(true);
     expect(nudgeDone(-0.6, -1, false, 1000)).toBe(true);
     expect(nudgeDone(-0.6, -1, true, 25_000)).toBe(true);

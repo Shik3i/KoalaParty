@@ -295,10 +295,11 @@
       splashTimer = setTimeout(() => (splash = null), 3200);
       recap.videos = [...recap.videos, nextMedia.title];
     }
-    // A finished queue is the natural end of a party: offer the recap once.
+    // A finished queue is the natural end of a party: offer the recap once, as a
+    // notice rather than a dialog, so adding the next video is never blocked.
     if (!nextMedia && previous.playback.media && !next.queue.length && recap.videos.length >= 2 && !recapShown) {
       recapShown = true;
-      recapOpen = true;
+      showNotice($t('notice.queueDone'), 12_000, 'info', { label: $t('recap.open'), run: () => (recapOpen = true) });
     }
     const wasActive = new Set(previous.members.filter((m) => m.active).map((m) => m.identityId));
     for (const member of next.members) {
@@ -397,6 +398,10 @@
       scheduleCountdown(countdown > now ? countdown : 0);
     }
     if (room) announceChanges(room, next);
+    // Nothing left to watch: leave the room's fullscreen player instead of
+    // keeping an empty black screen.
+    if (!next.playback.media && document.fullscreenElement && document.fullscreenElement === playerWrap)
+      void document.exitFullscreen().catch(() => {});
     else seenEvents = Object.fromEntries(next.events.map((event) => [event.id, true as const]));
     if (heat.mediaId && heat.mediaId !== mediaId) heat = { mediaId: '', buckets: {} };
     room = next;

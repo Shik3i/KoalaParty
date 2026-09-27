@@ -129,8 +129,12 @@ export function isWrappedEndedPlayback(
   )
     return false;
   const beginningWindow = Math.max(2, Math.min(10, duration * 0.02));
+  // The server stops its clock at the length a viewer reported, which can differ
+  // from this player's duration by a fraction of a second; treat "at the end"
+  // with the same tolerance as a natural ENDED.
+  const endTolerance = Math.max(1, Math.min(5, duration * 0.01));
   return (
-    expectedTime >= duration &&
+    expectedTime >= duration - endTolerance &&
     currentTime >= 0 &&
     currentTime <= beginningWindow &&
     expectedTime - currentTime >= Math.min(30, duration * 0.5)
@@ -207,10 +211,16 @@ export function timelineJump(
 // paused player can be aligned precisely at no cost, so everyone resumes from the
 // same frame.
 export const DRIFT_HARD_SECONDS = 1.8;
-export const DRIFT_SOFT_SECONDS = 0.5;
-export const DRIFT_PAUSED_SECONDS = 0.3;
+// Measured with real YouTube players: a paused seek lands to the millisecond, and
+// a brief speed nudge catches up small drift unnoticed, so both tiers stay tight.
+export const DRIFT_SOFT_SECONDS = 0.3;
+export const DRIFT_PAUSED_SECONDS = 0.08;
 export const DRIFT_SOFT_SUSTAIN_MS = 2_000;
 export const DRIFT_SOFT_COOLDOWN_MS = 15_000;
+// A player that accepts speed nudges is caught up much earlier and more often:
+// its reported time is stable to the millisecond, and a nudge never stalls.
+export const DRIFT_NUDGE_SECONDS = 0.12;
+export const DRIFT_NUDGE_COOLDOWN_MS = 5_000;
 
 export type DriftAction = 'none' | 'correct';
 
@@ -220,13 +230,19 @@ export function driftAction(options: {
   now: number;
   softSince: number | null;
   lastSoftCorrection: number;
+  nudge?: boolean; // the player can catch up by a brief speed change
 }): DriftAction {
   const size = Math.abs(options.drift);
   if (size > DRIFT_HARD_SECONDS) return 'correct';
   if (!options.playing) return size > DRIFT_PAUSED_SECONDS ? 'correct' : 'none';
-  if (size <= DRIFT_SOFT_SECONDS || options.softSince === null) return 'none';
+  if (size <= softDriftThreshold(options.nudge) || options.softSince === null) return 'none';
   if (options.now - options.softSince < DRIFT_SOFT_SUSTAIN_MS) return 'none';
-  return options.now - options.lastSoftCorrection >= DRIFT_SOFT_COOLDOWN_MS ? 'correct' : 'none';
+  const cooldown = options.nudge ? DRIFT_NUDGE_COOLDOWN_MS : DRIFT_SOFT_COOLDOWN_MS;
+  return options.now - options.lastSoftCorrection >= cooldown ? 'correct' : 'none';
+}
+
+export function softDriftThreshold(nudge = false): number {
+  return nudge ? DRIFT_NUDGE_SECONDS : DRIFT_SOFT_SECONDS;
 }
 
 // A seek while playing lands behind its target by the time YouTube needs to
@@ -255,7 +271,7 @@ export function nudgeRateFor(drift: number, baseRate: number): number | null {
 
 // A nudge ends once the viewer is (nearly) back in sync, overshoots, the player
 // stops playing, or it has run for too long.
-export const NUDGE_SETTLED_SECONDS = 0.15;
+export const NUDGE_SETTLED_SECONDS = 0.05;
 export const NUDGE_MAX_MS = 20_000;
 export function nudgeDone(drift: number, startDrift: number, playing: boolean, elapsedMs: number): boolean {
   return (
