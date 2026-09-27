@@ -405,6 +405,19 @@
     else seenEvents = Object.fromEntries(next.events.map((event) => [event.id, true as const]));
     if (heat.mediaId && heat.mediaId !== mediaId) heat = { mediaId: '', buckets: {} };
     room = next;
+    // The server stops its clock at a video's end. A snapshot sitting there
+    // while "playing" means the video finished while nobody watched: report the
+    // end instead of loading it, which YouTube would restart from 0. Checked on
+    // every snapshot, because the first one after a reload arrives before this
+    // viewer counts as connected and may report.
+    finishedMediaId =
+      pb.status === 'playing' && pb.media && pb.duration && pb.position >= pb.duration - 0.01 ? mediaId : '';
+    const finishedKey = `${mediaId}:${pb.revision}`;
+    if (finishedMediaId && finishedReportKey !== finishedKey && automaticEndDelay(next) !== null) {
+      finishedReportKey = finishedKey;
+      const duration = pb.duration ?? 0;
+      queueMicrotask(() => reportEnded(mediaId, duration, duration));
+    }
     updateMediaSession(next);
     updateMediaPosition();
     updateProgressTimer();
@@ -428,6 +441,8 @@
     progressTimer = setInterval(() => (nowTick = Date.now()), 500);
   }
   let reportedDurationFor = '';
+  let finishedMediaId = '';
+  let finishedReportKey = '';
   function handleDuration(duration: number) {
     mediaDuration = duration;
     updateMediaPosition();
@@ -1557,7 +1572,9 @@
           <div class="player-wrap" class:mini-player={miniPlayer} class:fullscreen bind:this={playerWrap}>
             <YouTubePlayer
               enabled={true}
-              videoId={room.playback.media?.providerId}
+              videoId={finishedMediaId && finishedMediaId === room.playback.media?.id
+                ? null
+                : room.playback.media?.providerId}
               mediaId={room.playback.media?.id}
               playbackRevision={room.playback.revision}
               {syncRequest}

@@ -183,6 +183,17 @@ try {
   await a.goto(`${BASE}/privacy`);
   await a.waitForTimeout(30_000);
   await a.goto(`${BASE}${roomPath}`);
+  // The finished video must not be played again from the start.
+  const replayed = await a.evaluate(async (finished) => {
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      const f = document.querySelector('iframe');
+      const p = f && window.YT?.get ? window.YT.get(f.id) : null;
+      if (p?.getVideoData?.()?.video_id === finished && p.getPlayerState?.() === 1) return true;
+    }
+    return false;
+  }, SHORT);
+  check('the finished video is not replayed after the reload', !replayed);
   await waitFor(a, isPlaying, LONG, 45_000).catch(() => {});
   const reloaded = await player(a);
   const reloadedRoom = await snapshot(a);
