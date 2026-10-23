@@ -4,6 +4,12 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.15.4] - 2026-10-23
+
+### Security
+
+- Bump Go toolchain to 1.26.10 and update dependencies to fix security vulnerabilities.
+
 ## [0.15.3] - 2026-09-27
 
 ### Fixed
