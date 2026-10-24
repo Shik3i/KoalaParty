@@ -8,9 +8,15 @@
     PictureInPicture,
     Play,
     SkipForward,
+    Sparkle,
+    SpeakerHigh,
+    SpeakerLow,
+    SpeakerSlash,
   } from 'phosphor-svelte';
   import { t } from '$lib/i18n';
   import { formatDuration, type Snapshot } from '$lib/room';
+  import AmbilightPopover from './AmbilightPopover.svelte';
+  import { volume, muted, setVolume, toggleMute } from '$lib/volume';
 
   let {
     room,
@@ -55,6 +61,7 @@
   } = $props();
 
   const HEAT_BUCKET = 5;
+  let ambilightOpen = $state(false);
   const pct = $derived(duration > 0 ? Math.min(100, (position / duration) * 100) : 0);
   // Reaction density along the timeline: where the room laughed, cheered or gasped.
   const heatBars = $derived.by(() => {
@@ -81,6 +88,35 @@
     disabled={commandPending || !caps['playback.play_pause'] || !room.playback.media}
     >{#if playing}<Pause size={18} weight="fill" />{:else}<Play size={18} weight="fill" />{/if}</button
   >
+  <div class="volume-control" class:muted={$muted || $volume === 0}>
+    <button
+      type="button"
+      class="secondary icon-button volume-btn"
+      aria-label={$muted ? $t('player.unmute') : $t('player.mute')}
+      title={$muted ? $t('player.unmute') : $t('player.mute')}
+      onclick={toggleMute}
+    >
+      {#if $muted || $volume === 0}
+        <SpeakerSlash size={17} weight="bold" />
+      {:else if $volume < 50}
+        <SpeakerLow size={17} weight="bold" />
+      {:else}
+        <SpeakerHigh size={17} weight="bold" />
+      {/if}
+    </button>
+    <div class="volume-slider-wrap">
+      <input
+        type="range"
+        class="volume-slider"
+        min="0"
+        max="100"
+        step="1"
+        value={$muted ? 0 : $volume}
+        aria-label={$t('player.volume')}
+        oninput={(e) => setVolume(Number(e.currentTarget.value))}
+      />
+    </div>
+  </div>
   <div class="scrubber-area">
     {#if room.playback.media}<div
         class="scrubber"
@@ -157,7 +193,21 @@
     title={theater ? $t('player.exitTheater') : $t('player.theater')}
     onclick={onTheater}
     >{#if theater}<ArrowsIn size={17} weight="bold" />{:else}<ArrowsOut size={17} weight="bold" />{/if}</button
-  ><button
+  >
+  <div class="ambilight-anchor">
+    <button
+      class="secondary bar-button"
+      class:active={ambilightOpen}
+      aria-pressed={ambilightOpen}
+      aria-label={$t('ambilight.title')}
+      title={$t('ambilight.title')}
+      onclick={() => (ambilightOpen = !ambilightOpen)}><Sparkle size={17} weight="bold" /></button
+    >
+    {#if ambilightOpen}
+      <AmbilightPopover onClose={() => (ambilightOpen = false)} />
+    {/if}
+  </div>
+  <button
     class="secondary bar-button"
     aria-pressed={miniPlayer}
     aria-label={miniPlayer ? $t('player.dock') : $t('player.mini')}
@@ -167,6 +217,11 @@
 </div>
 
 <style>
+  .ambilight-anchor {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
   .player-bar {
     display: flex;
     align-items: center;
@@ -178,6 +233,39 @@
     height: 2.8rem;
     padding: 0;
     border-radius: 50%;
+  }
+  .volume-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    position: relative;
+  }
+  .volume-btn {
+    padding: 0.55rem;
+    border-radius: var(--radius-sm);
+  }
+  .volume-slider-wrap {
+    width: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition:
+      width 0.22s ease,
+      opacity 0.22s ease;
+    display: flex;
+    align-items: center;
+  }
+  .volume-control:hover .volume-slider-wrap,
+  .volume-control:focus-within .volume-slider-wrap {
+    width: 74px;
+    opacity: 1;
+    margin-right: 0.35rem;
+  }
+  .volume-slider {
+    width: 70px;
+    height: 4px;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+    margin: 0;
   }
   .scrubber-area {
     flex: 1;
@@ -270,6 +358,9 @@
     }
   }
   @media (max-width: 580px) {
+    .volume-slider-wrap {
+      display: none !important;
+    }
     .player-bar {
       gap: 0.35rem;
     }

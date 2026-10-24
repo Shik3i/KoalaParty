@@ -5,6 +5,7 @@
   import { api } from '$lib/api';
   import { errorText, t } from '$lib/i18n';
   import { participantNameParts, type Member, type Snapshot } from '$lib/room';
+  import { ambilight, updateAmbilight, AMBILIGHT_MODES } from '$lib/ambilight';
 
   type Command = (type: string, payload?: Record<string, unknown>) => Promise<boolean>;
   let {
@@ -166,6 +167,52 @@
       <p class="muted small">
         {$t('settings.privacyNote')} <a href="/privacy">{$t('room.privacyDetails')}</a>
       </p>
+    </div>
+    <div>
+      <h3>{$t('ambilight.title')}</h3>
+      <p class="muted">{$t('ambilight.hint')}</p>
+      <label>
+        {$t('ambilight.mode')}
+        <select value={$ambilight.mode} onchange={(e) => updateAmbilight({ mode: e.currentTarget.value as any })}>
+          {#each AMBILIGHT_MODES as mode}
+            <option value={mode.value}>{$t(mode.labelKey as any)}</option>
+          {/each}
+        </select>
+      </label>
+      {#if $ambilight.mode === 'static'}
+        <label>
+          {$t('ambilight.color')}
+          <input
+            type="color"
+            value={$ambilight.color}
+            oninput={(e) => updateAmbilight({ color: e.currentTarget.value })}
+          />
+        </label>
+      {/if}
+      {#if $ambilight.mode !== 'off'}
+        <label>
+          {$t('ambilight.intensity')} ({Math.round($ambilight.intensity * 100)}%)
+          <input
+            type="range"
+            min="0.2"
+            max="1.0"
+            step="0.05"
+            value={$ambilight.intensity}
+            oninput={(e) => updateAmbilight({ intensity: Number(e.currentTarget.value) })}
+          />
+        </label>
+        <label>
+          {$t('ambilight.blur')} ({$ambilight.blur}px)
+          <input
+            type="range"
+            min="24"
+            max="80"
+            step="4"
+            value={$ambilight.blur}
+            oninput={(e) => updateAmbilight({ blur: Number(e.currentTarget.value) })}
+          />
+        </label>
+      {/if}
     </div>
     {#if manager}<div>
         <h3>{$t('settings.together')}</h3>

@@ -8,6 +8,7 @@
     Copy,
     DotsSixVertical,
     DotsThreeVertical,
+    DownloadSimple,
     FloppyDisk,
     FolderOpen,
     Play,
@@ -95,6 +96,39 @@
       onNotice($t('invite.copyFailed'), 'error');
     }
   }
+  function downloadPlaylist(event: Event) {
+    closeMenu(event);
+    const items: Array<{ title: string; url: string }> = [];
+    if (room.playback.media) {
+      items.push({
+        title: room.playback.media.title || room.playback.media.providerId,
+        url: `https://youtu.be/${room.playback.media.providerId}`,
+      });
+    }
+    for (const item of room.queue) {
+      items.push({
+        title: item.media.title || item.media.providerId,
+        url: `https://youtu.be/${item.media.providerId}${item.start ? `?t=${Math.floor(item.start)}` : ''}`,
+      });
+    }
+    if (!items.length) return;
+    const lines = [
+      `# KoalaParty Playlist - ${room.label || 'Room'}`,
+      `# Exported: ${new Date().toLocaleString()}`,
+      `# Total: ${items.length}`,
+      '',
+      ...items.map((it, i) => `${i + 1}. ${it.title} - ${it.url}`),
+    ].join('\r\n');
+    const blob = new Blob([lines], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(room.label || 'koalaparty').replace(/[^a-zA-Z0-9_-]/g, '_')}_playlist.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    onNotice($t('queue.downloaded'), 'success');
+  }
+
   function drop(target: string) {
     if (!dragging || dragging === target) return;
     const ids = room.queue.map((item) => item.id);
@@ -182,6 +216,9 @@
       <div class="menu">
         <button class="ghost" disabled={!totalStart && !room.playback.media} onclick={copyLinks}
           ><Copy size={14} weight="bold" />{$t('queue.copyLinks')}</button
+        >
+        <button class="ghost" disabled={!totalStart && !room.playback.media} onclick={downloadPlaylist}
+          ><DownloadSimple size={14} weight="bold" />{$t('queue.download')}</button
         >
         <button class="ghost" disabled={!totalStart && !room.playback.media} onclick={openSave}
           ><FloppyDisk size={14} weight="bold" />{$t('queue.save')}</button

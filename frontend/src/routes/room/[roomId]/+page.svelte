@@ -18,7 +18,9 @@
   import ActivityPanel from '$lib/room/ActivityPanel.svelte';
   import PlayerBar from '$lib/room/PlayerBar.svelte';
   import InviteDialog from '$lib/room/InviteDialog.svelte';
+  import Ambilight from '$lib/room/Ambilight.svelte';
   import ShortcutsDialog from '$lib/room/ShortcutsDialog.svelte';
+  import { toggleMute } from '$lib/volume';
   import RecapDialog, { type RecapStats } from '$lib/room/RecapDialog.svelte';
   import Dialog from '$lib/room/Dialog.svelte';
   import '$lib/room/room.css';
@@ -876,6 +878,8 @@
       } else if (key === 'f') {
         void toggleFullscreen();
       } else if (key === 'm') {
+        toggleMute();
+      } else if (key === 'i') {
         miniPlayer = !miniPlayer;
       } else if (/^[0-9]$/.test(key)) {
         const emoji = REACTION_EMOJIS[(Number(key) + 9) % 10];
@@ -1563,12 +1567,13 @@
     <section class="room-grid" class:theater>
       <div class="main-column">
         <div class="stage">
-          {#if room.playback.media?.thumbnail}{#key room.playback.media.id}<div
-                class="ambient"
-                aria-hidden="true"
-                style={`background-image:url("${room.playback.media.thumbnail}")`}
-                transition:fade={{ duration: 900 }}
-              ></div>{/key}{/if}
+          {#if room.playback.media && !miniPlayer && !fullscreen}
+            <Ambilight
+              thumbnail={room.playback.media.thumbnail}
+              videoId={room.playback.media.providerId || room.playback.media.id}
+              playing={room.playback.status === 'playing' && !countdownEnd}
+            />
+          {/if}
           <div class="player-wrap" class:mini-player={miniPlayer} class:fullscreen bind:this={playerWrap}>
             <YouTubePlayer
               enabled={true}
@@ -1847,6 +1852,7 @@
           <ChatPanel
             messages={chat}
             me={room.me}
+            members={room.members}
             canChat={caps['chat.send']}
             {connected}
             active={sideTab === 'chat'}

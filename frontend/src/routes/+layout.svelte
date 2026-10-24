@@ -30,11 +30,49 @@
   let principal: Principal | null = $state(null);
   let version = $state('');
   let compactHeader = $state(false);
+  let scrollTicking = false;
+
+  function handleScroll() {
+    if (scrollTicking) return;
+    scrollTicking = true;
+    requestAnimationFrame(() => {
+      scrollTicking = false;
+      if (typeof window === 'undefined') return;
+      const y = Math.max(0, window.scrollY);
+      const doc = document.documentElement;
+      const scrollable = Math.max(0, doc.scrollHeight - window.innerHeight);
+
+      // On large / ultrawide displays where content barely exceeds viewport height,
+      // compacting the header by 20px would shrink document scroll height, causing
+      // the browser to clamp scrollY below the threshold and oscillate back and forth.
+      // We require at least 80px scrollable room before compacting.
+      if (scrollable < 80) {
+        if (compactHeader) compactHeader = false;
+        return;
+      }
+
+      // Hysteresis prevents jitter around the threshold:
+      // - Enter compact mode only when scrolled down past 56px.
+      // - Exit compact mode only when scrolled back near the top (< 18px).
+      // The 38px buffer easily absorbs the 20px header height change without feedback loops.
+      if (!compactHeader && y > 56) {
+        compactHeader = true;
+      } else if (compactHeader && y < 18) {
+        compactHeader = false;
+      }
+    });
+  }
+  $effect(() => {
+    void page.url.pathname;
+    handleScroll();
+  });
+
   onMount(async () => {
     theme = initialTheme();
     applyTheme(theme);
     design = initialDesign();
     applyDesign(design);
+    handleScroll();
     try {
       principal = await establish();
     } catch {}
@@ -63,7 +101,7 @@
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f2f3e9" />
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d1b15" />
 </svelte:head>
-<svelte:window onscroll={() => (compactHeader = window.scrollY > 28)} />
+<svelte:window onscroll={handleScroll} onresize={handleScroll} />
 <a class="skip" href="#main">{$t('layout.skip')}</a>
 <header class="site-header" class:compact={compactHeader}>
   <a class="brand" href="/"><img src="/icons/koalaparty-192.png" alt="" /> KoalaParty</a>
@@ -186,6 +224,7 @@
     -webkit-backdrop-filter: blur(20px) saturate(140%);
     position: sticky;
     top: 0;
+    will-change: height;
     z-index: 10;
     box-shadow: 0 1px 0 color-mix(in srgb, var(--border-subtle) 70%, transparent);
     transition:

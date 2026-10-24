@@ -68,6 +68,13 @@
   font-size: 0.95rem;
   margin: 0;
 }
+.room-shell .room-panel[hidden] {
+  display: none !important;
+}
+.room-shell .room-panel:not([hidden]) {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 450px;
+}
 /* Dialogs */
 .room-shell .modal-backdrop {
   position: fixed;

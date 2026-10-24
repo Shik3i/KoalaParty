@@ -20,8 +20,10 @@
     <dd>{$t('shortcuts.chat')}</dd>
     <dt><kbd>1</kbd>…<kbd>0</kbd></dt>
     <dd>{$t('shortcuts.react')}</dd>
-    <dt><kbd>F</kbd> · <kbd>T</kbd> · <kbd>M</kbd></dt>
+    <dt><kbd>F</kbd> · <kbd>T</kbd> · <kbd>I</kbd></dt>
     <dd>{$t('shortcuts.views')}</dd>
+    <dt><kbd>M</kbd></dt>
+    <dd>{$t('player.mute')}</dd>
     <dt><kbd>Shift</kbd>+<kbd>Enter</kbd></dt>
     <dd>{$t('shortcuts.playNow')}</dd>
   </dl>

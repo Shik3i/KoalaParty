@@ -25,6 +25,7 @@
   import { loadYouTubeAPI } from '$lib/youtubeApi';
   import { t, tNow } from '$lib/i18n';
   import type { SponsorSegment } from '$lib/room';
+  import { volume, muted } from '$lib/volume';
   let {
     enabled = false,
     videoId = null,
@@ -132,6 +133,18 @@
   let prevWall = 0; // wall clock at prevTime
   let previousTimelineState: number | null = null;
   let timelineRecoveryUntil = 0;
+
+  $effect(() => {
+    if (!player || !ready) return;
+    try {
+      if ($muted || $volume === 0) {
+        player.mute?.();
+      } else {
+        player.unMute?.();
+        player.setVolume?.($volume);
+      }
+    } catch {}
+  });
   let monitor: ReturnType<typeof setTimeout> | null = null;
   // Browsers can block autoplay with sound until the tab has a user gesture. Never
   // work around that by muting media: retry with sound, then ask for one explicit
@@ -490,6 +503,13 @@
               /* module may not be loaded yet; harmless */
             }
             ready = true;
+            try {
+              if ($muted || $volume === 0) player.mute?.();
+              else {
+                player.unMute?.();
+                player.setVolume?.($volume);
+              }
+            } catch {}
             emitDiagnostic('ready');
             sync();
           },

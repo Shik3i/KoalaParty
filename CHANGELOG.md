@@ -4,6 +4,26 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-24
+
+### Added
+
+- **Customizable & dynamic Ambilight:** Atmospheric lighting behind the video player now supports multiple modes:
+  - *Dynamic Aurora:* Multi-layer fluid mesh gradients that animate and breathe during playback.
+  - *Video-adaptive:* Dominant corner color palette sampled from the current video thumbnail with smooth transitions.
+  - *Custom color:* Choose any glow color with quick swatches (Cyan, Cyberpunk Purple, Sunset Amber, Emerald Mint, Neon Pink, Warm Gold, Arctic Frost) or a custom color picker.
+  - *Thumbnail & Off modes:* Classic blurred thumbnail or complete deactivation.
+  - Brightness/intensity and softness/blur controls, persisted in `localStorage` and accessible via the player bar and room settings.
+- **Player volume & mute controls:** Native volume slider with smooth slide-out and instant mute toggle in the player bar, controlling the YouTube player directly. Supports keyboard shortcut <kbd>M</kbd> for mute/unmute and <kbd>I</kbd> for mini-player.
+- **Chat mentions & notifications:** Typing `@` in chat opens member autocomplete with arrow key navigation. Mentions are highlighted in chat messages, messages mentioning the viewer receive subtle visual highlighting, and an optional gentle two-tone chime plays via Web Audio API. Chat sounds can be muted with a dedicated toggle button.
+- **Playlist download:** Rooms can now export their full playlist as a formatted `.txt` file with video titles, URLs, and timestamps directly from the queue menu.
+
+### Fixed
+
+- **Sticky header jitter on 4K & Ultrawide displays:** Resolved an issue where shrinking the header on scroll caused the browser to clamp scroll height on displays with little overflow, oscillating in an infinite loop. Introduced asymmetric hysteresis, minimum scroll headroom guard, and `requestAnimationFrame` throttling.
+- **Ambilight GPU & performance containment:** Isolated ambient blur layers to their own compositing plane using `contain: layout paint` and hardware acceleration. Ambient lighting is automatically paused/hidden in fullscreen and mini-player modes to save GPU and battery resources.
+- **Mobile responsiveness:** Touch screens under 580px width keep the volume button as a clean 1-tap mute toggle without expanding slider overflow.
+
 ## [0.15.4] - 2026-10-23
 
 ### Security
