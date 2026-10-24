@@ -15,7 +15,8 @@
     "test:e2e": "npm run build && node ../scripts/build-e2e-server.mjs && playwright test"
   },
   "overrides": {
-    "cookie": "0.7.2"
+    "cookie": "0.7.2",
+    "undici": "^8.12.3"
   },
   "devDependencies": {
     "@emnapi/core": "^1.11.3",

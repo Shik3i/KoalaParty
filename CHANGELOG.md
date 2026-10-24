@@ -24,6 +24,10 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 - **Ambilight GPU & performance containment:** Isolated ambient blur layers to their own compositing plane using `contain: layout paint` and hardware acceleration. Ambient lighting is automatically paused/hidden in fullscreen and mini-player modes to save GPU and battery resources.
 - **Mobile responsiveness:** Touch screens under 580px width keep the volume button as a clean 1-tap mute toggle without expanding slider overflow.
 
+### Security
+
+- Override `undici` to `^8.12.3` in the frontend dependencies to resolve high-severity vulnerability GHSA-4qv8-2p9j-2685 (DoS in EventSource parser).
+
 ## [0.15.4] - 2026-10-23
 
 ### Security
