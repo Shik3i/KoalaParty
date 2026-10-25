@@ -6,6 +6,7 @@
   import { errorText, t } from '$lib/i18n';
   import { participantNameParts, type Member, type Snapshot } from '$lib/room';
   import { ambilight, updateAmbilight, AMBILIGHT_MODES } from '$lib/ambilight';
+  import { chatBubblesEnabled, setChatBubbles, suppressCaptionsEnabled, setSuppressCaptions } from '$lib/preferences';
 
   type Command = (type: string, payload?: Record<string, unknown>) => Promise<boolean>;
   let {
@@ -213,6 +214,25 @@
           />
         </label>
       {/if}
+    </div>
+    <div>
+      <h3>{$t('settings.playback')}</h3>
+      <label class="toggle">
+        <input
+          type="checkbox"
+          checked={$suppressCaptionsEnabled}
+          onchange={(e) => setSuppressCaptions(e.currentTarget.checked)}
+        /><span>{$t('settings.suppressCaptions')}</span>
+      </label>
+      <p class="muted small">{$t('settings.suppressCaptionsHint')}</p>
+      <label class="toggle">
+        <input
+          type="checkbox"
+          checked={$chatBubblesEnabled}
+          onchange={(e) => setChatBubbles(e.currentTarget.checked)}
+        /><span>{$t('settings.chatBubbles')}</span>
+      </label>
+      <p class="muted small">{$t('settings.chatBubblesHint')}</p>
     </div>
     {#if manager}<div>
         <h3>{$t('settings.together')}</h3>

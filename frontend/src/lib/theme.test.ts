@@ -29,6 +29,9 @@ describe('design preference', () => {
     applyDesign('ocean');
     expect(document.documentElement.dataset.design).toBe('ocean');
     expect(initialDesign()).toBe('ocean');
+    applyDesign('oled');
+    expect(document.documentElement.dataset.design).toBe('oled');
+    expect(initialDesign()).toBe('oled');
   });
   it('drops the attribute for the default eucalyptus design', () => {
     applyDesign('grape');

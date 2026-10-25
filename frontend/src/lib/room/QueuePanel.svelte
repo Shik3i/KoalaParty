@@ -75,6 +75,15 @@
   const indexOf = (itemId: string) => room.queue.findIndex((item) => item.id === itemId);
   const visible = $derived(filterQueue(room.queue, query));
   const totalStart = $derived(room.queue.length);
+  const totalDuration = $derived(room.queue.reduce((acc, item) => acc + (item.media.duration || 0), 0));
+  function formatQueueDuration(totalSeconds: number): string {
+    const s = Math.round(totalSeconds);
+    if (s <= 0) return '';
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+  }
 
   // Everything queued, plus what is playing, as links: paste them into any room.
   const shareableVideos = (): VideoRequest[] => {
@@ -191,7 +200,12 @@
 </script>
 
 <header>
-  <h2>{$t('queue.title')}</h2>
+  <h2>
+    {$t('queue.title')}
+    {#if totalDuration > 0}
+      <span class="queue-duration-badge" title={$t('queue.totalDuration')}>· {formatQueueDuration(totalDuration)}</span>
+    {/if}
+  </h2>
   <div class="queue-tools">
     <button
       class="ghost"
@@ -366,6 +380,12 @@
     display: flex;
     align-items: center;
     gap: 0.2rem;
+  }
+  .queue-duration-badge {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: normal;
   }
   .queue-tools .active,
   .next-badge {

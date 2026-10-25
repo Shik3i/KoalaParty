@@ -26,6 +26,8 @@
   import { t, tNow } from '$lib/i18n';
   import type { SponsorSegment } from '$lib/room';
   import { volume, muted } from '$lib/volume';
+  import { get } from 'svelte/store';
+  import { suppressCaptionsEnabled } from '$lib/preferences';
   let {
     enabled = false,
     videoId = null,
@@ -174,6 +176,20 @@
   let nudgeStartDrift = 0;
   // Set once this player ignored a rate request; small drift is then sought away.
   let nudgeUnsupported = false;
+  let captionsSuppressedVideo = '';
+
+  function suppressCaptions(force = false) {
+    if (!player || !get(suppressCaptionsEnabled)) return;
+    if (!force && lastVideo && captionsSuppressedVideo === lastVideo) return;
+    try {
+      player.unloadModule?.('captions');
+      player.unloadModule?.('cc');
+      player.setOption?.('captions', 'track', {});
+      player.setOption?.('cc', 'track', {});
+    } catch {
+      /* harmless if module not ready */
+    }
+  }
 
   function emitDiagnostic(event: string, details: Record<string, string | number | boolean | null> = {}) {
     onDiagnosticEvent(
@@ -365,6 +381,7 @@
     playerErrorCode = null;
     confirmedVideo = null;
     endedMediaId = null;
+    captionsSuppressedVideo = '';
     guard(3000);
     emitDiagnostic('retry', { reason, retryCount });
     const request = { videoId: lastVideo, startSeconds: Math.max(0, expectedPosition()) };
@@ -377,6 +394,7 @@
     } else {
       player.cueVideoById(request);
     }
+    suppressCaptions(true);
   }
   function resumeAutoplay() {
     autoplayBlocked = false;
@@ -481,7 +499,7 @@
         // cc_load_policy: 0 stops us forcing captions on. Whether captions still appear
         // then depends on the viewer's own YouTube/browser caption preference, which we
         // cannot override; unloadModule below is a best-effort hide on top of that.
-        playerVars: { origin: location.origin, rel: 0, cc_load_policy: 0 },
+        playerVars: { origin: location.origin, rel: 0, cc_load_policy: 0, iv_load_policy: 3 },
         events: {
           onReady: () => {
             if (generation !== playerGeneration || disposed) return;
@@ -494,14 +512,7 @@
             } catch {
               /* iframe permissions are best-effort across browser versions */
             }
-            // Best-effort: hide auto-captions that would otherwise show by default. The
-            // viewer can always re-enable them with the player's CC button.
-            try {
-              player.unloadModule?.('captions');
-              player.unloadModule?.('cc');
-            } catch {
-              /* module may not be loaded yet; harmless */
-            }
+            suppressCaptions(true);
             ready = true;
             try {
               if ($muted || $volume === 0) player.mute?.();
@@ -513,13 +524,25 @@
             emitDiagnostic('ready');
             sync();
           },
+          onApiChange: () => {
+            if (generation !== playerGeneration || disposed) return;
+            suppressCaptions();
+          },
           onAutoplayBlocked: () => {
             if (generation !== playerGeneration || disposed) return;
             emitDiagnostic('autoplay_blocked');
             autoplayBlocked = status === 'playing' && !currentMediaEnded();
           },
           onStateChange: (e: any) => {
-            if (generation === playerGeneration && !disposed) handleStateChange(e.data);
+            if (generation === playerGeneration && !disposed) {
+              if (e?.data === PLAYING || e?.data === BUFFERING) {
+                suppressCaptions();
+                if (e?.data === PLAYING && lastVideo) {
+                  captionsSuppressedVideo = lastVideo;
+                }
+              }
+              handleStateChange(e.data);
+            }
           },
           onPlaybackRateChange: (e: any) => {
             if (generation === playerGeneration && !disposed) handleRateChange(e.data);
@@ -980,6 +1003,7 @@
       // delayed callback for the old request will fail the video-ID check.
       lastVideo = videoId;
       lastMediaId = mediaId;
+      captionsSuppressedVideo = '';
       confirmedVideo = null;
       endedMediaId = null;
       previousTimelineState = null;
@@ -999,6 +1023,7 @@
         player.loadVideoById(request);
         startPreloadWatch();
       } else player.cueVideoById(request);
+      suppressCaptions(true);
       applyRate();
       prevTime = target;
       prevWall = Date.now();

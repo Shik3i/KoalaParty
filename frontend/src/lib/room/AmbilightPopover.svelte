@@ -50,7 +50,7 @@
       <Sparkle size={17} weight="duotone" />
       {$t('ambilight.title')}
     </span>
-    <button class="ghost icon-button close-btn" onclick={onClose} aria-label={$t('settings.close')}>
+    <button class="ghost icon-button close-btn" onclick={onClose} aria-label={$t('common.close')}>
       <X size={15} weight="bold" />
     </button>
   </div>
@@ -143,7 +143,7 @@
   <div class="foot">
     <button class="ghost reset-btn" onclick={resetAmbilight}>
       <ArrowCounterClockwise size={14} weight="bold" />
-      Reset
+      {$t('ambilight.reset')}
     </button>
   </div>
 </div>
@@ -329,5 +329,15 @@
 
   .reset-btn:hover {
     color: var(--text-primary);
+  }
+
+  @media (max-width: 480px) {
+    .ambilight-popover {
+      position: fixed;
+      left: 1rem;
+      right: 1rem;
+      bottom: 5.5rem;
+      width: auto;
+    }
   }
 </style>

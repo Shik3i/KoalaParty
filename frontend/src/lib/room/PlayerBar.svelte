@@ -9,6 +9,7 @@
     Play,
     SkipForward,
     Sparkle,
+    Moon,
     SpeakerHigh,
     SpeakerLow,
     SpeakerSlash,
@@ -16,6 +17,8 @@
   import { t } from '$lib/i18n';
   import { formatDuration, type Snapshot } from '$lib/room';
   import AmbilightPopover from './AmbilightPopover.svelte';
+  import SleepTimerPopover from './SleepTimerPopover.svelte';
+  import { sleepTimer } from '$lib/sleepTimer';
   import { volume, muted, setVolume, toggleMute } from '$lib/volume';
 
   let {
@@ -62,6 +65,13 @@
 
   const HEAT_BUCKET = 5;
   let ambilightOpen = $state(false);
+  let sleepOpen = $state(false);
+
+  function onSleepTrigger() {
+    if (playing) {
+      onTogglePlay();
+    }
+  }
   const pct = $derived(duration > 0 ? Math.min(100, (position / duration) * 100) : 0);
   // Reaction density along the timeline: where the room laughed, cheered or gasped.
   const heatBars = $derived.by(() => {
@@ -207,6 +217,21 @@
       <AmbilightPopover onClose={() => (ambilightOpen = false)} />
     {/if}
   </div>
+  <div class="sleep-anchor">
+    <button
+      class="secondary bar-button"
+      class:active={sleepOpen || $sleepTimer.mode !== 'off'}
+      aria-pressed={sleepOpen || $sleepTimer.mode !== 'off'}
+      aria-label={$t('player.sleepTimer')}
+      title={$t('player.sleepTimer')}
+      onclick={() => (sleepOpen = !sleepOpen)}
+    >
+      <Moon size={17} weight={$sleepTimer.mode !== 'off' ? 'fill' : 'bold'} />
+    </button>
+    {#if sleepOpen}
+      <SleepTimerPopover onTrigger={onSleepTrigger} onClose={() => (sleepOpen = false)} />
+    {/if}
+  </div>
   <button
     class="secondary bar-button"
     aria-pressed={miniPlayer}
@@ -217,7 +242,8 @@
 </div>
 
 <style>
-  .ambilight-anchor {
+  .ambilight-anchor,
+  .sleep-anchor {
     position: relative;
     display: flex;
     align-items: center;
@@ -226,6 +252,8 @@
     display: flex;
     align-items: center;
     gap: 0.55rem;
+    position: relative;
+    z-index: 5;
   }
   .play-toggle {
     flex: 0 0 auto;

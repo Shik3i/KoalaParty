@@ -21,6 +21,8 @@
   import Ambilight from '$lib/room/Ambilight.svelte';
   import ShortcutsDialog from '$lib/room/ShortcutsDialog.svelte';
   import { toggleMute } from '$lib/volume';
+  import { chatBubblesEnabled } from '$lib/preferences';
+  import { sleepTimer, clearSleepTimer } from '$lib/sleepTimer';
   import RecapDialog, { type RecapStats } from '$lib/room/RecapDialog.svelte';
   import Dialog from '$lib/room/Dialog.svelte';
   import '$lib/room/room.css';
@@ -1237,6 +1239,14 @@
 
   function reportEnded(mediaId: string, position: number, duration: number, attempt = 0) {
     if (!room || room.playback.media?.id !== mediaId) return;
+    if ($sleepTimer.mode === 'after-video') {
+      clearSleepTimer();
+      if (room.playback.status === 'playing') {
+        void playbackCommand('player.pause', { position: livePosition() });
+      }
+      showNotice($t('notice.sleepTimerDone'), 4000, 'info');
+      return;
+    }
     const revision = room.playback.revision;
     const delay = automaticEndDelay(room);
     if (delay === null) return;
@@ -1520,6 +1530,16 @@
     minutes: Math.max(1, Math.round((nowTick - sessionStart) / 60_000)),
     ...recap,
   } satisfies RecapStats;
+  $: nextUpItem = room?.queue && room.queue.length > 0 ? room.queue[0] : null;
+  $: nextUpRemaining = (() => {
+    if (!room || room.playback.status !== 'playing' || mediaDuration < 20 || !nextUpItem) return null;
+    const pos = livePosition(nowTick);
+    const rem = mediaDuration - pos;
+    if (rem > 0 && rem <= 12) {
+      return Math.max(1, Math.ceil(rem));
+    }
+    return null;
+  })();
 </script>
 
 <svelte:head><title>{hiddenUnread ? `(${hiddenUnread}) ` : ''}{room?.label || roomId} · KoalaParty</title></svelte:head>
@@ -1690,16 +1710,47 @@
                   <span>{combo.emoji}</span><b>×{combo.count}</b>
                 </div>{/key}{/if}
             {#if fullscreen}<SocialToasts toasts={socialToasts} placement="overlay" />{/if}
-            <div class="bubbles" aria-live="polite">
-              {#each bubbles as bubble (bubble.id)}<p
-                  animate:flip={{ duration: 200 }}
-                  in:fly={{ x: -20, duration: 220 }}
-                  out:fade={{ duration: 250 }}
-                >
-                  <span aria-hidden="true">{bubble.badge}</span><b>{bubble.name}</b>
-                  {bubble.text}
-                </p>{/each}
-            </div>
+            {#if $chatBubblesEnabled}
+              <div class="bubbles" aria-live="polite">
+                {#each bubbles as bubble (bubble.id)}<p
+                    animate:flip={{ duration: 200 }}
+                    in:fly={{ x: -20, duration: 220 }}
+                    out:fade={{ duration: 250 }}
+                  >
+                    <span aria-hidden="true">{bubble.badge}</span><b>{bubble.name}</b>
+                    {bubble.text}
+                  </p>{/each}
+              </div>
+            {/if}
+            {#if !fullscreen && !miniPlayer}
+              <div class="video-quick-reactions" aria-label={$t('player.react')}>
+                {#each ['❤️', '😂', '🔥', '👏', '🍿'] as emoji}
+                  <button
+                    class="quick-react-btn"
+                    title={$t('player.reactWith', { emoji })}
+                    onclick={() => react(emoji)}
+                  >
+                    {emoji}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+            {#if nextUpRemaining !== null && nextUpItem}
+              <div class="next-up-card" transition:fly={{ y: 20, duration: 250 }}>
+                <span class="next-up-badge">{$t('room.nextUpIn', { seconds: nextUpRemaining })}</span>
+                <div class="next-up-body">
+                  {#if nextUpItem.media.thumbnail}
+                    <img src={nextUpItem.media.thumbnail} alt="" class="next-up-thumb" />
+                  {/if}
+                  <span class="next-up-title" title={nextUpItem.media.title}>{nextUpItem.media.title}</span>
+                  {#if caps['playback.skip']}
+                    <button class="next-up-play-btn" onclick={() => command('queue.skip', {}, { silentStale: true })}>
+                      {$t('room.playNextNow')}
+                    </button>
+                  {/if}
+                </div>
+              </div>
+            {/if}
             {#if dropActive}<div class="drop-zone" transition:fade={{ duration: 120 }}>
                 <span>{$t('room.dropHere')}</span>
               </div>{/if}
@@ -1994,21 +2045,11 @@
   .stage {
     position: relative;
     isolation: isolate;
-  }
-  .ambient {
-    position: absolute;
-    inset: -2% -1%;
-    z-index: -1;
-    background-size: cover;
-    background-position: center;
-    filter: blur(48px) saturate(1.9) brightness(1.1);
-    opacity: 0.7;
-    transform: scale(1.06);
-    pointer-events: none;
-    border-radius: 2rem;
+    z-index: 1;
   }
   .player-wrap {
     position: relative;
+    z-index: 2;
     border-radius: var(--radius-md);
     box-shadow: 0 22px 48px rgba(3, 12, 8, 0.28);
   }
@@ -2270,6 +2311,111 @@
   .bubbles b {
     margin: 0 0.3rem 0 0.2rem;
   }
+  .video-quick-reactions {
+    position: absolute;
+    bottom: 0.85rem;
+    right: 0.85rem;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.45rem;
+    background: rgba(10, 16, 12, 0.72);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 9999px;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(4px);
+    transition:
+      opacity 0.2s ease,
+      transform 0.2s ease;
+  }
+  .player-wrap:hover .video-quick-reactions,
+  .video-quick-reactions:focus-within {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+  .quick-react-btn {
+    background: transparent;
+    border: none;
+    padding: 0.2rem 0.3rem;
+    font-size: 1.15rem;
+    line-height: 1;
+    cursor: pointer;
+    border-radius: 50%;
+    transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .quick-react-btn:hover {
+    transform: scale(1.3);
+  }
+  .quick-react-btn:active {
+    transform: scale(0.9);
+  }
+  .next-up-card {
+    position: absolute;
+    bottom: 0.85rem;
+    left: 0.85rem;
+    z-index: 6;
+    max-width: min(320px, calc(100% - 1.7rem));
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.55rem 0.75rem;
+    background: rgba(10, 16, 12, 0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    color: #fff;
+    pointer-events: auto;
+  }
+  .next-up-badge {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--accent-primary, #62e7a2);
+  }
+  .next-up-body {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .next-up-thumb {
+    width: 48px;
+    height: 32px;
+    object-fit: cover;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .next-up-title {
+    font-size: 0.82rem;
+    font-weight: 600;
+    line-height: 1.25;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+  }
+  .next-up-play-btn {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.25rem 0.55rem;
+    background: var(--accent-primary, #62e7a2);
+    color: #05160d;
+    border: none;
+    border-radius: var(--radius-xs, 4px);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity 0.15s ease;
+  }
+  .next-up-play-btn:hover {
+    opacity: 0.9;
+  }
   .drop-zone {
     position: absolute;
     inset: 0;
@@ -2448,7 +2594,7 @@
     font-weight: 650;
     box-shadow: var(--shadow-panel);
     max-width: min(94vw, 34rem);
-    z-index: 70;
+    z-index: 100;
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -2511,8 +2657,8 @@
       margin-inline: calc(-1 * clamp(0.7rem, 2vw, 2rem));
       background: var(--surface-page);
     }
-    .ambient {
-      display: none;
+    :global(.ambient-container) {
+      display: none !important;
     }
     .player-wrap:not(.mini-player):not(.fullscreen),
     .player-wrap:not(.mini-player):not(.fullscreen) :global(.player) {

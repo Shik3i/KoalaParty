@@ -5,6 +5,7 @@
   import '../lib/styles/themes/amber.css';
   import '../lib/styles/themes/grape.css';
   import '../lib/styles/themes/rose.css';
+  import '../lib/styles/themes/oled.css';
   import '../lib/styles/themes/resolver.css';
   import '../lib/styles/base.css';
   import { onMount } from 'svelte';

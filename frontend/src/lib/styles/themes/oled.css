@@ -1,0 +1,38 @@
+/* OLED Black — pure pitch-black theme for AMOLED/OLED displays and battery saving. */
+[data-design='oled'] {
+  --light-surface-page: #f0f1ea;
+  --light-surface-panel: #fafbf5;
+  --light-surface-elevated: #ffffff;
+  --light-surface-hover: #e5e9dc;
+  --light-text-primary: #121815;
+  --light-text-secondary: #3c4842;
+  --light-text-muted: #5e6b65;
+  --light-border-subtle: #d6ded8;
+  --light-border-strong: #a4b3aa;
+  --light-accent-primary: #1f573b;
+  --light-accent-hover: #17442d;
+  --light-accent-muted: #c4dbcd;
+  --light-danger: #a63c3c;
+  --light-warning: #875f0f;
+  --light-success: #32764b;
+  --light-player-background: #000000;
+  --light-activity-background: #ebf0e7;
+
+  --dark-surface-page: #000000;
+  --dark-surface-panel: #0a0a0a;
+  --dark-surface-elevated: #121212;
+  --dark-surface-hover: #1e1e1e;
+  --dark-text-primary: #f5f5f5;
+  --dark-text-secondary: #b8b8b8;
+  --dark-text-muted: #757575;
+  --dark-border-subtle: #1f1f1f;
+  --dark-border-strong: #383838;
+  --dark-accent-primary: #8fc59d;
+  --dark-accent-hover: #b4e0bf;
+  --dark-accent-muted: #14281a;
+  --dark-danger: #ff6b6b;
+  --dark-warning: #f1c40f;
+  --dark-success: #2ecc71;
+  --dark-player-background: #000000;
+  --dark-activity-background: #050505;
+}

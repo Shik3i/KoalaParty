@@ -5,6 +5,7 @@ export interface Media {
   providerId: string;
   title: string;
   thumbnail: string;
+  duration?: number;
 }
 export interface QueueItem {
   id: string;

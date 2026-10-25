@@ -169,6 +169,8 @@
     justify-content: space-between;
     gap: 1rem;
     margin-bottom: 0.9rem;
+    position: relative;
+    z-index: 5;
   }
   .room-title {
     display: grid;

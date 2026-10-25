@@ -56,27 +56,27 @@
 <style>
   .ambient-container {
     position: absolute;
-    inset: -3% -1.5%;
+    inset: -45px -35px;
     z-index: -1;
     pointer-events: none;
-    border-radius: 2rem;
+    user-select: none;
     overflow: visible;
     transform: translateZ(0);
-    contain: layout paint;
   }
 
   .ambient {
     position: absolute;
     inset: 0;
-    filter: blur(var(--blur, 52px)) saturate(1.8) brightness(1.1);
+    filter: blur(var(--blur, 52px)) saturate(1.75) brightness(1.08);
     opacity: var(--opacity, 0.75);
-    transform: scale(1.08) translateZ(0);
-    will-change: transform, opacity;
+    transform: scale(1.04) translateZ(0);
+    will-change: transform, opacity, filter;
     backface-visibility: hidden;
+    mask-image: radial-gradient(ellipse 90% 90% at 50% 50%, rgba(0, 0, 0, 1) 45%, rgba(0, 0, 0, 0) 92%);
+    -webkit-mask-image: radial-gradient(ellipse 90% 90% at 50% 50%, rgba(0, 0, 0, 1) 45%, rgba(0, 0, 0, 0) 92%);
     transition:
-      opacity 0.5s ease,
-      filter 0.5s ease;
-    border-radius: 2rem;
+      opacity 0.4s ease,
+      filter 0.4s ease;
   }
 
   /* 1. Thumbnail mode */
@@ -113,16 +113,16 @@
 
   @keyframes pulseAdaptive {
     0% {
-      transform: scale(1.06) rotate(0deg);
-      filter: blur(var(--blur, 52px)) saturate(1.8) brightness(1.05);
+      transform: scale(1.03) rotate(0deg);
+      filter: blur(var(--blur, 52px)) saturate(1.75) brightness(1.05);
     }
     50% {
-      transform: scale(1.12) rotate(1.5deg);
-      filter: blur(calc(var(--blur, 52px) * 1.15)) saturate(2.1) brightness(1.2);
+      transform: scale(1.07) rotate(1deg);
+      filter: blur(calc(var(--blur, 52px) * 1.15)) saturate(2) brightness(1.15);
     }
     100% {
-      transform: scale(1.06) rotate(-1.5deg);
-      filter: blur(var(--blur, 52px)) saturate(1.8) brightness(1.05);
+      transform: scale(1.03) rotate(-1deg);
+      filter: blur(var(--blur, 52px)) saturate(1.75) brightness(1.05);
     }
   }
 
@@ -132,14 +132,16 @@
     inset: 0;
     filter: blur(var(--blur, 52px));
     opacity: var(--opacity, 0.75);
-    transform: scale(1.08) translateZ(0);
-    will-change: transform, opacity;
+    transform: scale(1.04) translateZ(0);
+    will-change: transform, opacity, filter;
     backface-visibility: hidden;
+    mask-image: radial-gradient(ellipse 90% 90% at 50% 50%, rgba(0, 0, 0, 1) 45%, rgba(0, 0, 0, 0) 92%);
+    -webkit-mask-image: radial-gradient(ellipse 90% 90% at 50% 50%, rgba(0, 0, 0, 1) 45%, rgba(0, 0, 0, 0) 92%);
   }
 
   .aurora-blob {
     position: absolute;
-    inset: -10%;
+    inset: -15%;
     border-radius: 50%;
     mix-blend-mode: screen;
   }

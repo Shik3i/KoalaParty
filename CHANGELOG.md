@@ -4,6 +4,24 @@ All notable changes are documented here. KoalaParty follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-25
+
+### Added
+
+- **Sleep Timer (Schlummermodus):** Set playback to automatically pause after the current video finishes, or after 15, 30, 45, or 60 minutes. Controlled via a sleek moon icon popover in the player bar with active countdown indicators.
+- **OLED Pitch Black Theme:** Added a true `#000000` pitch-black theme optimized for OLED displays, with custom deep contrast. Available in the theme picker.
+- **Queue Total Duration Badge:** Header of the queue now displays the aggregate playtime badge (e.g. `· 1h 24m`) computed from queued items.
+- **Floating Video Quick Reactions:** Instant reaction pill bar on video hover with top emojis (❤️, 😂, 🔥, 👏, 🍿) for 1-click reactions without leaving the player.
+- **Up-Next Video Preview Card:** Floating next-up preview card during the last 12 seconds of video with thumbnail, title, countdown badge, and a 1-click "Play now" button.
+- **Playback & Display Preferences:** User settings persisted in `localStorage` to toggle floating chat bubbles over video and default closed captions off.
+
+### Fixed
+
+- **Ambilight Sharp Rectangular Clipping:** Removed CSS `contain: layout paint` on `.ambient-container` that forced Chromium to hard-clip the blurred ambient glow at container bounds; added expanded insets with feathered radial gradient masks for organic dropoff.
+- **Ambilight UI Occlusion:** Fixed stacking context issue where Ambilight painted on top of the Room Header (obscuring "Live", "In sync", "Unlisted" badges) and the Player Bar scrubber by raising header and player bar stacking contexts.
+- **YouTube Closed Captions (CC) Defaulting On:** Suppressed YouTube's aggressive auto-enabled closed captions on video ready, API change, and playback state transitions, while preserving manual viewer toggle.
+- **Invite Modal Copy Feedback & Scrim Fluidity:** Added immediate in-modal feedback to the Copy button (locks for 2s, displays checkmark and "Copied!"/"Kopiert!"), accessible top-right modal close button, elevated toast notifications above scrim overlays, and frosted glass backdrop blur.
+
 ## [0.16.0] - 2026-10-24
 
 ### Added
