@@ -670,7 +670,7 @@ test('personalized queue votes, mini-player and advancing pause positions', asyn
   await expect(ownerVote).toContainText('2');
   await owner.locator('.queue .icon').click();
   await expect(member.locator('.queue li')).toHaveCount(0);
-  await member.getByRole('button', { name: '❤️' }).click();
+  await member.locator('.reaction-bar').getByRole('button', { name: '❤️' }).click();
   await expect(owner.locator('.reaction-overlay').getByText('❤️')).toBeVisible();
   await expect(owner.locator('.sync-pill')).toHaveText(/In sync|Buffering|s (behind|ahead)/);
   await owner.getByRole('button', { name: 'Float mini-player' }).click();
