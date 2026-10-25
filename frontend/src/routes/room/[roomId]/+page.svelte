@@ -1727,6 +1727,7 @@
                 {#each ['❤️', '😂', '🔥', '👏', '🍿'] as emoji}
                   <button
                     class="quick-react-btn"
+                    aria-label={$t('player.reactWith', { emoji })}
                     title={$t('player.reactWith', { emoji })}
                     onclick={() => react(emoji)}
                   >
